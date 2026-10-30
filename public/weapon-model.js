@@ -1,5 +1,6 @@
 import * as THREE from '/vendor/three.module.js';
 import { getWeapon, getSkin } from '/shared/catalog.js';
+import { getOutfit } from '/shared/outfits.js';
 
 export function disposeModel(group) {
   const geometries = new Set(), materials = new Set();
@@ -14,16 +15,20 @@ export class WeaponModels {
   constructor() { this.textures = new Map(); }
 
   skinTexture(skin) {
-    if (!skin.pattern) return null;
-    if (!this.textures.has(skin.pattern)) {
-      const texture = new THREE.TextureLoader().load(`/assets/${skin.pattern}`);
-      texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-      texture.repeat.set(1.8, 1.4); texture.anisotropy = 4; this.textures.set(skin.pattern, texture);
-    }
-    return this.textures.get(skin.pattern);
+    return this.assetTexture(skin.pattern);
   }
 
-  create(weaponId, skinId, firstPerson = false) {
+  assetTexture(file) {
+    if (!file) return null;
+    if (!this.textures.has(file)) {
+      const texture = new THREE.TextureLoader().load(`/assets/${file}`);
+      texture.colorSpace = THREE.SRGBColorSpace; texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(1.8, 1.4); texture.anisotropy = 4; this.textures.set(file, texture);
+    }
+    return this.textures.get(file);
+  }
+
+  create(weaponId, skinId, firstPerson = false, outfitId = 'field') {
     const weapon = getWeapon(weaponId), skin = getSkin(skinId), group = new THREE.Group();
     const material = (color, options = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.46, metalness: 0.65, ...(firstPerson ? { depthTest: false, depthWrite: false, fog: false } : {}), ...options });
     const coat = material(skin.pattern ? new THREE.Color(skin.color).lerp(new THREE.Color('#ffffff'), 0.35) : skin.color, { map: this.skinTexture(skin) });
@@ -46,7 +51,7 @@ export class WeaponModels {
       box([0.07, 0.015, 0.10], [0, y - 0.04, z], black);
       for (const side of [-1, 1]) box([0.012, 0.08, 0.025], [side * 0.044, y, z], plate);
       box([0.1, 0.012, 0.025], [0, y + 0.04, z], plate);
-      box([0.006, 0.006, 0.008], [0, y, z + 0.006], luminous);
+      group.userData.reticle = box([0.002, 0.002, 0.008], [0, y, z + 0.006], luminous);
     };
     let muzzleZ, aimHeight = 0.14;
 
@@ -79,7 +84,7 @@ export class WeaponModels {
       rail(0.28, 0.025); box([0.012, 0.055, 0.025], [0, 0.09, -0.9], luminous); aimHeight = 0.11; muzzleZ = -0.97;
       for (let i = 0; i < 4; i++) tube(0.016, 0.085, [0.078, 0.015, 0.1 - i * 0.06], accent);
       group.userData.pump = pump;
-    } else {
+    } else if (weapon.id === 'sniper') {
       box([0.135, 0.15, 0.46], [0, 0, -0.04]); box([0.11, 0.12, 0.31], [0, -0.02, 0.32], plate);
       box([0.14, 0.19, 0.05], [0, -0.03, 0.49], rubber);
       box([0.1, 0.085, 0.42], [0, -0.01, -0.48], plate); rail(0.52, -0.15);
@@ -91,20 +96,49 @@ export class WeaponModels {
       tube(0.012, 0.1, [0.10, 0.025, 0.07], steel); box([0.045, 0.04, 0.035], [0.1, 0.02, 0.13], black);
       for (const side of [-1, 1]) { const leg = box([0.018, 0.22, 0.025], [side * 0.07, -0.13, -0.67], black); leg.rotation.z = side * 0.35; }
       aimHeight = 0.195;
+    } else if (weapon.id === 'pistol') {
+      const slide = new THREE.Group(); group.add(slide);
+      box([0.09, 0.08, 0.35], [0, 0.035, -0.07], coat, slide);
+      box([0.075, 0.055, 0.21], [0, -0.025, -0.02], plate);
+      tube(0.018, 0.16, [0, 0.03, -0.27], steel); muzzleZ = -0.36;
+      box([0.08, 0.026, 0.08], [0, -0.19, 0.13], accent);
+      for (const side of [-1, 1]) box([0.012, 0.025, 0.02], [side * 0.026, 0.085, 0.06], black, slide);
+      group.userData.reticle = box([0.006, 0.008, 0.012], [0, 0.085, -0.235], luminous, slide);
+      for (let i = 0; i < 5; i++) box([0.003, 0.045, 0.009], [0.046, 0.035, 0.06 - i * 0.018], steel, slide);
+      group.userData.slide = slide; aimHeight = 0.085;
+    } else if (weapon.id === 'lmg') {
+      box([0.17, 0.18, 0.50], [0, 0, -0.07]); box([0.13, 0.14, 0.29], [0, -0.01, 0.34], plate);
+      box([0.15, 0.18, 0.045], [0, -0.02, 0.49], rubber);
+      box([0.14, 0.13, 0.40], [0, 0, -0.51], plate); rail(0.70, -0.24); holo(0.16, 0.025);
+      tube(0.032, 0.40, [0, 0.02, -0.84], steel); tube(0.045, 0.08, [0, 0.02, -1.04]); muzzleZ = -1.09;
+      box([0.25, 0.24, 0.22], [-0.12, -0.18, -0.11], accent);
+      box([0.27, 0.026, 0.24], [-0.12, -0.055, -0.11], black);
+      for (let i = 0; i < 6; i++) tube(0.012, 0.10, [-0.16 + i * 0.027, -0.018, -0.1], steel);
+      for (const side of [-1, 1]) { const leg = box([0.022, 0.25, 0.03], [side * 0.09, -0.15, -0.72], black); leg.rotation.z = side * 0.5; }
+      aimHeight = 0.16;
+    } else if (weapon.id === 'dmr') {
+      box([0.13, 0.15, 0.45], [0, 0, -0.045]); box([0.11, 0.13, 0.29], [0, -0.015, 0.32], plate);
+      box([0.13, 0.18, 0.045], [0, -0.025, 0.47], rubber); box([0.115, 0.035, 0.20], [0, 0.075, 0.31], accent);
+      box([0.105, 0.10, 0.40], [0, 0, -0.46], plate); rail(0.58, -0.19); holo(0.16, 0.025);
+      tube(0.023, 0.37, [0, 0.02, -0.83], steel); tube(0.034, 0.065, [0, 0.02, -1.02]); muzzleZ = -1.06;
+      const mag = box([0.08, 0.18, 0.13], [0, -0.15, -0.08], accent); mag.rotation.x = -0.1;
+      const optic = new THREE.Mesh(new THREE.TorusGeometry(0.052, 0.008, 8, 20), black); optic.position.set(0, 0.16, -0.045); group.add(optic);
+      aimHeight = 0.16;
     }
     const grip = box([0.075, 0.17, 0.085], [0, -0.13, 0.13], rubber); grip.rotation.x = -0.25;
     box([0.008, 0.026, 0.08], [-0.07, 0.005, 0.02], accent);
     if (firstPerson) {
-      const sleeve = material(skin.suit, { roughness: 0.95, metalness: 0 });
+      const outfit = getOutfit(outfitId);
+      const sleeve = material(outfit.id === 'field' ? skin.suit : outfit.suit, { roughness: 0.95, metalness: 0 });
       const rightArm = box([0.12, 0.12, 0.35], [0.08, -0.23, 0.30], sleeve); rightArm.rotation.x = -0.3; rightArm.rotation.z = 0.14;
       box([0.10, 0.12, 0.13], [0.055, -0.14, 0.14], rubber);
-      const leftArm = box([0.1, 0.1, 0.32], [-0.14, -0.2, -0.17], sleeve); leftArm.rotation.y = -0.55; leftArm.rotation.x = -0.3;
-      box([0.12, 0.09, 0.12], [-0.03, -0.09, -0.34], rubber);
+      const leftArm = box([0.1, 0.1, 0.32], [-0.14, -0.2, weapon.id === 'pistol' ? 0.14 : -0.17], sleeve); leftArm.rotation.y = -0.55; leftArm.rotation.x = -0.3;
+      box([0.12, 0.09, 0.12], [-0.03, weapon.id === 'pistol' ? -0.14 : -0.09, weapon.id === 'pistol' ? 0.12 : -0.34], rubber);
     }
     const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.02, muzzleZ); group.add(muzzle);
     const flash = new THREE.Mesh(new THREE.ConeGeometry(weapon.id === 'shotgun' ? 0.11 : 0.07, 0.23, 5), new THREE.MeshBasicMaterial({ color: '#ffda98', transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: !firstPerson }));
     flash.rotation.x = -Math.PI / 2; flash.position.set(0, 0.02, muzzleZ - 0.10); flash.visible = false; group.add(flash);
-    Object.assign(group.userData, { weaponId: weapon.id, skinId: skin.id, muzzle, flash, aimHeight });
+    Object.assign(group.userData, { weaponId: weapon.id, skinId: skin.id, muzzle, flash, aimHeight, aimPoint: new THREE.Vector3(0, aimHeight, 0.015) });
     group.traverse((child) => { child.castShadow = !firstPerson; child.receiveShadow = !firstPerson; if (firstPerson) { child.renderOrder = 10; child.frustumCulled = false; } });
     return group;
   }

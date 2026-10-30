@@ -74,6 +74,48 @@
       "seed": 7092602,
       "width": 768,
       "height": 768
+    },
+    {
+      "file": "outfit-field.png",
+      "prompt": "masterpiece, best quality, very aesthetic, rating:general, solo, full body, standing neutral pose, adult androgynous futuristic tactical operator, fully covered face, olive gray armored field uniform, orange narrow visor, compact military helmet, utilitarian clean silhouette, fully clothed, no exposed skin, original character design, game character concept art, professional model sheet style, entire body visible including boots, centered composition, plain dark blue gray studio background, soft cinematic rim lighting, detailed hard surface armor, anime concept illustration",
+      "seed": 7092700,
+      "width": 768,
+      "height": 1024
+    },
+    {
+      "file": "outfit-runner.png",
+      "prompt": "masterpiece, best quality, very aesthetic, rating:general, solo, full body, standing neutral pose, adult androgynous futuristic reconnaissance operative, charcoal hood over a full face helmet, mint cyan narrow visor, dark layered tactical suit, subtle mint circuit accents, clean stealth scout silhouette, fully clothed, no exposed skin, original character design, game character concept art, professional model sheet style, entire body visible including boots, centered composition, plain dark blue gray studio background, soft cinematic rim lighting, detailed hard surface armor, anime concept illustration",
+      "seed": 7092701,
+      "width": 768,
+      "height": 1024
+    },
+    {
+      "file": "outfit-hazmat.png",
+      "prompt": "masterpiece, best quality, very aesthetic, rating:general, solo, full body, standing neutral pose, adult androgynous industrial science fiction hazard operative, mustard yellow fully sealed protective suit, full face breathing mask, pale teal glass visor, compact twin filter respirator, small breathing tanks on the back, thick protective panels, fully clothed, no exposed skin, original character design, game character concept art, professional model sheet style, entire body visible including boots, centered composition, plain dark blue gray studio background, soft cinematic rim lighting, detailed hard surface armor, anime concept illustration",
+      "seed": 7092702,
+      "width": 768,
+      "height": 1024
+    },
+    {
+      "file": "outfit-orbital.png",
+      "prompt": "masterpiece, best quality, very aesthetic, rating:general, solo, full body, standing neutral pose, adult androgynous orbital space guard, white and pale blue full protective space armor, rounded full face astronaut combat helmet, cyan glass visor, compact life support backpack, blue chest control panel, clean science fiction silhouette, fully clothed, no exposed skin, original character design, game character concept art, professional model sheet style, entire body visible including boots, centered composition, plain dark blue gray studio background, soft cinematic rim lighting, detailed hard surface armor, anime concept illustration",
+      "seed": 7092703,
+      "width": 768,
+      "height": 1024
+    },
+    {
+      "file": "outfit-retrobot.png",
+      "prompt": "masterpiece, best quality, very aesthetic, rating:general, solo, full body, standing neutral pose, friendly retro futuristic combat android, orange and charcoal mechanical armored body, rectangular helmet face display, two small mint green digital eyes, boxy segmented limbs, industrial 1980s science fiction robot design, fully clothed, no exposed skin, original character design, game character concept art, professional model sheet style, entire body visible including boots, centered composition, plain dark blue gray studio background, soft cinematic rim lighting, detailed hard surface armor, anime concept illustration",
+      "seed": 7092704,
+      "width": 768,
+      "height": 1024
+    },
+    {
+      "file": "outfit-panels.png",
+      "prompt": "masterpiece, best quality, no humans, neutral light gray futuristic polymer armor material texture, tiny geometric panel seams, fine matte microtexture, subtle fabric weave, clean abstract technical surface, even soft lighting, flat orthographic material swatch, seamless full frame pattern, no perspective",
+      "seed": 7092800,
+      "width": 768,
+      "height": 768
     }
   ]
 }

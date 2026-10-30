@@ -66,6 +66,7 @@ export function publicationRisk(file) {
   if (/^(?:node_modules|\.toolchain|artifacts|dist|release|test-results|playwright-report|\.vercel)\//.test(file)) return 'private-build-output';
   if (/^\.env(?:\.|$)/.test(name) && !/\.(?:example|sample)$/.test(name)) return 'environment-file';
   if (/^(?:\.npmrc|\.pypirc|\.netrc|\.htpasswd|id_rsa|id_ed25519)$/.test(name) || /\.(?:key|p12|pfx|keystore|jks)$/i.test(name) || /(?:credentials|service-account).*\.json$/i.test(name)) return 'credential-file';
+  if (/^(?:profile|profiles|linkshot-profile)(?:[.-].*)?\.json(?:\.tmp)?$/i.test(name) || /^(?:data|\.linkshot)\//.test(file)) return 'personal-progression-data';
   if (/\.(?:exe|zip|tar\.gz|log)$/i.test(name)) return 'generated-or-local-file';
   return null;
 }

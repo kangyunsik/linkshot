@@ -37,3 +37,11 @@ id_ed25519
 *.exe
 *.zip
 *.tar.gz
+
+# Per-device progression belongs to the user, never the public repository.
+data/
+.linkshot/
+profile.json
+profile.json.tmp
+profiles.json
+linkshot-profile*.json

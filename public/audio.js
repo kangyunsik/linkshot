@@ -55,12 +55,12 @@ export class GameAudio {
   }
 
   shot(volume = 1, pan = 0, weaponId = 'rifle') {
-    const [duration, frequency, bass] = weaponId === 'smg' ? [0.08, 4700, 185] : weaponId === 'shotgun' ? [0.22, 1900, 85] : weaponId === 'sniper' ? [0.24, 2600, 70] : [0.13, 3600, 135];
+    const [duration, frequency, bass] = weaponId === 'smg' ? [0.08, 4700, 185] : weaponId === 'shotgun' ? [0.22, 1900, 85] : weaponId === 'sniper' ? [0.24, 2600, 70] : weaponId === 'pistol' ? [0.10, 4200, 170] : weaponId === 'lmg' ? [0.15, 3200, 110] : weaponId === 'dmr' ? [0.17, 2700, 95] : [0.13, 3600, 135];
     this.burst(duration, volume * 0.55, frequency, pan);
     this.tone(bass, duration, volume * 0.3, 'triangle', 30, pan);
     this.tone(1800, 0.025, volume * 0.04, 'square', 260, pan);
   }
-  step(sprint = false) { this.burst(0.07, sprint ? 0.085 : 0.05, 450); }
+  step(sprint = false, crouched = false) { this.burst(0.07, crouched ? 0.025 : sprint ? 0.085 : 0.05, 450); }
   reload() { this.tone(1100, 0.07, 0.08, 'triangle', 240); this.burst(0.1, 0.07, 1900); }
   hit(head = false) { this.tone(head ? 1800 : 1150, 0.07, 0.12, 'sine', head ? 2500 : 1450); }
   hurt() { this.burst(0.16, 0.1, 320); }

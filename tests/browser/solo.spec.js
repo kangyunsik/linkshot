@@ -4,11 +4,11 @@ import { MAPS } from '../../shared/world.js';
 
 test.use({ baseURL: process.env.SOLO_SOURCE_TEST ? 'http://127.0.0.1:3000' : 'http://127.0.0.1:4173' });
 test.beforeEach(async ({ context }) => {
-  if (process.env.SOLO_SOURCE_TEST) await context.route('**/runtime-config.js', (route) => route.fulfill({ contentType: 'text/javascript', body: "export const APP_MODE = 'solo';" }));
+  if (process.env.SOLO_SOURCE_TEST) await context.route('**/runtime-config.js', (route) => route.fulfill({ contentType: 'text/javascript', body: "export const APP_MODE = 'solo'; export const PROFILE_STORAGE = 'browser';" }));
   await context.addInitScript(() => { try { localStorage.setItem('sector07-settings', JSON.stringify({ sensitivity: 1, fov: 82, volume: 0, quality: 'low' })); } catch { /* about:blank */ } });
 });
 
-test('static solo build supports map/skin selection, four weapons, scope and independent magazines without a server', async ({ page }) => {
+test('static solo build supports map/skin selection, seven weapons, scope and independent magazines without a server', async ({ page }) => {
   const errors = [], requests = [], sockets = [];
   page.on('pageerror', (error) => errors.push(error.message)); page.on('request', (request) => requests.push(request.url())); page.on('websocket', (socket) => sockets.push(socket.url()));
   await page.goto('/'); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
@@ -18,7 +18,7 @@ test('static solo build supports map/skin selection, four weapons, scope and ind
   await expect(page.locator('.map-choice')).toHaveCount(6);
   await page.getByRole('button', { name: '레드라인 전장 선택', exact: true }).click(); await expect(page.locator('#hero-map-name')).toHaveText('REDLINE 19');
   await page.getByRole('button', { name: '무기 및 스킨 선택' }).click();
-  await expect(page.locator('#weapon-choices button')).toHaveCount(4); await expect(page.locator('#skin-choices button')).toHaveCount(6);
+  await expect(page.locator('#weapon-choices button')).toHaveCount(7); await expect(page.locator('#skin-choices button')).toHaveCount(6);
   await page.getByRole('button', { name: '저격소총 SR–1 선택' }).click(); await page.getByRole('button', { name: '아크틱 고스트 스킨', exact: true }).click();
   await expect(page.locator('#weapon-stats')).toContainText('100 / HEAD 150');
   await expect(page.locator('#armory-skin-name')).toHaveText('ARCTIC GHOST');
@@ -31,6 +31,8 @@ test('static solo build supports map/skin selection, four weapons, scope and ind
   await expect(page.locator('#hud-map-name')).toHaveText('REDLINE 19'); await expect(page.locator('#hud-weapon-name')).toHaveText('SR–1'); await expect(page.locator('#hud-ammo')).toHaveText('05'); await expect(page.locator('#hud-skin-name')).toHaveText('ARCTIC GHOST');
   await page.getByRole('button', { name: '교전 시작', exact: true }).click();
   await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id)).toBe('game-canvas');
+  await page.keyboard.down('KeyC'); await expect(page.locator('#hud-stance')).toBeVisible();
+  await page.keyboard.up('KeyC'); await expect(page.locator('#hud-stance')).toBeHidden();
   await page.mouse.down({ button: 'right' }); await expect(page.locator('#scope-overlay')).toBeVisible(); await page.screenshot({ path: 'artifacts/redline-scope.png' });
   await page.mouse.up({ button: 'right' }); await expect(page.locator('#scope-overlay')).toBeHidden();
   await page.keyboard.press('Digit2'); await expect(page.locator('#hud-weapon-name')).toHaveText('PD–9'); await expect(page.locator('#hud-ammo')).toHaveText('36');
@@ -46,6 +48,9 @@ test('static solo build supports map/skin selection, four weapons, scope and ind
   const heldAt = Date.now();
   await expect.poll(async () => { await expect(page.locator('#hud-ammo')).toHaveText('07'); return Date.now() - heldAt; }, { intervals: [100, 150, 200], timeout: 3000 }).toBeGreaterThan(1000);
   await page.mouse.up(); await page.keyboard.press('Digit4'); await expect(page.locator('#hud-weapon-name')).toHaveText('SR–1'); await expect(page.locator('#hud-ammo')).toHaveText('05');
+  await page.keyboard.press('Digit5'); await expect(page.locator('#hud-weapon-name')).toHaveText('PX–9'); await expect(page.locator('#hud-ammo')).toHaveText('15');
+  await page.keyboard.press('Digit6'); await expect(page.locator('#hud-weapon-name')).toHaveText('LM–60'); await expect(page.locator('#hud-ammo')).toHaveText('60');
+  await page.keyboard.press('Digit7'); await expect(page.locator('#hud-weapon-name')).toHaveText('MR–14'); await expect(page.locator('#hud-ammo')).toHaveText('12');
   await page.mouse.wheel(0, 100); await expect(page.locator('#hud-weapon-name')).toHaveText('VX–7');
   await expect.poll(async () => Number(await page.locator('#hud-ammo').textContent())).toBeLessThan(29);
   await page.screenshot({ path: 'artifacts/solo-redline.png' });

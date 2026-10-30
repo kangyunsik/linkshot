@@ -3,14 +3,28 @@ export const RULES = Object.freeze({
   fragLimit: 20, magazine: 30, reloadSeconds: 1.75, fireSeconds: 0.105,
   respawnSeconds: 3, protectionSeconds: 1.5, damage: 28, headDamage: 48,
   playerRadius: 0.34, playerHeight: 1.8, eyeHeight: 1.62,
+  crouchHeight: 1.1, crouchEyeHeight: 0.92, crouchSpeed: 2.565,
+  walkSpeed: 5.7, sprintSpeed: 8.55, stepHeight: 0.48,
   switchSeconds: 0.32,
 });
+
+const STANDING_POSE = Object.freeze({ height: RULES.playerHeight, eyeHeight: RULES.eyeHeight, headHeight: 1.58, headRadius: 0.25, bodyTop: 1.4, aimHeight: 1.05 });
+const CROUCHING_POSE = Object.freeze({ height: RULES.crouchHeight, eyeHeight: RULES.crouchEyeHeight, headHeight: 0.88, headRadius: 0.22, bodyTop: 0.7, aimHeight: 0.55 });
+export const playerPose = (player) => player?.crouching === true ? CROUCHING_POSE : STANDING_POSE;
+
+// Horizontal bearing of an incoming shot relative to the viewer: front=0, right=+PI/2.
+export function damageBearing(viewer, source, yaw = viewer?.yaw ?? 0) {
+  if (![viewer?.x, viewer?.z, source?.x, source?.z, yaw].every(Number.isFinite)) return null;
+  const dx = source.x - viewer.x, dz = source.z - viewer.z;
+  if (Math.hypot(dx, dz) < 0.05) return null;
+  return Math.atan2(dx * Math.cos(yaw) - dz * Math.sin(yaw), -dx * Math.sin(yaw) - dz * Math.cos(yaw));
+}
 
 function block(id, x, z, w, d, h, kind = 'container', color = 'slate') {
   return { id, x, z, w, d, h, y: 0, kind, color };
 }
 
-export const WORLD = Object.freeze({
+const FOUNDRY = Object.freeze({
   id: 'foundry', name: 'FOUNDRY 07', title: 'FOUNDRY', label: '파운드리', width: 56, depth: 46,
   tag: '근접 교전', theme: 'industrial', image: 'foundry-hero.png',
   description: '중앙 반응로와 컨테이너를 둘러싼 짧고 빠른 교전. 엄폐물을 활용해 측면을 노리세요.',
@@ -112,7 +126,45 @@ const redline = arena({
   block('cargo-west', -30, 0, 4, 3, 1.6, 'crate', 'orange'), block('cargo-east', 30, 0, 4, 3, 1.6, 'crate', 'orange'),
 ]);
 
-export const MAPS = Object.freeze([WORLD, longrail, drydock, blocknine, whiteout, redline]);
+function addTacticalFeatures(base) {
+  const obstacles = [...base.obstacles], platforms = [], extraCover = [];
+  const candidates = [];
+  const distanceTo = (point, anchor) => (point.x - anchor.x) ** 2 + (point.z - anchor.z) ** 2;
+  for (let z = Math.ceil(-base.depth / 2 + 7); z <= base.depth / 2 - 7; z += 2) {
+    for (let x = Math.ceil(-base.width / 2 + 7); x <= base.width / 2 - 7; x += 2) candidates.push({ x, z });
+  }
+  function clear(x, z, w, d, padding) {
+    if (Math.abs(x) + w / 2 > base.width / 2 - 4.5 || Math.abs(z) + d / 2 > base.depth / 2 - 4.5) return false;
+    // Keep the cross-map approaches and the signature long sightlines open.
+    if (Math.abs(x) < w / 2 + 2.2 || Math.abs(z) < d / 2 + 2.2) return false;
+    if (base.spawns.some((s) => Math.abs(s.x - x) < w / 2 + 2 && Math.abs(s.z - z) < d / 2 + 2)) return false;
+    return !obstacles.some((box) => Math.abs(box.x - x) < (box.w + w) / 2 + padding && Math.abs(box.z - z) < (box.d + d) / 2 + padding);
+  }
+  for (const [index, [sx, sz]] of [[-1, -1], [1, 1], [-1, 1], [1, -1]].entries()) {
+    const anchor = { x: Math.round(sx * base.width * 0.29), z: Math.round(sz * base.depth * 0.34) };
+    const spot = [...candidates].sort((a, b) => distanceTo(a, anchor) - distanceTo(b, anchor)).find((p) => clear(p.x, p.z, 3.8, 5, 2));
+    if (!spot) continue;
+    const id = `platform-${index}`;
+    for (let step = 0; step < 3; step++) obstacles.push(block(`${id}-step-${step}`, spot.x, spot.z - 2 + step, 3.2, 1, (step + 1) * 0.45, 'step'));
+    obstacles.push(block(`${id}-deck`, spot.x, spot.z + 1.5, 3.8, 2, 1.8, 'platform', 'orange'));
+    platforms.push({ id, x: spot.x, z: spot.z, height: 1.8, approach: { x: spot.x, z: spot.z - 3.2 } });
+  }
+  const coverAnchors = [[-0.28, -0.24], [0.28, 0.24], [0.24, -0.28], [-0.24, 0.28], [-0.36, 0.18], [0.36, -0.18], [-0.18, -0.36], [0.18, 0.36], [-0.34, -0.34], [0.34, 0.34], [-0.34, 0.34], [0.34, -0.34]];
+  // Integer ranking, rather than transcendental math, keeps layouts identical across browser engines.
+  for (let index = 0; index < coverAnchors.length; index++) {
+    const low = index % 3 === 0, panel = index % 3 === 1;
+    const w = low ? 3.6 : panel ? 0.8 : 2, d = low ? 0.8 : panel ? 3.4 : 2;
+    const anchor = { x: Math.round(coverAnchors[index][0] * base.width), z: Math.round(coverAnchors[index][1] * base.depth) };
+    const spot = [...candidates].sort((a, b) => distanceTo(a, anchor) - distanceTo(b, anchor)).find((p) => clear(p.x, p.z, w, d, 1.3));
+    if (!spot) continue;
+    const cover = block(`tactical-cover-${index}`, spot.x, spot.z, w, d, low ? 1.15 : panel ? 2.6 : 1.8, 'crate', low ? 'orange' : 'slate');
+    obstacles.push(cover); extraCover.push(cover.id);
+  }
+  return Object.freeze({ ...base, obstacles, platforms, extraCover });
+}
+
+export const WORLD = addTacticalFeatures(FOUNDRY);
+export const MAPS = Object.freeze([WORLD, ...[longrail, drydock, blocknine, whiteout, redline].map(addTacticalFeatures)]);
 export const getMap = (id) => MAPS.find((map) => map.id === id) || WORLD;
 
 export function bounds(box, padding = 0) {

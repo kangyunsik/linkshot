@@ -26,6 +26,7 @@ test('lobby, generated assets, map, settings persistence and responsive layout',
   await page.getByRole('button', { name: '방 목록 닫기' }).click();
   // Public documentation screenshots must not retain this machine's real LAN address.
   await page.locator('#lan-address').evaluate((element) => { element.textContent = '192.0.2.10:3000'; });
+  await page.locator('#profile-device').evaluate((element) => { element.textContent = '기기 #DEMO'; });
   await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/lobby-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
@@ -52,6 +53,10 @@ test('two browser clients share a room; pointer lock, movement, firing, reload, 
   await page.keyboard.down('KeyW');
   await expect.poll(() => state && Math.hypot(state.players[0].x - initial.x, state.players[0].z - initial.z)).toBeGreaterThan(1.5);
   await page.keyboard.up('KeyW');
+  await page.keyboard.down('KeyC'); await expect.poll(() => state?.players[0].crouching).toBe(true); await expect(page.locator('#hud-stance')).toBeVisible();
+  await page.keyboard.up('KeyC'); await expect.poll(() => state?.players[0].crouching).toBe(false); await expect(page.locator('#hud-stance')).toBeHidden();
+  await page.keyboard.down('ControlLeft'); await expect.poll(() => state?.players[0].crouching).toBe(true);
+  await page.keyboard.up('ControlLeft'); await expect.poll(() => state?.players[0].crouching).toBe(false);
   await page.mouse.down(); await expect.poll(() => state?.players[0].ammo).toBeLessThan(29); await page.mouse.up();
   await page.keyboard.press('KeyR'); await expect(page.locator('#reload-indicator')).toBeVisible();
   await expect(page.locator('#hud-ammo')).toHaveText('30');

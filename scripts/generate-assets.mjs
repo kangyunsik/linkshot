@@ -35,6 +35,18 @@ const assets = [
     ['forge', 'dark gunmetal and burnt orange forged steel surface pattern, angular copper molten cracks, geometric armor camouflage, scratched metal, intricate abstract industrial pattern, seamless flat surface, no perspective'],
     ['camo', 'white gray black digital camouflage pattern texture, irregular angular geometric polygon patches, arctic military camouflage, flat graphic pattern, matte painted surface, seamless all over pattern, no perspective'],
   ].map(([id, pattern], i) => ({ file: `skin-${id}.png`, width: 768, height: 768, seed: 7092600 + i, prompt: `masterpiece, best quality, no humans, ${pattern}, game weapon skin texture, top down orthographic material swatch, flat even lighting, full frame abstract pattern` })),
+  ...[
+    ['field', 'adult androgynous futuristic tactical operator, fully covered face, olive gray armored field uniform, orange narrow visor, compact military helmet, utilitarian clean silhouette'],
+    ['runner', 'adult androgynous futuristic reconnaissance operative, charcoal hood over a full face helmet, mint cyan narrow visor, dark layered tactical suit, subtle mint circuit accents, clean stealth scout silhouette'],
+    ['hazmat', 'adult androgynous industrial science fiction hazard operative, mustard yellow fully sealed protective suit, full face breathing mask, pale teal glass visor, compact twin filter respirator, small breathing tanks on the back, thick protective panels'],
+    ['orbital', 'adult androgynous orbital space guard, white and pale blue full protective space armor, rounded full face astronaut combat helmet, cyan glass visor, compact life support backpack, blue chest control panel, clean science fiction silhouette'],
+    ['retrobot', 'friendly retro futuristic combat android, orange and charcoal mechanical armored body, rectangular helmet face display, two small mint green digital eyes, boxy segmented limbs, industrial 1980s science fiction robot design'],
+  ].map(([id, character], i) => ({
+    file: `outfit-${id}.png`, width: 768, height: 1024, seed: 7092700 + i,
+    prompt: `masterpiece, best quality, very aesthetic, rating:general, solo, full body, standing neutral pose, ${character}, fully clothed, no exposed skin, original character design, game character concept art, professional model sheet style, entire body visible including boots, centered composition, plain dark blue gray studio background, soft cinematic rim lighting, detailed hard surface armor, anime concept illustration`,
+    negative: 'worst quality, low quality, blurry, text, logo, watermark, signature, multiple people, crowd, cropped feet, close up, nude, naked, bikini, revealing clothes, exposed skin, blood, gore, weapon in hands, firearm, sword',
+  })),
+  { file: 'outfit-panels.png', width: 768, height: 768, seed: 7092800, prompt: 'masterpiece, best quality, no humans, neutral light gray futuristic polymer armor material texture, tiny geometric panel seams, fine matte microtexture, subtle fabric weave, clean abstract technical surface, even soft lighting, flat orthographic material swatch, seamless full frame pattern, no perspective' },
 ];
 const negative = 'worst quality, low quality, lowres, blurry, text, logo, watermark, signature, people, person, character, face, organic, plants, oversaturated';
 
@@ -66,7 +78,7 @@ for (const asset of assets) {
   const workflow = {
     '1': { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: checkpoint } },
     '2': { class_type: 'CLIPTextEncode', inputs: { clip: ['1', 1], text: asset.prompt } },
-    '3': { class_type: 'CLIPTextEncode', inputs: { clip: ['1', 1], text: negative } },
+    '3': { class_type: 'CLIPTextEncode', inputs: { clip: ['1', 1], text: asset.negative || negative } },
     '4': { class_type: 'EmptyLatentImage', inputs: { width: asset.width, height: asset.height, batch_size: 1 } },
     '5': { class_type: 'KSampler', inputs: { model: ['1', 0], positive: ['2', 0], negative: ['3', 0], latent_image: ['4', 0], seed: asset.seed, steps: 24, cfg: 6, sampler_name: 'euler_ancestral', scheduler: 'normal', denoise: 1 } },
     '6': { class_type: 'VAEDecode', inputs: { samples: ['5', 0], vae: ['1', 2] } },

@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, writeFile, cp, access } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, cp, access } from 'node:fs/promises';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
+import { POINT_RULES } from '../shared/progression.js';
+import { OUTFITS } from '../shared/outfits.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let go = process.env.GO_BINARY || path.join(root, '.toolchain/go/bin', process.platform === 'win32' ? 'go.exe' : 'go');
@@ -14,12 +16,14 @@ const hasGo = spawnSync(go, ['version'], { encoding: 'utf8' }).status === 0;
 test('portable launcher serves embedded files on loopback without Node or external browser automation', { skip: !hasGo, timeout: 90_000 }, async (t) => {
   const stage = path.join(root, 'artifacts/launcher-smoke');
   await mkdir(path.join(stage, 'web/shared'), { recursive: true });
+  const profileData = await mkdtemp(path.join(stage, 'profile-data-'));
   await writeFile(path.join(stage, 'web/index.html'), '<!doctype html><title>LINKSHOT launcher test</title>Embedded solo build');
   await writeFile(path.join(stage, 'web/shared/test.js'), 'export const embedded = true;');
+  await writeFile(path.join(stage, 'web/economy.json'), JSON.stringify({ version: 1, points: POINT_RULES, outfits: OUTFITS.map(({ id, price }) => ({ id, price })) }));
   await cp(path.join(root, 'scripts/windows-launcher.go'), path.join(stage, 'main.go'));
   const binary = path.join(stage, process.platform === 'win32' ? 'launcher-test.exe' : 'launcher-test');
   execFileSync(go, ['build', '-trimpath', '-o', binary, 'main.go'], { cwd: stage, env: { ...process.env, CGO_ENABLED: '0' }, timeout: 70_000 });
-  const child = spawn(binary, ['--no-browser'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(binary, ['--no-browser'], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LINKSHOT_DATA_DIR: profileData } });
   t.after(async () => { if (child.exitCode !== null) return; const stopped = new Promise((resolve) => child.once('exit', resolve)); child.kill('SIGINT'); await stopped; });
   const url = await new Promise((resolve, reject) => {
     let text = ''; const timeout = setTimeout(() => reject(new Error('Launcher did not print a URL')), 10_000);
@@ -33,4 +37,25 @@ test('portable launcher serves embedded files on loopback without Node or extern
   assert.equal((await fetch(url, { method: 'POST' })).status, 405);
   const forbidden = await new Promise((resolve, reject) => { http.get(url, { headers: { Host: 'unexpected.invalid' } }, (response) => { response.resume(); response.once('end', () => resolve(response.statusCode)); }).once('error', reject); });
   assert.equal(forbidden, 403);
+  const runtime = await (await fetch(`${url}/runtime-config.js`)).text(); assert.match(runtime, /PROFILE_STORAGE = 'host'/);
+  const first = await (await fetch(`${url}/api/profile`)).json(); assert.equal(first.scope, 'host'); assert.ok(first.profile.id);
+  for (const field of ['hostname', 'ip', 'mac', 'path', 'account']) assert.equal(first.profile[field], undefined);
+  const operate = async (operation) => {
+    const response = await fetch(`${url}/api/profile`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: url }, body: JSON.stringify(operation) });
+    return { status: response.status, data: await response.json() };
+  };
+  let update = await operate({ type: 'round', roundId: 'native-round-0001', kills: 5, deaths: 2 });
+  assert.equal(update.data.profile.kills, 5); assert.equal(update.data.profile.points, 0);
+  update = await operate({ type: 'round', roundId: 'native-round-0001', kills: 5, deaths: 2, completed: true, won: true });
+  assert.equal(update.data.profile.points, 250); assert.equal(update.data.award.points, 250);
+  update = await operate({ type: 'round', roundId: 'native-round-0001', kills: 5, deaths: 2, completed: true, won: true });
+  assert.equal(update.data.profile.points, 250); assert.equal(update.data.award, null);
+  update = await operate({ type: 'purchase', outfitId: 'runner' }); assert.equal(update.data.profile.points, 0); assert.equal(update.data.profile.equippedOutfitId, 'runner');
+  update = await operate({ type: 'purchase', outfitId: 'runner' }); assert.equal(update.data.cost, 0); assert.equal(update.data.profile.points, 0);
+  update = await operate({ type: 'purchase', outfitId: 'orbital' }); assert.equal(update.status, 409); assert.equal(update.data.profile.points, 0);
+  update = await operate({ type: 'round', roundId: 'native-round-0002', kills: 1, deaths: 1, completed: true }); assert.equal(update.data.profile.points, 70);
+  const disk = JSON.parse(await readFile(path.join(profileData, 'profile.json'), 'utf8'));
+  assert.equal(disk.id, first.profile.id); assert.equal(disk.kills, 6); assert.equal(disk.deaths, 3); assert.equal(disk.points, 70); assert.equal(disk.roundsPlayed, 2); assert.equal(disk.equippedOutfitId, 'runner');
+  assert.equal((await fetch(`${url}/api/profile`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://unrelated.invalid' }, body: '{}' })).status, 403);
+  assert.equal((await operate({ type: 'round', points: 999999 })).status, 400);
 });

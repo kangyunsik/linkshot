@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { checkText, publicationRisk, pngMetadata } from '../scripts/security-audit.mjs';
 
 test('publication guard blocks local credentials and generated output, including force-tracked files', () => {
-  for (const file of ['.env', '.env.production', '.npmrc', 'private.key', 'service-account-prod.json', 'release/game.zip', '.toolchain/go/bin/go', 'artifacts/lobby.png']) assert.ok(publicationRisk(file), file);
+  for (const file of ['.env', '.env.production', '.npmrc', 'private.key', 'service-account-prod.json', 'release/game.zip', '.toolchain/go/bin/go', 'artifacts/lobby.png', 'profile.json', 'profile.json.tmp', 'linkshot-profile-backup.json', 'data/profiles.json']) assert.ok(publicationRisk(file), file);
   for (const file of ['.env.example', '.env.production.example', 'public/assets/foundry-hero.png', 'shared/catalog.js']) assert.equal(publicationRisk(file), null, file);
 });
 

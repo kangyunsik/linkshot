@@ -10,10 +10,10 @@ const input = (overrides = {}) => ({ ...EMPTY_INPUT, ...overrides });
 test('movement is normalized, frame-rate independent, and cannot cross cover', () => {
   const p = player();
   for (let i = 0; i < 60; i++) movePlayer(p, input({ forward: 1 }), 1 / 60);
-  assert.ok(Math.abs(p.z - 12) < 0.001);
+  assert.ok(Math.abs(p.z - (18 - RULES.walkSpeed)) < 0.001);
   const diagonal = player({ x: 21, z: 19 });
   movePlayer(diagonal, input({ forward: 1, strafe: 1 }), 1 / 60);
-  assert.ok(Math.abs(Math.hypot(diagonal.x - 21, diagonal.z - 19) - 0.1) < 0.001);
+  assert.ok(Math.abs(Math.hypot(diagonal.x - 21, diagonal.z - 19) - RULES.walkSpeed / 60) < 0.001);
   const cover = player({ x: 0, z: -12 });
   for (let i = 0; i < 120; i++) movePlayer(cover, input({ forward: 1 }), 1 / 60);
   assert.ok(cover.z >= -14.66 - 0.001);
@@ -103,13 +103,15 @@ test('navigation produces a path around solid cover rather than through it', () 
   }
 });
 
-test('bots navigate, fire and score against a real player during a simulated match', () => {
-  let now = 1000; const room = new Room('BOT22', { bots: 3, clock: () => now });
-  const human = room.addPlayer('human', 'OPERATOR');
+test('bots navigate, fire and score in a free-for-all match with humans and other bots', () => {
+  let now = 1000, seed = 7;
+  const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+  const room = new Room('BOT22', { bots: 3, clock: () => now, random });
+  room.addPlayer('human', 'OPERATOR');
   const origins = new Map([...room.players.values()].map((p) => [p.id, { x: p.x, z: p.z }]));
   for (let i = 0; i < 45 * 60; i++) { now += 1000 / 60; room.tick(1 / 60); }
   assert.ok(room.events.filter((e) => e.type === 'shot').length > 10);
-  assert.ok(human.deaths > 0);
+  assert.ok([...room.players.values()].some((p) => p.isBot && p.kills > 0));
   assert.ok([...room.players.values()].some((p) => p.isBot && Math.hypot(p.x - origins.get(p.id).x, p.z - origins.get(p.id).z) > 8));
 });
 
