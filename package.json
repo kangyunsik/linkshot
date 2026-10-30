@@ -1,0 +1,27 @@
+{
+  "name": "linkshot-fps",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "LINKSHOT — a browser FPS with solo play and server-authoritative LAN multiplayer.",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "build": "node scripts/build.mjs",
+    "preview": "node scripts/preview.mjs",
+    "setup:packaging": "node scripts/setup-packaging.mjs",
+    "package:windows": "npm run build && node scripts/package-windows.mjs",
+    "test": "node --test tests/*.test.js",
+    "test:e2e": "npm run build && playwright test",
+    "security:check": "node scripts/security-audit.mjs",
+    "assets:generate": "node scripts/generate-assets.mjs"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "three": "^0.180.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1"
+  }
+}

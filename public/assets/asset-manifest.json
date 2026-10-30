@@ -1,0 +1,79 @@
+{
+  "engine": "ComfyUI (local, ~/engine)",
+  "checkpoint": "animagine-xl-4.0-opt.safetensors",
+  "modelLicense": "CreativeML Open RAIL++-M",
+  "modelSource": "https://huggingface.co/cagliostrolab/animagine-xl-4.0",
+  "note": "Locally generated images; no paid API or external image service used. Procedural meshes, UI and sounds are authored in this project.",
+  "assets": [
+    {
+      "file": "foundry-hero.png",
+      "prompt": "masterpiece, best quality, very aesthetic, scenery, no humans, industrial science fiction military training arena, brutalist concrete architecture, monumental dark steel industrial foundry, tall red orange steel gantry on the right, cyan blue overcast sky, warm orange light, cinematic atmospheric perspective, dramatic wide angle establishing shot, game environment concept art, hard surface, small orange warning lights, dark charcoal foreground, futuristic shipping containers, highly detailed background, moody, composition with open space on the left, anime background art",
+      "seed": 7092431,
+      "width": 1152,
+      "height": 768
+    },
+    {
+      "file": "foundry-panel.png",
+      "prompt": "masterpiece, best quality, very aesthetic, no humans, industrial sci-fi metal wall panel texture, front view, flat orthographic view, dark desaturated blue gray steel panels, recessed vents, worn scratched steel, orange hazard stripe on the bottom, industrial surface, hard surface, sharp detail, game environment texture, symmetrical square composition, flat even lighting",
+      "seed": 7092432,
+      "width": 768,
+      "height": 768
+    },
+    {
+      "file": "longrail-hero.png",
+      "prompt": "masterpiece, best quality, very aesthetic, scenery, no humans, an extremely long abandoned futuristic freight railway yard, two parallel rails leading to a distant vanishing point, blue steel cargo train carriages, glowing amber signal lights, stormy indigo evening sky, cinematic science fiction industrial environment, wide angle establishing shot, highly detailed background, game environment concept art, moody cinematic composition, anime background art",
+      "seed": 7092500,
+      "width": 1152,
+      "height": 768
+    },
+    {
+      "file": "drydock-hero.png",
+      "prompt": "masterpiece, best quality, very aesthetic, scenery, no humans, a very wide futuristic dry dock cargo harbor, immense gantry cranes, rows of weathered orange and blue shipping containers, turquoise sea visible beyond seawalls, soft golden morning light, expansive military arena environment, wide angle establishing shot, highly detailed background, game environment concept art, moody cinematic composition, anime background art",
+      "seed": 7092501,
+      "width": 1152,
+      "height": 768
+    },
+    {
+      "file": "blocknine-hero.png",
+      "prompt": "masterpiece, best quality, very aesthetic, scenery, no humans, abandoned futuristic city block at blue hour, concrete buildings and intersecting narrow alleys, violet and cyan light in windows, wet asphalt reflecting light, dramatic urban tactical arena, dense geometric city architecture, wide angle establishing shot, highly detailed background, game environment concept art, moody cinematic composition, anime background art",
+      "seed": 7092502,
+      "width": 1152,
+      "height": 768
+    },
+    {
+      "file": "whiteout-hero.png",
+      "prompt": "masterpiece, best quality, very aesthetic, scenery, no humans, a futuristic arctic research outpost in a vast snowy plain, white modular laboratories, icy blue cargo crates, glacier mountains, pale cyan overcast sky, cold bright light, snow drifts, crisp science fiction military environment, wide angle establishing shot, highly detailed background, game environment concept art, moody cinematic composition, anime background art",
+      "seed": 7092503,
+      "width": 1152,
+      "height": 768
+    },
+    {
+      "file": "redline-hero.png",
+      "prompt": "masterpiece, best quality, very aesthetic, scenery, no humans, an extremely long desert freight highway between red sandstone cliffs, rust colored industrial depots and low concrete barriers, sand and dust, warm copper sunset, distant mesas, abandoned tactical arena, cinematic wide desert landscape, wide angle establishing shot, highly detailed background, game environment concept art, moody cinematic composition, anime background art",
+      "seed": 7092504,
+      "width": 1152,
+      "height": 768
+    },
+    {
+      "file": "skin-circuit.png",
+      "prompt": "masterpiece, best quality, no humans, dark charcoal teal futuristic circuit board surface pattern, thin mint cyan geometric circuit traces, microchip paths, intricate etched lines, subtle metallic finish, seamless flat surface, no perspective, game weapon skin texture, top down orthographic material swatch, flat even lighting, full frame abstract pattern",
+      "seed": 7092600,
+      "width": 768,
+      "height": 768
+    },
+    {
+      "file": "skin-forge.png",
+      "prompt": "masterpiece, best quality, no humans, dark gunmetal and burnt orange forged steel surface pattern, angular copper molten cracks, geometric armor camouflage, scratched metal, intricate abstract industrial pattern, seamless flat surface, no perspective, game weapon skin texture, top down orthographic material swatch, flat even lighting, full frame abstract pattern",
+      "seed": 7092601,
+      "width": 768,
+      "height": 768
+    },
+    {
+      "file": "skin-camo.png",
+      "prompt": "masterpiece, best quality, no humans, white gray black digital camouflage pattern texture, irregular angular geometric polygon patches, arctic military camouflage, flat graphic pattern, matte painted surface, seamless all over pattern, no perspective, game weapon skin texture, top down orthographic material swatch, flat even lighting, full frame abstract pattern",
+      "seed": 7092602,
+      "width": 768,
+      "height": 768
+    }
+  ]
+}
