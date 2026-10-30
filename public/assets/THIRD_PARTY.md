@@ -28,8 +28,14 @@
 - License: CC0 1.0 Universal — https://creativecommons.org/publicdomain/zero/1.0/
 - Original recordings: CZ-52 pistol, SKS rifle, Mosin Nagant rifle, shotgun.
 - Changes: one audited isolated muzzle blast per weapon, spectral noise reduction, filtering, fixed mono resampling, exponential suppression of late echoes/mechanical tails, peak normalization and fades. No random sample or pitch variations are used during gameplay.
+- SR–1, AWP and M82 additionally use bass-weighted processing and a deterministic dense diffuse 1.65–2.20 second decay. The tail is processed from the single isolated blast, not another recorded shot or bolt click. Fixed resampling is baked into each file; playback always uses rate 1.
 - The 20 gameplay sound profiles are artistic edits of the four listed source recordings; they are not claimed to be original recordings of each named real-world weapon.
 - Prepared file list and hashes: `sounds/manifest.json`.
 - Reproduction tools: `scripts/prepare-character.py`, `scripts/prepare-audio.py` in the source repository. Downloaded archives and working files are not distributed.
+
+## Procedural boot and kill-confirmation effects
+
+- Original synthesis in `public/sound-design.js`: heel/sole/scrape boot sounds, impact/chime kill and multikill confirmations, and a headshot accent.
+- These effects are created from deterministic noise and oscillators, not external recordings, downloaded voice packs or a speech API. There are no additional third-party audio assets for these effects.
 
 Three.js and its glTF/skeleton utilities are by the Three.js authors, under the MIT license. The full notice is included as `LICENSE-three.txt`: https://github.com/mrdoob/three.js/blob/dev/LICENSE.

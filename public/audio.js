@@ -1,5 +1,8 @@
 import { WEAPONS } from '/shared/catalog.js';
 import { NETWORK_PROTOCOL } from '/shared/world.js';
+import { footstepSignal, killSignal } from './sound-design.js';
+
+const SOUND_REVISION = 2;
 
 export class GameAudio {
   constructor(settings) {
@@ -7,8 +10,9 @@ export class GameAudio {
     this.context = null;
     this.muted = false;
     this.samples = new Map(); this.voices = new Set();
+    this.stepVoices = new Set(); this.killSamples = new Map(); this.killVoice = null;
     this.bytes = Promise.allSettled(WEAPONS.flatMap((weapon) => [1].map(async (variant) => {
-      const response = await fetch(`/assets/sounds/${weapon.id}-${variant}.wav?v=${NETWORK_PROTOCOL}`, { signal: AbortSignal.timeout(12000) });
+      const response = await fetch(`/assets/sounds/${weapon.id}-${variant}.wav?v=${NETWORK_PROTOCOL}-${SOUND_REVISION}`, { signal: AbortSignal.timeout(12000) });
       if (!response.ok) throw new Error('Sound sample unavailable');
       return { id: weapon.id, variant, bytes: await response.arrayBuffer() };
     })));
@@ -32,6 +36,7 @@ export class GameAudio {
         this.noise = this.context.createBuffer(1, length, this.context.sampleRate);
         const data = this.noise.getChannelData(0);
         for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+        this.stepSamples = [0, 1].map((foot) => this.buffer(footstepSignal(this.context.sampleRate, foot)));
       }
       await this.context.resume();
       this.updateVolume();
@@ -45,6 +50,10 @@ export class GameAudio {
 
   updateVolume() {
     if (this.master) this.master.gain.setTargetAtTime(this.muted ? 0 : this.settings.volume / 100 * 0.45, this.context.currentTime, 0.02);
+  }
+
+  buffer(signal) {
+    const buffer = this.context.createBuffer(1, signal.length, this.context.sampleRate); buffer.getChannelData(0).set(signal); return buffer;
   }
 
   tone(frequency, duration, volume = 0.1, type = 'sine', endFrequency = frequency, pan = 0) {
@@ -94,9 +103,29 @@ export class GameAudio {
     const queuedAt = performance.now();
     this.ready?.then(() => { if ((!allowed || allowed()) && performance.now() - queuedAt < 350 && this.samples.get(weaponId)?.some(Boolean)) this.shot(volume, pan, weaponId, distance, allowed); });
   }
-  step(sprint = false, crouched = false) { this.burst(0.07, crouched ? 0.025 : sprint ? 0.085 : 0.05, 450); }
+  step(sprint = false, crouched = false, { volume = 1, pan = 0, distance = 0, occluded = false, foot = 0 } = {}) {
+    if (!this.context || this.context.state !== 'running' || this.muted || this.settings.volume <= 0 || volume <= 0.0001) return null;
+    const c = this.context, source = c.createBufferSource(), gain = c.createGain(), filter = c.createBiquadFilter(), panner = c.createStereoPanner();
+    source.buffer = this.stepSamples[foot === 1 ? 1 : 0]; source.playbackRate.value = 1;
+    gain.gain.value = Math.max(0, Math.min(1, volume)) * (crouched ? 0.23 : sprint ? 0.9 : 0.65);
+    filter.type = 'lowpass'; filter.frequency.value = occluded ? crouched ? 650 : 850 : Math.max(950, (crouched ? 1800 : 3000) * Math.exp(-distance / 30));
+    panner.pan.value = Math.max(-1, Math.min(1, pan)); source.connect(filter).connect(gain).connect(panner); panner.connect(this.master); panner.connect(this.room);
+    const voice = { source, gain, filter, panner };
+    if (this.stepVoices.size >= 16) { const oldest = this.stepVoices.values().next().value; oldest.source.stop(); this.stepVoices.delete(oldest); }
+    this.stepVoices.add(voice); source.onended = () => { this.stepVoices.delete(voice); source.disconnect(); filter.disconnect(); gain.disconnect(); panner.disconnect(); };
+    source.start(); return voice;
+  }
   reload() { this.tone(1100, 0.07, 0.08, 'triangle', 240); this.burst(0.1, 0.07, 1900); }
   hit(head = false) { this.tone(head ? 1800 : 1150, 0.07, 0.12, 'sine', head ? 2500 : 1450); }
   hurt() { this.burst(0.16, 0.1, 320); }
-  kill() { this.tone(660, 0.16, 0.1, 'sine', 990); }
+  kill(chain = 1, headshot = false) {
+    if (!this.context || this.context.state !== 'running' || this.muted || this.settings.volume <= 0) return null;
+    const rank = Math.max(1, Math.min(8, Math.floor(Number(chain) || 1))), key = `${rank}/${headshot === true}`, c = this.context;
+    if (!this.killSamples.has(key)) this.killSamples.set(key, this.buffer(killSignal(c.sampleRate, rank, headshot)));
+    if (this.killVoice) { this.killVoice.gain.gain.setTargetAtTime(0, c.currentTime, 0.015); this.killVoice.source.stop(c.currentTime + 0.06); }
+    const source = c.createBufferSource(), gain = c.createGain(); source.buffer = this.killSamples.get(key); source.playbackRate.value = 1; gain.gain.value = 0.78;
+    source.connect(gain).connect(this.master); const voice = { source, gain }; this.killVoice = voice;
+    source.onended = () => { if (this.killVoice === voice) this.killVoice = null; source.disconnect(); gain.disconnect(); };
+    source.start(); return voice;
+  }
 }

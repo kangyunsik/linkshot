@@ -71,6 +71,58 @@ test('each gun repeats one identical recorded sound with fixed pitch and bounded
   expect(result.voices).toBeGreaterThan(0); expect(result.voices).toBeLessThanOrEqual(40);
 });
 
+test('boot sounds are spatial, stance-aware and bounded; kill cues are distinct and obey mute', async ({ page }) => {
+  await page.goto('/'); await expect(page.getByText('LAN SERVER ONLINE')).toBeVisible();
+  const result = await page.evaluate(async () => {
+    const { GameAudio } = await import('/audio.js'), audio = new GameAudio({ volume: 100 }); await audio.unlock(); await audio.ready; audio.master.gain.cancelScheduledValues(audio.context.currentTime); audio.master.gain.value = 0;
+    const walk = audio.step(false, false, { pan: -0.8 }), run = audio.step(true), crouch = audio.step(false, true), wall = audio.step(false, false, { volume: 0.3, occluded: true });
+    const single = audio.kill(1), triple = audio.kill(3, true);
+    for (let i = 0; i < 40; i++) audio.step(false, false, { foot: i % 2 });
+    const result = { walk: walk.gain.gain.value, run: run.gain.gain.value, crouch: crouch.gain.gain.value, pan: walk.panner.pan.value, filtered: wall.filter.frequency.value < walk.filter.frequency.value, steps: audio.stepVoices.size, killDistinct: single.source.buffer !== triple.source.buffer, killRate: triple.source.playbackRate.value, sniperSeconds: ['sniper', 'awp', 'm82'].map((id) => audio.samples.get(id)[0].duration) };
+    audio.muted = true; result.mutedStep = audio.step() === null; result.mutedKill = audio.kill(2) === null;
+    audio.muted = false; audio.settings.volume = 0; result.zeroVolume = audio.step() === null && audio.kill() === null;
+    await audio.context.close(); return result;
+  });
+  expect(result.run).toBeGreaterThan(result.walk); expect(result.walk).toBeGreaterThan(result.crouch); expect(result.pan).toBeCloseTo(-0.8, 6); expect(result.filtered).toBe(true); expect(result.steps).toBeLessThanOrEqual(16);
+  expect(result.killDistinct).toBe(true); expect(result.killRate).toBe(1); expect(result.mutedStep && result.mutedKill && result.zeroVolume).toBe(true);
+  expect(result.sniperSeconds[0]).toBeCloseTo(1.65, 2); expect(result.sniperSeconds[1]).toBeCloseTo(1.95, 2); expect(result.sniperSeconds[2]).toBeCloseTo(2.2, 2);
+});
+
+test('local and nearby remote movement both produce footsteps, but dead sources do not', async ({ page }) => {
+  await fixture(page);
+  try {
+    const result = await page.evaluate(() => {
+      const { game, room, timer } = window.__rules; clearInterval(timer); cancelAnimationFrame(game.frameId);
+      room.world = { ...room.world, width: 100, depth: 100, obstacles: [] }; game.world = room.world;
+      const steps = []; game.audio.step = (sprint, crouched, mix) => steps.push({ sprint, crouched, ...mix });
+      game.keys.add('KeyW'); const avatar = game.remote.get('other'); Object.assign(avatar.target, { moveSpeed: 5.7, grounded: true, hp: 100 });
+      const start = performance.now(); game.previousFrame = start;
+      for (let i = 1; i <= 120; i++) { avatar.target.z = 6 - i * 5.7 / 60; game.animate(start + i * 1000 / 60); cancelAnimationFrame(game.frameId); }
+      const local = steps.filter((step) => !step.remote), remote = steps.filter((step) => step.remote), beforeDeath = steps.length;
+      game.local.hp = 0; avatar.target.hp = 0;
+      for (let i = 121; i <= 180; i++) { avatar.target.z -= 0.1; game.animate(start + i * 1000 / 60); cancelAnimationFrame(game.frameId); }
+      return { local, remote, beforeDeath, afterDeath: steps.length };
+    });
+    expect(result.local.length).toBeGreaterThanOrEqual(3); expect(result.remote.length).toBeGreaterThanOrEqual(3); expect(result.afterDeath).toBe(result.beforeDeath);
+    expect(result.local.every((step) => step.playerId === 'viewer' && step.volume === 1)).toBe(true);
+    expect(result.remote.every((step) => step.playerId === 'other' && step.pan < 0 && step.volume > 0 && step.volume < 1)).toBe(true);
+  } finally { await dispose(page); }
+});
+
+test('only confirmed personal kills play kill/multikill audio, including the final kill, without duplicates', async ({ page }) => {
+  await fixture(page);
+  try {
+    const cues = await page.evaluate(() => {
+      const { game, timer } = window.__rules; clearInterval(timer); const cues = []; game.audio.kill = (chain, headshot) => cues.push({ chain, headshot });
+      const event = { type: 'kill', killId: 'audio-kill-1', killerId: 'viewer', victimId: 'other', killer: 'VIEWER', victim: 'OPERATOR', weaponId: 'rifle', killChain: 1, headshot: false };
+      game.handleEvent(event); game.handleEvent(event); game.handleEvent({ ...event, killId: 'someone-else', killerId: 'other' });
+      game.handleEvent({ ...event, killId: 'audio-kill-2', killChain: 2, headshot: true });
+      game.room.phase = 'ended'; game.handleEvent({ ...event, killId: 'audio-kill-3', killChain: 3 }); return cues;
+    });
+    expect(cues).toEqual([{ chain: 1, headshot: false }, { chain: 2, headshot: true }, { chain: 3, headshot: false }]);
+  } finally { await dispose(page); }
+});
+
 test('multi-storey buildings use batched geometry and render actual open windows', async ({ page }) => {
   await fixture(page, 'blocknine');
   try {

@@ -3,7 +3,7 @@
   "license": "CC0-1.0",
   "source": "https://opengameart.org/content/gunshot-sounds",
   "archive": "https://opengameart.org/sites/default/files/sounds.zip",
-  "processing": "One audited isolated muzzle blast per weapon, 9ms lead-in, spectral noise reduction, filtering, fixed resampling, exponential echo/mechanical-tail suppression, peak normalization and fade. No random variations or paid API.",
+  "processing": "One audited isolated muzzle blast per weapon, 9ms lead-in, spectral noise reduction, filtering, fixed resampling, mechanical-tail suppression, peak normalization and fade. The three sniper profiles add a bass-weighted body and deterministic dense diffuse 1.65\u20132.20s decay, never a second recorded shot. No runtime sample/pitch variations or paid API.",
   "files": [
     {
       "file": "rifle-1.wav",
@@ -37,9 +37,12 @@
       "recording": "mosin.wav",
       "sourceAttack": 0.47,
       "singleShot": true,
+      "soundProfile": "heavy-sniper",
+      "diffuseTailSeconds": 1.65,
+      "fixedPitch": 0.82,
       "variant": 1,
-      "seconds": 1.0,
-      "sha256": "717bc5cdd4ef5636addf62252903e697aa3084765d7017e341b06dede35ef3cc"
+      "seconds": 1.65,
+      "sha256": "fd957ff9873afcd71cc83d35434e3c82838c1b17cc7276996c78f29a3ae2f3fa"
     },
     {
       "file": "pistol-1.wav",
@@ -127,18 +130,24 @@
       "recording": "mosin.wav",
       "sourceAttack": 0.47,
       "singleShot": true,
+      "soundProfile": "heavy-sniper",
+      "diffuseTailSeconds": 1.95,
+      "fixedPitch": 0.76,
       "variant": 1,
-      "seconds": 1.1,
-      "sha256": "aa791cf9bd795844c89302bba1af0e3a73b57dd2bdbe82bc0b245a3e1ae09123"
+      "seconds": 1.95,
+      "sha256": "250defb8d273d7afa6f4a96e1a2574c0330d7083508904fca729028e9cead029"
     },
     {
       "file": "m82-1.wav",
       "recording": "mosin.wav",
       "sourceAttack": 0.47,
       "singleShot": true,
+      "soundProfile": "heavy-sniper",
+      "diffuseTailSeconds": 2.2,
+      "fixedPitch": 0.66,
       "variant": 1,
-      "seconds": 1.24,
-      "sha256": "fcc79b2700f15ba8c91b43cda0a67e802ad05e42ecf228abb9ebd5044b43b6dd"
+      "seconds": 2.2,
+      "sha256": "4584a42306f8977f4994140468207b26e0e12b5c532ea7700c32268374e9ea73"
     },
     {
       "file": "spas12-1.wav",

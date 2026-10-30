@@ -11,6 +11,7 @@ test('recorded firearm samples have verified CC0 provenance, valid PCM and safe 
   assert.equal(manifest.license, 'CC0-1.0'); assert.equal(manifest.creator, 'Tabasco'); assert.equal(manifest.files.length, WEAPONS.length);
   assert.equal(new Set(manifest.files.map((file) => file.sha256)).size, WEAPONS.length);
   for (const item of manifest.files) {
+    const weapon = WEAPONS.find((weapon) => item.file === `${weapon.id}-1.wav`); assert.ok(weapon, 'known canonical weapon sample'); assert.equal(item.soundProfile === 'heavy-sniper', weapon.type === 'SNIPER');
     const data = await readFile(new URL(item.file, directory));
     assert.equal(data.toString('ascii', 0, 4), 'RIFF'); assert.equal(data.toString('ascii', 8, 12), 'WAVE'); assert.equal(data.readUInt16LE(20), 1);
     assert.equal(data.readUInt16LE(22), 1); assert.equal(data.readUInt32LE(24), 44100); assert.equal(data.readUInt16LE(34), 16);
@@ -22,7 +23,15 @@ test('recorded firearm samples have verified CC0 provenance, valid PCM and safe 
     for (let start = 44; start < data.length; start += 882) {
       let sum = 0, count = 0; for (let i = start; i < Math.min(data.length, start + 882); i += 2) { sum += (data.readInt16LE(i) / 32768) ** 2; count++; } rms.push(Math.sqrt(sum / count));
     }
-    assert.ok(Math.max(...rms.slice(15)) < Math.max(...rms.slice(0, 8)) * 0.12, `${item.file}: a later blast/mechanical attack is audible`);
+    if (item.soundProfile === 'heavy-sniper') {
+      assert.ok(item.seconds >= 1.6 && item.seconds <= 2.3); assert.ok(item.fixedPitch > 0.5 && item.fixedPitch < 1);
+      assert.ok(Math.max(...rms.slice(15)) < Math.max(...rms.slice(0, 8)) * 0.6, `${item.file}: diffuse tail must not become a second blast`);
+      const energyBetween = (start, end) => { let sum = 0, count = 0; for (let i = 44 + Math.floor(start * 44100) * 2; i < Math.min(data.length, 44 + Math.floor(end * 44100) * 2); i += 2) { sum += (data.readInt16LE(i) / 32768) ** 2; count++; } return Math.sqrt(sum / count); };
+      const early = energyBetween(0.2, 0.8), late = energyBetween(0.8, 1.3); assert.ok(early > 0.008 && late > 0.002 && late < early * 0.5, `${item.file}: retain a long, fading report`);
+      let low = 0, bass = 0; const alpha = 1 - Math.exp(-2 * Math.PI * 350 / 44100);
+      for (let i = 44; i < data.length; i += 2) { low += (data.readInt16LE(i) / 32768 - low) * alpha; bass += low * low; }
+      assert.ok(bass / energy > 0.25, `${item.file}: a heavy low-frequency body`);
+    } else assert.ok(Math.max(...rms.slice(15)) < Math.max(...rms.slice(0, 8)) * 0.12, `${item.file}: a later blast/mechanical attack is audible`);
   }
 });
 

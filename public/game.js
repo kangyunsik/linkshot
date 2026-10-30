@@ -12,6 +12,7 @@ import { CombatEffects } from './combat-effects.js';
 import { AimRecoil } from './aim-recoil.js';
 import { ShotFeedback } from './shot-feedback.js';
 import { weaponMastery } from '/shared/progression.js';
+import { FootstepTracker, footstepMix } from './footsteps.js';
 
 const $ = (id) => document.getElementById(id);
 const lerp = THREE.MathUtils.lerp;
@@ -61,9 +62,10 @@ export class FPSGame {
     this.abort = new AbortController(); this.keys = new Set(); this.remote = new Map(); this.effects = [];
     this.players = []; this.selfId = null; this.local = null; this.predicted = null; this.room = null;
     this.aimRecoil = new AimRecoil();
+    this.localSteps = new FootstepTracker();
     this.shotFeedback = new ShotFeedback(); this.fireSeq = 0; this.localShotIndex = 0; this.seenKills = new Set();
     this.yaw = 0; this.pitch = 0; this.fireHeld = false; this.ads = false; this.disposed = false;
-    this.lastFire = 0; this.lastSend = 0; this.lastMap = 0; this.lastScoreboard = 0; this.stepDistance = 0;
+    this.lastFire = 0; this.lastSend = 0; this.lastMap = 0; this.lastScoreboard = 0;
     this.reloadPressedUntil = 0; this.jumpPressedUntil = 0; this.recoil = 0; this.muzzleUntil = 0; this.serverOffset = 0; this.hadReload = false;
     this.world = getMap(mapId); this.skinId = getSkin(skinId).id; this.requestedWeaponId = getWeapon(weaponId).id;
     this.outfitId = getOutfit(outfitId).id;
@@ -296,7 +298,7 @@ export class FPSGame {
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture, transparent: true, opacity: 0.8, depthWrite: false })); label.position.y = 2.15; label.scale.set(2.6, 0.325, 1); group.add(label);
     group.position.set(player.x, player.y, player.z); group.rotation.y = player.yaw; this.scene.add(group);
     const shield = new THREE.Mesh(new THREE.TorusGeometry(0.43, 0.02, 8, 32), new THREE.MeshBasicMaterial({ color: '#82d9ff', transparent: true, opacity: 0.75, depthWrite: false })); shield.rotation.x = -Math.PI / 2; shield.position.y = 0.035; shield.name = 'spawn-shield'; group.add(shield);
-    return { ...operator, label, shield, target: player, lastX: player.x, lastZ: player.z, flashUntil: 0 };
+    return { ...operator, label, shield, target: player, lastX: player.x, lastZ: player.z, flashUntil: 0, steps: new FootstepTracker() };
   }
 
   bindInput() {
@@ -412,6 +414,7 @@ export class FPSGame {
       this.requestedWeaponId = local.weaponId; this.localNextFire = 0; this.fireLatched = false;
       this.clearInput(local.spawnCount);
       this.clearDamageDirections();
+      this.localSteps.reset();
     } else {
       reconcileMovement(this.predicted, local, this.world);
     }
@@ -551,7 +554,7 @@ export class FPSGame {
       while ($('killfeed').children.length > 5) $('killfeed').lastChild.remove();
       setTimeout(() => entry.remove(), 5500);
       if (event.killerId === this.selfId) {
-        this.audio.kill(); this.hud['kill-confirmation'].textContent = event.headshot ? 'HEADSHOT  +1' : 'ELIMINATED  +1'; this.killUntil = performance.now() + 1800;
+        this.audio.kill(event.killChain || 1, event.headshot === true); this.hud['kill-confirmation'].textContent = event.headshot ? 'HEADSHOT  +1' : 'ELIMINATED  +1'; this.killUntil = performance.now() + 1800;
         this.showKillFeedback(event);
       }
     }
@@ -641,12 +644,10 @@ export class FPSGame {
     const input = this.input();
     if (now - this.lastSend >= 1000 / 30 && this.local) { this.send(input); this.lastSend = now; }
     if (this.predicted && this.local) {
-      const previousX = this.predicted.x, previousZ = this.predicted.z;
       if (this.local.hp > 0 && this.room.phase === 'active') movePlayer(this.predicted, input, dt, this.world);
-      const moved = Math.hypot(this.predicted.x - previousX, this.predicted.z - previousZ);
-      this.stepDistance += moved;
       const sprinting = this.predicted.sprinting;
-      if (this.stepDistance > (sprinting ? 2.5 : 2.0) && this.predicted.grounded && this.locked) { this.audio.step(sprinting, this.predicted.crouching); this.stepDistance = 0; }
+      const step = this.localSteps.update(this.predicted, now, { active: this.local.hp > 0 && this.room.phase === 'active' && this.locked });
+      if (step) this.audio.step(step.sprint, step.crouched, { foot: step.foot, volume: 1, pan: step.foot ? 0.06 : -0.06, distance: 0, remote: false, playerId: this.selfId });
       const moving = Math.abs(input.forward) + Math.abs(input.strafe) > 0;
       const ads = this.ads && this.locked && !this.hadReload && this.local.switchUntil <= this.serverNow && this.requestedWeaponId === this.local.weaponId && this.local.hp > 0;
       const bob = !ads && moving && this.predicted.grounded ? Math.sin(now * (sprinting ? 0.017 : 0.012)) : 0;
@@ -713,6 +714,17 @@ export class FPSGame {
       const crouchTarget = target.crouchAmount ?? (target.crouching ? 1 : 0), crouchStep = dt / RULES.crouchSeconds;
       avatar.crouchAmount += clamp(crouchTarget - avatar.crouchAmount, -crouchStep, crouchStep);
       avatar.label.position.y = 2.15 - avatar.crouchAmount * 0.7;
+      const source = { x: position.x, y: position.y, z: position.z, hp: target.hp, grounded: target.grounded, moveSpeed: target.moveSpeed, spawnCount: target.spawnCount, crouching: target.crouching, sprinting: target.sprinting };
+      const step = avatar.steps.update(source, now, { active: this.room?.phase === 'active', teleport });
+      if (step && this.predicted) {
+        let mix = footstepMix(this.predicted, source, this.yaw);
+        if (mix.volume > 0) {
+          const origin = { x: this.predicted.x, y: this.predicted.y + playerPose(this.predicted).eyeHeight, z: this.predicted.z };
+          const occluded = !hasLineOfSight(origin, { x: source.x, y: source.y + 0.25, z: source.z }, this.world);
+          if (occluded) mix = footstepMix(this.predicted, source, this.yaw, true);
+          this.audio.step(step.sprint, step.crouched, { ...mix, foot: step.foot, remote: true, playerId: target.id });
+        }
+      }
       const speed = Math.hypot(position.x - avatar.lastX, position.z - avatar.lastZ) / Math.max(dt, 0.001);
       const stride = Math.sin(now * 0.011) * Math.min(0.5, speed * 0.08) * (1 - avatar.crouchAmount * 0.65);
       poseOperator(avatar, avatar.crouchAmount, stride);
