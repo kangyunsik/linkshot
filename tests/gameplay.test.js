@@ -81,7 +81,7 @@ test('the sniper last shot cannot start an automatic reload sound during its fir
 });
 
 test('FAMAS delivers exactly three rounds per press, finishes a released burst and cancels for reload', () => {
-  let now = 1000; const room = new Room('BURST3', { bots: 0, clock: () => now }), p = room.addPlayer('a', 'ALPHA', false, { weaponId: 'famas' });
+  let now = 1000; const room = new Room('BURST3', { bots: 0, clock: () => now }), p = room.addPlayer('a', 'ALPHA', false, { weaponId: 'famas', ownedWeapons: ['famas'] });
   room.setInput('a', input({ fire: true, ads: true })); room.tick(1 / 60);
   room.setInput('a', input({ ads: true }));
   for (let i = 0; i < 60; i++) { now += 1000 / 60; room.tick(1 / 60); }

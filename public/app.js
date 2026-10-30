@@ -2,12 +2,12 @@ import { FPSGame } from './game.js';
 import { GameAudio } from './audio.js';
 import { drawTacticalMap } from './map.js';
 import { MAPS, getMap, RULES, normalizeRoundOptions, NETWORK_PROTOCOL } from '/shared/world.js';
-import { WEAPONS, SKINS, getWeapon, getSkin } from '/shared/catalog.js';
+import { WEAPONS, SKINS, getWeapon, getSkin, ownsWeapon } from '/shared/catalog.js';
 import { ArmoryPreview } from './weapon-model.js';
 import { SoloConnection } from './solo-connection.js';
 import { APP_MODE, PROFILE_STORAGE } from './runtime-config.js';
 import { ProfileStore, PROFILE_KEY } from './profile.js';
-import { profileStats, POINT_RULES } from '/shared/progression.js';
+import { profileStats, POINT_RULES, weaponMastery } from '/shared/progression.js';
 import { OUTFITS, getOutfit } from '/shared/outfits.js';
 import { OperatorPreview } from './operator-model.js';
 import { BOT_DIFFICULTIES, getBotDifficulty } from '/shared/simulation.js';
@@ -32,6 +32,8 @@ let preview = null;
 let operatorPreview = null, selectedOutfitId = 'field', purchaseRequestId = null, shopBusy = false;
 let selfSessionId = null, lastRoundReward = null;
 const profileStore = await new ProfileStore({ host: PROFILE_STORAGE === 'host', name: stored('sector07-name', `OP-${Math.floor(100 + Math.random() * 900)}`) }).load();
+if (!ownsWeapon(profileStore.profile, loadout.weaponId)) loadout.weaponId = 'rifle';
+let selectedWeaponId = loadout.weaponId;
 selectedOutfitId = profileStore.profile.equippedOutfitId;
 const audio = new GameAudio(settings);
 audio.muted = stored('sector07-muted', 'false') === 'true';
@@ -157,11 +159,17 @@ function callsign() {
   store('sector07-name', name); profileStore.setName(name).catch((error) => toast(error.message, true)); return name;
 }
 
+function profileLoadout() {
+  const profile = profileStore.profile;
+  if (!ownsWeapon(profile, loadout.weaponId)) loadout.weaponId = 'rifle';
+  return { ...loadout, outfitId: profile.equippedOutfitId, ownedWeapons: profile.ownedWeapons, weaponKills: profile.weaponKills };
+}
+
 function requestJoin(code) {
   if (busy || game) return;
   if (!connected) { toast('먼저 로컬 서버에 연결되어야 합니다.', true); return; }
   if (!/^[A-Z2-9]{5}$/.test(code)) { toast('5자리 방 코드를 입력해 주세요.', true); return; }
-  setBusy(true); send({ type: 'join', code, name: callsign(), ...loadout, outfitId: profileStore.profile.equippedOutfitId });
+  setBusy(true); send({ type: 'join', code, name: callsign(), ...profileLoadout() });
 }
 
 function showMenu(visible) {
@@ -230,11 +238,11 @@ function openDialog(id) {
     const world = getMap(loadout.mapId);
     drawTacticalMap($('briefing-map'), { world, spawns: true, detailed: true });
     $('briefing-map-title').textContent = world.name; $('briefing-map-size').textContent = `${world.width} × ${world.depth} M`;
-    $('briefing-map-description').textContent = `${world.description} 건물 ${world.buildings.length}개·추가 엄폐벽 ${world.coverWalls.length}개와 계단식 발판을 활용하세요. ${roundOptions.roundSeconds / 60}분 또는 먼저 ${roundOptions.fragLimit}킬을 달성하면 라운드가 끝납니다.`;
+    $('briefing-map-description').textContent = `${world.description} 건물 ${world.buildings.length}개·추가 엄폐벽 ${world.coverWalls.length}개와 계단식 발판을 활용하세요. 지상·2/3층·옥상 ${world.spawns.length}개 스폰은 건물·화물·설비의 자연 엄폐를 사용합니다. ${roundOptions.roundSeconds / 60}분 또는 먼저 ${roundOptions.fragLimit}킬을 달성하면 라운드가 끝납니다.`;
   }
   dialog.showModal();
   if (id === 'armory-dialog') {
-    try { preview = new ArmoryPreview($('weapon-preview')); preview.set(loadout.weaponId, loadout.skinId); $('preview-fallback').hidden = true; }
+    try { preview = new ArmoryPreview($('weapon-preview')); preview.set(selectedWeaponId, loadout.skinId); $('preview-fallback').hidden = true; }
     catch { $('preview-fallback').hidden = false; }
   }
   if (id === 'shop-dialog') {
@@ -258,7 +266,7 @@ function renderProfile() {
   $('profile-full-id').textContent = profile.id;
   $('profile-storage-detail').textContent = profileStore.scope === 'host' ? '운영체제 사용자 설정 폴더의 LINKSHOT/profile.json' : '현재 사이트 주소의 이 브라우저 로컬 저장소';
   $('profile-rounds').textContent = `${profile.roundsPlayed} / ${profile.wins}`; $('profile-earned').textContent = `${format(profile.totalEarned)} LP`;
-  renderRoundReward(); renderShop();
+  renderRoundReward(); renderShop(); renderWeaponOwnership();
 }
 
 function syncProgress(data) {
@@ -266,7 +274,7 @@ function syncProgress(data) {
   const player = data.players.find((entry) => entry.id === selfSessionId); if (!player) return;
   const result = data.room.result?.roundId === data.room.roundId ? data.room.result.rewards?.[selfSessionId] : null;
   lastRoundReward = data.room.phase === 'ended' && result ? result : null;
-  profileStore.syncRound({ roundId: data.room.roundId, kills: result?.kills ?? player.kills, deaths: result?.deaths ?? player.deaths, completed: !!lastRoundReward, won: lastRoundReward?.won === true }).catch((error) => toast(error.message, true));
+  profileStore.syncRound({ roundId: data.room.roundId, kills: result?.kills ?? player.kills, deaths: result?.deaths ?? player.deaths, weaponKills: result?.weaponKills ?? player.weaponKills, completed: !!lastRoundReward, won: lastRoundReward?.won === true }).catch((error) => toast(error.message, true));
   renderRoundReward();
 }
 
@@ -296,17 +304,16 @@ function renderShop() {
 }
 
 function updateSelections() {
-  const world = getMap(loadout.mapId), weapon = getWeapon(loadout.weaponId), skin = getSkin(loadout.skinId);
+  const world = getMap(loadout.mapId), weapon = getWeapon(selectedWeaponId), equipped = getWeapon(loadout.weaponId), skin = getSkin(loadout.skinId);
   const index = MAPS.indexOf(world) + 1;
   $('hero-map-title').textContent = `${world.title}.`; $('hero-map-title').style.fontSize = world.title.length > 8 ? '.78em' : '';
   $('hero-map-name').textContent = world.name; $('hero-map-index').textContent = String(index).padStart(2, '0');
   $('hero-operation').textContent = `OPERATION ${String(index).padStart(3, '0')}`; $('hero-description').textContent = world.description;
   document.querySelector('.hero-art').style.backgroundImage = `linear-gradient(90deg,#0e151bdf 0%,#0e151b68 45%,#0d161b00 100%),linear-gradient(0deg,#0e141aef,#10202a00 45%,#17212e33),url('/assets/${world.image}')`;
   $('map-card-name').textContent = world.name; $('map-card-description').textContent = `${world.width} × ${world.depth} M · ${world.tag}`;
-  $('loadout-weapon').replaceChildren(document.createTextNode(`${weapon.name} `));
-  const type = document.createElement('span'); type.textContent = weapon.type; $('loadout-weapon').append(type);
-  $('loadout-description').textContent = `${weapon.label} · ${weapon.magazine}발 · 사망 후 E로 변경`;
-  document.querySelector('#armory-dialog .dialog-footer span').textContent = '시작 무기는 여기서 선택 · 생존 중 교체 불가 · 사망 후 E로 다음 부활 장비 변경';
+  $('loadout-weapon').replaceChildren(document.createTextNode(`${equipped.name} `));
+  const type = document.createElement('span'); type.textContent = equipped.type; $('loadout-weapon').append(type);
+  $('loadout-description').textContent = `${equipped.label} · ${equipped.magazine}발 · 사망 후 E로 변경`;
   $('loadout-heading').textContent = `YOUR LOADOUT / ${String(WEAPONS.length).padStart(2, '0')} WEAPONS`;
   $('loadout-skin').textContent = `${skin.name} · 장비 변경 ↗`;
   $('armory-button').style.setProperty('--finish', skin.color); $('armory-button').style.setProperty('--finish-accent', skin.accent);
@@ -321,6 +328,23 @@ function updateSelections() {
     const row = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.textContent = value; row.append(dt, dd); $('weapon-stats').append(row);
   }
   preview?.set(weapon.id, skin.id); store('sector07-loadout', JSON.stringify(loadout));
+  renderWeaponOwnership();
+}
+
+function renderWeaponOwnership() {
+  const profile = profileStore.profile, weapon = getWeapon(selectedWeaponId), owned = ownsWeapon(profile, weapon.id), mastery = weaponMastery(profile.weaponKills[weapon.id]);
+  for (const button of $('weapon-choices').children) {
+    const item = getWeapon(button.dataset.weapon), available = ownsWeapon(profile, item.id);
+    button.classList.toggle('locked', !available);
+    button.querySelector('small').textContent = available ? `${item.label} · Lv.${weaponMastery(profile.weaponKills[item.id]).level}` : `잠김 · ${item.price.toLocaleString('ko-KR')} LP`;
+  }
+  $('armory-level').textContent = `Lv.${mastery.level}`;
+  $('armory-mastery-count').textContent = `${mastery.inLevel} / ${mastery.required} KILLS → Lv.${mastery.level + 1}`;
+  $('armory-mastery-fill').style.width = `${mastery.progress * 100}%`;
+  $('armory-owned-state').textContent = !weapon.price ? '기본 지급 · 무제한 이용' : owned ? '영구 해금됨 · 무제한 이용' : '미해금 · 구매하면 이 기기에서 영구 이용';
+  $('armory-unlock').textContent = shopBusy ? '저장 중...' : owned ? loadout.weaponId === weapon.id ? '출격 장비로 선택됨' : '출격 장비로 선택' : `${weapon.price.toLocaleString('ko-KR')} LP로 영구 해금`;
+  $('armory-unlock').disabled = shopBusy || owned && loadout.weaponId === weapon.id || !owned && profile.points < weapon.price;
+  $('armory-balance').textContent = `보유 ${profile.points.toLocaleString('ko-KR')} LP${!owned && profile.points < weapon.price ? ` · ${weapon.price - profile.points} LP 더 필요` : ''}`;
 }
 
 function makeCollections() {
@@ -341,7 +365,7 @@ function makeCollections() {
     const button = document.createElement('button'); button.dataset.weapon = weapon.id; button.setAttribute('aria-label', `${weapon.label} ${weapon.name} 선택`);
     const key = document.createElement('kbd'); key.textContent = weapon.slot;
     const copy = document.createElement('span'), name = document.createElement('b'), label = document.createElement('small'); name.textContent = weapon.name; label.textContent = weapon.label; copy.append(name, label); button.append(key, copy); $('weapon-choices').append(button);
-    button.addEventListener('click', () => { loadout.weaponId = weapon.id; updateSelections(); });
+    button.addEventListener('click', () => { selectedWeaponId = weapon.id; if (ownsWeapon(profileStore.profile, weapon.id)) loadout.weaponId = weapon.id; updateSelections(); });
   }
   for (const skin of SKINS) {
     const button = document.createElement('button'); button.className = 'skin-choice'; button.dataset.skin = skin.id; button.setAttribute('aria-label', `${skin.label} 스킨`);
@@ -387,7 +411,7 @@ function updateSettings() {
 
 $('create-button').addEventListener('click', () => {
   if (busy || !connected) return;
-  setBusy(true); send({ type: 'create', mode, bots: botCount, botDifficulty, ...roundOptions, name: callsign(), ...loadout, outfitId: profileStore.profile.equippedOutfitId });
+  setBusy(true); send({ type: 'create', mode, bots: botCount, botDifficulty, ...roundOptions, name: callsign(), ...profileLoadout() });
 });
 $('join-form').addEventListener('submit', (event) => { event.preventDefault(); requestJoin($('room-code').value.trim().toUpperCase()); });
 $('room-code').addEventListener('input', () => { $('room-code').value = $('room-code').value.toUpperCase().replace(/[^A-Z2-9]/g, ''); });
@@ -421,17 +445,30 @@ $('shop-dialog').addEventListener('close', () => { operatorPreview?.dispose(); o
 $('shop-action').addEventListener('click', async () => {
   const outfit = getOutfit(selectedOutfitId);
   if (!profileStore.profile.ownedOutfits.includes(outfit.id)) {
-    purchaseRequestId = outfit.id; $('purchase-description').textContent = `${outfit.label} 외형을 ${outfit.price} LP에 구매하고 장착합니다.`; openDialog('purchase-dialog'); return;
+    purchaseRequestId = { type: 'outfit', id: outfit.id }; $('purchase-title').textContent = '이 외형을 구매할까요?'; $('purchase-description').textContent = `${outfit.label} 외형을 ${outfit.price} LP에 구매하고 장착합니다.`;
+    $('purchase-note').textContent = '포인트를 차감하고 외형을 장착합니다. 외형은 게임 플레이 능력치에 영향을 주지 않습니다.'; $('confirm-purchase').textContent = '구매 후 장착'; openDialog('purchase-dialog'); return;
   }
   shopBusy = true; renderShop();
   try { await profileStore.equip(outfit.id); toast(`${outfit.label} 외형을 장착했습니다.`); }
   catch (error) { toast(error.message, true); } finally { shopBusy = false; renderShop(); }
 });
+$('armory-unlock').addEventListener('click', () => {
+  const weapon = getWeapon(selectedWeaponId);
+  if (ownsWeapon(profileStore.profile, weapon.id)) { loadout.weaponId = weapon.id; updateSelections(); return; }
+  purchaseRequestId = { type: 'weapon', id: weapon.id }; $('purchase-title').textContent = '이 무기를 영구 해금할까요?';
+  $('purchase-description').textContent = `${weapon.name}을 ${weapon.price.toLocaleString('ko-KR')} LP로 영구 해금하고 출격 장비로 선택합니다.`;
+  $('purchase-note').textContent = '해금은 이 기기 프로필에 저장됩니다. 추가 사용료는 없으며 무기 숙련도는 피해량이나 체력을 높이지 않습니다.';
+  $('confirm-purchase').textContent = '영구 해금'; openDialog('purchase-dialog');
+});
 $('confirm-purchase').addEventListener('click', async () => {
   if (!purchaseRequestId || shopBusy) return;
-  const outfit = getOutfit(purchaseRequestId); shopBusy = true; $('confirm-purchase').disabled = true; renderShop();
-  try { await profileStore.purchase(outfit.id); $('purchase-dialog').close(); toast(`${outfit.label} 외형을 구매하고 장착했습니다.`); }
-  catch (error) { toast(error.message, true); } finally { shopBusy = false; purchaseRequestId = null; $('confirm-purchase').disabled = false; renderShop(); }
+  const request = purchaseRequestId; shopBusy = true; $('confirm-purchase').disabled = true; renderShop(); renderWeaponOwnership();
+  try {
+    if (request.type === 'weapon') {
+      await profileStore.purchaseWeapon(request.id); loadout.weaponId = request.id; selectedWeaponId = request.id; updateSelections(); toast(`${getWeapon(request.id).name} 영구 해금 완료`);
+    } else { await profileStore.purchase(request.id); toast(`${getOutfit(request.id).label} 외형을 구매하고 장착했습니다.`); }
+    $('purchase-dialog').close();
+  } catch (error) { toast(error.message, true); } finally { shopBusy = false; purchaseRequestId = null; $('confirm-purchase').disabled = false; renderShop(); renderWeaponOwnership(); }
 });
 $('nav-play').addEventListener('click', () => {
   setMode('lan'); $('create-button').focus({ preventScroll: true });
@@ -468,7 +505,7 @@ if (SOLO) {
   card.querySelector('h3').textContent = '혼자서도, 어디서나.'; card.querySelector('p').textContent = '게임과 봇은 이 브라우저 안에서 실행됩니다.';
   const badge = document.createElement('span'); badge.className = 'solo-network-badge'; badge.textContent = 'LOCAL SIMULATION · WEB WORKER'; card.querySelector('.info-copy').append(badge);
   const steps = $('help-dialog').querySelectorAll('.help-steps p span');
-  for (const [i, text] of [`전장과 장비를 고르세요. ${MAPS.length}개 전장과 ${WEAPONS.length}종 무기를 자유롭게 사용할 수 있습니다.`, '연습전 시작을 누르세요. 전적은 자동 저장되며 포인트는 라운드 완료 후 지급됩니다.', `20킬 또는 5분. 포인트로 구매하는 캐릭터 외형은 능력치에 영향을 주지 않습니다.`].entries()) steps[i].textContent = text;
+  for (const [i, text] of [`전장과 장비를 고르세요. ${MAPS.length}개 전장 · ${WEAPONS.length}종 중 1–4번은 무료, 나머지는 LP로 영구 해금합니다.`, '연습전 시작을 누르세요. 전적·무기 숙련도는 자동 저장되며 포인트는 라운드 완료 후 지급됩니다.', `목표 킬·시간을 설정하세요. 외형과 무기 숙련도는 능력치를 높이지 않습니다.`].entries()) steps[i].textContent = text;
   $('help-dialog').querySelector('.rooms-footnote').textContent = '이 배포는 1인 플레이 전용입니다. LAN 멀티플레이는 프로젝트를 로컬에서 npm start로 실행하면 사용할 수 있습니다.';
 }
 updateSettings(); updateBots(); updateConnection(false); updateRooms([]); connect();

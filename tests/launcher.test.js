@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 import { POINT_RULES } from '../shared/progression.js';
 import { OUTFITS } from '../shared/outfits.js';
+import { WEAPONS, FREE_WEAPON_IDS } from '../shared/catalog.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let go = process.env.GO_BINARY || path.join(root, '.toolchain/go/bin', process.platform === 'win32' ? 'go.exe' : 'go');
@@ -19,7 +20,7 @@ test('portable launcher serves embedded files on loopback without Node or extern
   const profileData = await mkdtemp(path.join(stage, 'profile-data-'));
   await writeFile(path.join(stage, 'web/index.html'), '<!doctype html><title>LINKSHOT launcher test</title>Embedded solo build');
   await writeFile(path.join(stage, 'web/shared/test.js'), 'export const embedded = true;');
-  await writeFile(path.join(stage, 'web/economy.json'), JSON.stringify({ version: 1, points: POINT_RULES, outfits: OUTFITS.map(({ id, price }) => ({ id, price })) }));
+  await writeFile(path.join(stage, 'web/economy.json'), JSON.stringify({ version: 1, points: POINT_RULES, outfits: OUTFITS.map(({ id, price }) => ({ id, price })), weapons: WEAPONS.map(({ id, price }) => ({ id, price })), freeWeapons: FREE_WEAPON_IDS }));
   await cp(path.join(root, 'scripts/windows-launcher.go'), path.join(stage, 'main.go'));
   const binary = path.join(stage, process.platform === 'win32' ? 'launcher-test.exe' : 'launcher-test');
   execFileSync(go, ['build', '-trimpath', '-o', binary, 'main.go'], { cwd: stage, env: { ...process.env, CGO_ENABLED: '0' }, timeout: 70_000 });
@@ -50,12 +51,20 @@ test('portable launcher serves embedded files on loopback without Node or extern
   assert.equal(update.data.profile.points, 250); assert.equal(update.data.award.points, 250);
   update = await operate({ type: 'round', roundId: 'native-round-0001', kills: 5, deaths: 2, completed: true, won: true });
   assert.equal(update.data.profile.points, 250); assert.equal(update.data.award, null);
+  update = await operate({ type: 'round', roundId: 'native-round-0001', kills: 5, deaths: 2, weaponKills: { rifle: 3, pistol: 2 }, completed: true, won: true });
+  assert.deepEqual(update.data.profile.weaponKills, { rifle: 3, pistol: 2 }); assert.equal(update.data.profile.kills, 5); assert.equal(update.data.profile.points, 250); assert.equal(update.data.award, null);
   update = await operate({ type: 'purchase', outfitId: 'runner' }); assert.equal(update.data.profile.points, 0); assert.equal(update.data.profile.equippedOutfitId, 'runner');
   update = await operate({ type: 'purchase', outfitId: 'runner' }); assert.equal(update.data.cost, 0); assert.equal(update.data.profile.points, 0);
   update = await operate({ type: 'purchase', outfitId: 'orbital' }); assert.equal(update.status, 409); assert.equal(update.data.profile.points, 0);
   update = await operate({ type: 'round', roundId: 'native-round-0002', kills: 1, deaths: 1, completed: true }); assert.equal(update.data.profile.points, 70);
   const disk = JSON.parse(await readFile(path.join(profileData, 'profile.json'), 'utf8'));
   assert.equal(disk.id, first.profile.id); assert.equal(disk.kills, 6); assert.equal(disk.deaths, 3); assert.equal(disk.points, 70); assert.equal(disk.roundsPlayed, 2); assert.equal(disk.equippedOutfitId, 'runner');
+  update = await operate({ type: 'round', roundId: 'native-round-0003', kills: 35, weaponKills: { rifle: 34, glock18c: 1 }, completed: true });
+  assert.equal(update.data.profile.points, 820); assert.equal(update.data.profile.weaponKills.rifle, 37);
+  update = await operate({ type: 'purchaseWeapon', weaponId: 'glock18c' }); assert.equal(update.status, 200); assert.equal(update.data.cost, 800); assert.equal(update.data.profile.points, 20); assert.ok(update.data.profile.ownedWeapons.includes('glock18c'));
+  update = await operate({ type: 'purchaseWeapon', weaponId: 'glock18c' }); assert.equal(update.data.cost, 0); assert.equal(update.data.profile.points, 20);
+  update = await operate({ type: 'purchaseWeapon', weaponId: 'm82' }); assert.equal(update.status, 409);
+  const saved = JSON.parse(await readFile(path.join(profileData, 'profile.json'), 'utf8')); assert.ok(saved.ownedWeapons.includes('glock18c')); assert.equal(saved.weaponKills.rifle, 37); assert.equal(saved.equippedOutfitId, 'runner');
   assert.equal((await fetch(`${url}/api/profile`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://unrelated.invalid' }, body: '{}' })).status, 403);
   assert.equal((await operate({ type: 'round', points: 999999 })).status, 400);
 });

@@ -2,7 +2,7 @@ import { cp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MAPS } from '../shared/world.js';
-import { SKINS, WEAPONS } from '../shared/catalog.js';
+import { SKINS, WEAPONS, FREE_WEAPON_IDS } from '../shared/catalog.js';
 import { OUTFITS } from '../shared/outfits.js';
 import { POINT_RULES } from '../shared/progression.js';
 import { publicationRisk } from './security-audit.mjs';
@@ -32,5 +32,5 @@ await mkdir(path.join(output, 'vendor'), { recursive: true });
 for (const file of ['three.module.js', 'three.core.js']) await cp(path.join(root, 'node_modules/three/build', file), path.join(output, 'vendor', file));
 for (const file of ['loaders/GLTFLoader.js', 'utils/BufferGeometryUtils.js', 'utils/SkeletonUtils.js']) { await mkdir(path.dirname(path.join(output, 'vendor/addons', file)), { recursive: true }); await cp(path.join(root, 'node_modules/three/examples/jsm', file), path.join(output, 'vendor/addons', file)); }
 await writeFile(path.join(output, 'runtime-config.js'), "// Static hosting: no API, WebSocket server, or paid service required.\nexport const APP_MODE = 'solo';\nexport const PROFILE_STORAGE = 'browser';\n");
-await writeFile(path.join(output, 'economy.json'), JSON.stringify({ version: 1, points: POINT_RULES, outfits: OUTFITS.map(({ id, price }) => ({ id, price })) }));
+await writeFile(path.join(output, 'economy.json'), JSON.stringify({ version: 1, points: POINT_RULES, outfits: OUTFITS.map(({ id, price }) => ({ id, price })), weapons: WEAPONS.map(({ id, price }) => ({ id, price })), freeWeapons: FREE_WEAPON_IDS }));
 console.log('Vercel용 1인 플레이 빌드 완료: dist/ (게임 서버 불필요)');

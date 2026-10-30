@@ -1,4 +1,5 @@
 import { DEFAULT_OUTFIT, getOutfit, isOutfitId } from './outfits.js';
+import { WEAPONS, FREE_WEAPON_IDS, normalizeOwnedWeapons, ownsWeapon, isWeaponId, getWeapon } from './catalog.js';
 
 export const POINT_RULES = Object.freeze({ completion: 50, perKill: 20, victory: 100 });
 export const PROFILE_VERSION = 1;
@@ -7,9 +8,19 @@ const count = (value) => Number.isSafeInteger(value) ? Math.max(0, Math.min(MAX_
 const validId = (value) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{7,99}$/.test(value) && !['constructor', 'prototype', '__proto__'].includes(value);
 const callsign = (value) => typeof value === 'string' ? value.replace(/[\p{C}<>]/gu, '').trim().slice(0, 16) || 'OPERATOR' : 'OPERATOR';
 
+export function normalizeWeaponKills(value) {
+  return Object.fromEntries(WEAPONS.filter(({ id }) => count(value?.[id]) > 0).map(({ id }) => [id, count(value[id])]));
+}
+
+export function weaponMastery(value = 0) {
+  const kills = count(value); let level = 0, start = 0, required = 50;
+  while (kills - start >= required) { start += required; level++; required *= 2; }
+  return { kills, level, inLevel: kills - start, required, nextAt: start + required, progress: (kills - start) / required };
+}
+
 export function createProfile(id, now = Date.now(), name = 'OPERATOR') {
   if (!validId(id)) throw new Error('프로필 ID가 올바르지 않습니다.');
-  return { version: PROFILE_VERSION, id, callsign: callsign(name), kills: 0, deaths: 0, points: 0, totalEarned: 0, roundsPlayed: 0, wins: 0, ownedOutfits: [DEFAULT_OUTFIT], equippedOutfitId: DEFAULT_OUTFIT, roundLedger: {}, createdAt: now, updatedAt: now };
+  return { version: PROFILE_VERSION, id, callsign: callsign(name), kills: 0, deaths: 0, points: 0, totalEarned: 0, roundsPlayed: 0, wins: 0, ownedOutfits: [DEFAULT_OUTFIT], equippedOutfitId: DEFAULT_OUTFIT, ownedWeapons: [...FREE_WEAPON_IDS], weaponKills: {}, roundLedger: {}, createdAt: now, updatedAt: now };
 }
 
 export function normalizeProfile(raw, fallbackId, now = Date.now()) {
@@ -18,11 +29,13 @@ export function normalizeProfile(raw, fallbackId, now = Date.now()) {
   for (const key of ['kills', 'deaths', 'points', 'totalEarned', 'roundsPlayed', 'wins']) result[key] = count(value[key]);
   result.ownedOutfits = [...new Set([DEFAULT_OUTFIT, ...(Array.isArray(value.ownedOutfits) ? value.ownedOutfits.filter(isOutfitId) : [])])];
   result.equippedOutfitId = result.ownedOutfits.includes(value.equippedOutfitId) ? value.equippedOutfitId : DEFAULT_OUTFIT;
+  result.ownedWeapons = normalizeOwnedWeapons(value.ownedWeapons);
+  result.weaponKills = normalizeWeaponKills(value.weaponKills);
   result.createdAt = Number.isFinite(value.createdAt) && value.createdAt > 0 ? value.createdAt : now;
   result.updatedAt = Number.isFinite(value.updatedAt) && value.updatedAt > 0 ? value.updatedAt : now;
   if (value.roundLedger && typeof value.roundLedger === 'object') {
     for (const [id, entry] of Object.entries(value.roundLedger).slice(-256)) {
-      if (validId(id) && entry && typeof entry === 'object') result.roundLedger[id] = { kills: count(entry.kills), deaths: count(entry.deaths), awarded: entry.awarded === true, updatedAt: Number.isFinite(entry.updatedAt) ? entry.updatedAt : 0 };
+      if (validId(id) && entry && typeof entry === 'object') result.roundLedger[id] = { kills: count(entry.kills), deaths: count(entry.deaths), weaponKills: normalizeWeaponKills(entry.weaponKills), awarded: entry.awarded === true, updatedAt: Number.isFinite(entry.updatedAt) ? entry.updatedAt : 0 };
     }
   }
   return result;
@@ -39,15 +52,22 @@ export function roundReward(kills, won = false) {
   return { completion: POINT_RULES.completion, killBonus, winBonus, points: POINT_RULES.completion + killBonus + winBonus, won: won === true };
 }
 
-export function recordRound(profile, { roundId, kills, deaths, completed = false, won = false }, now = Date.now()) {
+export function recordRound(profile, { roundId, kills, deaths, weaponKills, completed = false, won = false }, now = Date.now()) {
   if (!validId(roundId)) return { profile, changed: false, award: null };
   const prior = Object.hasOwn(profile.roundLedger, roundId) ? profile.roundLedger[roundId] : { kills: 0, deaths: 0, awarded: false };
   const nextKills = Math.max(prior.kills, count(kills)), nextDeaths = Math.max(prior.deaths, count(deaths));
+  const priorWeapons = normalizeWeaponKills(prior.weaponKills), nextWeapons = { ...priorWeapons }, incoming = normalizeWeaponKills(weaponKills);
+  let remaining = Math.max(0, nextKills - Object.values(priorWeapons).reduce((sum, value) => sum + value, 0)), weaponDelta = 0;
+  for (const { id } of WEAPONS) {
+    const delta = Math.min(remaining, Math.max(0, (incoming[id] || 0) - (priorWeapons[id] || 0)));
+    if (delta) { nextWeapons[id] = (priorWeapons[id] || 0) + delta; remaining -= delta; weaponDelta += delta; }
+  }
   const shouldAward = completed === true && !prior.awarded;
-  if (nextKills === prior.kills && nextDeaths === prior.deaths && !shouldAward) return { profile, changed: false, award: null };
+  if (nextKills === prior.kills && nextDeaths === prior.deaths && !weaponDelta && !shouldAward) return { profile, changed: false, award: null };
   const next = normalizeProfile(profile, profile.id, now);
   next.kills = count(next.kills + nextKills - prior.kills); next.deaths = count(next.deaths + nextDeaths - prior.deaths);
-  next.roundLedger[roundId] = { kills: nextKills, deaths: nextDeaths, awarded: prior.awarded || shouldAward, updatedAt: now };
+  for (const [id, value] of Object.entries(nextWeapons)) next.weaponKills[id] = count((next.weaponKills[id] || 0) + value - (priorWeapons[id] || 0));
+  next.roundLedger[roundId] = { kills: nextKills, deaths: nextDeaths, weaponKills: nextWeapons, awarded: prior.awarded || shouldAward, updatedAt: now };
   let award = null;
   if (shouldAward) {
     award = roundReward(nextKills, won);
@@ -74,9 +94,20 @@ export function equipOutfit(profile, outfitId, now = Date.now()) {
   const next = normalizeProfile(profile, profile.id, now); next.equippedOutfitId = outfitId; next.updatedAt = now; return next;
 }
 
+export function purchaseWeapon(profile, weaponId, now = Date.now()) {
+  if (!isWeaponId(weaponId)) throw new Error('존재하지 않는 무기입니다.');
+  if (ownsWeapon(profile, weaponId)) return { profile, cost: 0, alreadyOwned: true };
+  const weapon = getWeapon(weaponId);
+  if (profile.points < weapon.price) throw new Error(`포인트가 부족합니다. ${weapon.price - profile.points} LP가 더 필요합니다.`);
+  const next = normalizeProfile(profile, profile.id, now);
+  next.points -= weapon.price; next.ownedWeapons.push(weaponId); next.updatedAt = now;
+  return { profile: next, cost: weapon.price, alreadyOwned: false };
+}
+
 export function applyProfileOperation(profile, operation, now = Date.now()) {
   if (operation.type === 'round') return recordRound(profile, operation, now);
   if (operation.type === 'purchase') { const result = purchaseOutfit(profile, operation.outfitId, now); return { ...result, changed: result.profile !== profile, award: null }; }
+  if (operation.type === 'purchaseWeapon') { const result = purchaseWeapon(profile, operation.weaponId, now); return { ...result, changed: result.profile !== profile, award: null }; }
   if (operation.type === 'equip') { const next = equipOutfit(profile, operation.outfitId, now); return { profile: next, changed: next !== profile, award: null }; }
   if (operation.type === 'name') {
     const name = callsign(operation.callsign); if (name === profile.callsign) return { profile, changed: false, award: null };

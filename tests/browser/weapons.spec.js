@@ -2,11 +2,11 @@ import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { WEAPONS } from '../../shared/catalog.js';
 
-test('all twelve real-world profiles can be selected and render distinct gun assemblies', async ({ page }) => {
+test('all thirteen real-world profiles can be previewed and render distinct gun assemblies', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 1000 });
   const errors = []; page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/'); await expect(page.getByText('LAN SERVER ONLINE')).toBeVisible();
-  await page.getByRole('button', { name: '무기 및 스킨 선택', exact: true }).click(); await expect(page.locator('#weapon-choices button')).toHaveCount(19);
+  await page.getByRole('button', { name: '무기 및 스킨 선택', exact: true }).click(); await expect(page.locator('#weapon-choices button')).toHaveCount(20);
   for (const weapon of WEAPONS.slice(7)) { await page.locator(`#weapon-choices [data-weapon=${weapon.id}]`).click(); await expect(page.locator('#armory-weapon-name')).toHaveText(weapon.name); }
   await page.getByRole('button', { name: '장비 저장', exact: true }).click();
   await page.evaluate(async () => {

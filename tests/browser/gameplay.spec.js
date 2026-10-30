@@ -66,7 +66,7 @@ test('each gun repeats one identical recorded sound with fixed pitch and bounded
     for (let i = 0; i < 60; i++) audio.shot(0.2, (i % 3 - 1) * 0.5, 'rifle', 12);
     const sources = [...audio.voices], voices = sources.length, identical = sources.every((source) => source.buffer === sources[0].buffer && source.playbackRate.value === 1); audio.setEnvironment(true); await audio.context.close(); return { counts, voices, identical };
   });
-  expect(result.counts).toHaveLength(19); for (const count of result.counts) { expect(count.count).toBe(1); expect(count.duration).toBeGreaterThan(0.3); }
+  expect(result.counts).toHaveLength(20); for (const count of result.counts) { expect(count.count).toBe(1); expect(count.duration).toBeGreaterThan(0.3); }
   expect(result.identical).toBe(true);
   expect(result.voices).toBeGreaterThan(0); expect(result.voices).toBeLessThanOrEqual(40);
 });
@@ -164,7 +164,7 @@ test('FAMAS fires a three-round burst on one press and does not repeat while hel
     const start = Date.now(); await expect.poll(async () => { await expect(page.locator('#hud-ammo')).toHaveText('22'); return Date.now() - start; }, { intervals: [100, 150], timeout: 3000 }).toBeGreaterThan(900);
     expect(await page.evaluate(() => window.__rules.sounds.filter((id) => id === 'famas').length)).toBe(3);
     await page.mouse.up(); await page.mouse.down(); await page.mouse.up(); await expect(page.locator('#hud-ammo')).toHaveText('19');
-    expect(await page.locator('#respawn-weapon-choices button').count()).toBe(19);
+    expect(await page.locator('#respawn-weapon-choices button').count()).toBe(20);
     await expect.poll(() => page.evaluate(() => window.__rules.sounds.filter((id) => id === 'famas').length)).toBe(6);
   } finally { await dispose(page); }
 });
@@ -196,5 +196,90 @@ test('mouse aiming during recoil is preserved when the recoil recovers', async (
     await expect.poll(() => page.evaluate(() => Math.abs(window.__rules.game.pitch - 0.04)), { timeout: 3000, intervals: [50, 100] }).toBeLessThan(0.00001);
     expect(await page.evaluate(() => window.__rules.game.yaw)).toBeCloseTo(-0.012, 8);
     await expect.poll(() => page.evaluate(() => Math.abs(window.__rules.player.pitch - 0.04))).toBeLessThan(0.00001);
+  } finally { await dispose(page); }
+});
+
+test('death cancels held fire, burst prediction, ADS and delayed local shot feedback', async ({ page }) => {
+  await fixture(page);
+  try {
+    await page.mouse.down(); await expect.poll(() => page.evaluate(() => window.__rules.sounds.length)).toBeGreaterThan(0);
+    const before = await page.evaluate(() => {
+      const { player, game, room, sounds } = window.__rules;
+      Object.assign(game, { localBurstLeft: 2, localFirePending: true, ads: true });
+      Object.assign(player, { hp: 0, diedAt: Date.now(), respawnAt: Date.now() + 3000, lastDeath: { attackerName: 'OPERATOR', weaponId: 'ak47', weaponLevel: 3, headshot: true } });
+      game.applySnapshot(room.snapshot());
+      game.playLocalShot({ id: 'ak47', type: 'ASSAULT', recoil: 2.2 }, performance.now());
+      return { sounds: sounds.length, ammo: player.ammo };
+    });
+    await page.mouse.up(); await page.mouse.down(); await page.mouse.up();
+    await expect(page.locator('#death-attacker')).toHaveText('OPERATOR'); await expect(page.locator('#death-weapon')).toHaveText('AK-47'); await expect(page.locator('#death-weapon-level')).toHaveText('Lv.3');
+    const after = await page.evaluate(() => { const { game, sounds, player } = window.__rules; return { sounds: sounds.length, ammo: player.ammo, held: game.fireHeld, burst: game.localBurstLeft, pending: game.localFirePending, fire: game.input().fire, muzzle: game.muzzleUntil, ads: game.ads }; });
+    expect(after).toEqual({ ...before, held: false, burst: 0, pending: false, fire: false, muzzle: 0, ads: false });
+  } finally { await dispose(page); }
+});
+
+test('delayed and duplicate shot acknowledgements do not play AK/M4 audio twice', async ({ page }) => {
+  await fixture(page);
+  try {
+    const counts = await page.evaluate(async () => {
+      const { game, timer, sounds } = window.__rules; clearInterval(timer);
+      const { getWeapon } = await import('/shared/catalog.js'), results = [];
+      for (const id of ['ak47', 'm4a1']) {
+        game.fireSeq++; game.localShotIndex = 0; const before = sounds.length;
+        game.playLocalShot(getWeapon(id), performance.now() - 2000);
+        const event = { type: 'shot', id: 'viewer', weaponId: id, shotId: `${id}-delayed-1`, fireSeq: game.fireSeq, shotIndex: 1, origin: { x: 24, y: 1.62, z: 10 }, rays: [{ end: { x: 24, y: 1.62, z: 0 }, hit: null }] };
+        game.handleEvent(event); game.handleEvent(event); results.push(sounds.length - before);
+      }
+      return results;
+    });
+    expect(counts).toEqual([1, 1]);
+  } finally { await dispose(page); }
+});
+
+test('kill chains flash below the timer with per-kill weapon mastery and a level-up gauge', async ({ page }) => {
+  await fixture(page);
+  try {
+    for (const [chain, label] of [[1, 'KILL'], [2, 'DOUBLE KILL'], [3, 'TRIPLE KILL'], [4, 'QUADRA KILL']]) {
+      await page.evaluate((chain) => window.__rules.game.handleEvent({ type: 'kill', killId: `hud-kill-${chain}`, killerId: 'viewer', victimId: 'other', killer: 'VIEWER', victim: 'OPERATOR', weaponId: 'rifle', weaponKills: 49 + chain, weaponLevel: 1, killChain: chain, headshot: chain === 1 }), chain);
+      await expect(page.locator('#kill-chain-label')).toHaveText(label); await expect(page.locator('#kill-chain-count')).toHaveText(`×${chain}`);
+      await expect(page.locator('#mastery-level')).toContainText('Lv.1'); await expect(page.locator('#mastery-count')).toHaveText(`${chain - 1} / 100 KILLS → Lv.2`);
+    }
+    const placement = await page.evaluate(() => ({ clock: document.querySelector('.match-clock').getBoundingClientRect().bottom, banner: document.getElementById('kill-announcement').getBoundingClientRect().top, width: parseFloat(document.getElementById('mastery-fill').style.width) }));
+    expect(placement.banner).toBeGreaterThan(placement.clock); expect(placement.width).toBe(3);
+    await page.screenshot({ path: 'artifacts/kill-chain-mastery.png' });
+  } finally { await dispose(page); }
+});
+
+test('local camera and remote operator crouch animate over about 100ms rather than snapping', async ({ page }) => {
+  await fixture(page);
+  try {
+    const result = await page.evaluate(() => {
+      const { game, timer } = window.__rules; clearInterval(timer); cancelAnimationFrame(game.frameId);
+      game.keys.add('KeyC'); game.predicted.crouchAmount = 0; game.predicted.crouching = false;
+      const remote = game.remote.get('other'); remote.target.crouching = true; remote.target.crouchAmount = 1;
+      const start = performance.now(); game.previousFrame = start; const samples = [];
+      for (let i = 1; i <= 6; i++) { game.animate(start + i * 1000 / 60); cancelAnimationFrame(game.frameId); samples.push({ crouch: game.predicted.crouchAmount, eye: game.camera.position.y - game.predicted.y, remote: remote.crouchAmount }); }
+      return samples;
+    });
+    expect(result[0].crouch).toBeGreaterThan(0); expect(result[0].crouch).toBeLessThan(0.3); expect(result[0].eye).toBeGreaterThan(0.92); expect(result[0].remote).toBeLessThan(0.3);
+    expect(result.at(-1).crouch).toBeCloseTo(1); expect(result.at(-1).eye).toBeCloseTo(0.92); expect(result.at(-1).remote).toBeCloseTo(1);
+  } finally { await dispose(page); }
+});
+
+test('a server-first burst shot aligns later predictions and an old-life ACK cannot fire after respawn', async ({ page }) => {
+  await fixture(page);
+  try {
+    const result = await page.evaluate(async () => {
+      const { game, player, room, timer, sounds } = window.__rules; clearInterval(timer); cancelAnimationFrame(game.frameId);
+      const { getWeapon } = await import('/shared/catalog.js'), weapon = getWeapon('famas');
+      Object.assign(player, { weaponId: 'famas', nextWeaponId: 'famas', ammo: 25 }); game.applySnapshot(room.snapshot());
+      game.fireSeq++; game.localShotIndex = 0; game.fireHeld = true; game.localBurstLeft = 0;
+      const event = { type: 'shot', id: 'viewer', weaponId: 'famas', spawnCount: player.spawnCount, shotId: 'server-first-1', fireSeq: game.fireSeq, shotIndex: 1, origin: { x: 24, y: 1.62, z: 10 }, rays: [{ end: { x: 24, y: 1.62, z: 0 }, hit: null }] };
+      game.handleEvent(event); const remaining = game.localBurstLeft, firstIndex = game.localShotIndex;
+      for (const shotIndex of [2, 3]) { game.playLocalShot(weapon, performance.now()); game.localBurstLeft--; game.handleEvent({ ...event, shotId: `server-first-${shotIndex}`, shotIndex }); }
+      game.handleEvent({ ...event, shotId: 'old-life-late', fireSeq: game.fireSeq - 1, spawnCount: player.spawnCount - 1 });
+      return { remaining, firstIndex, sounds: sounds.filter((id) => id === 'famas').length };
+    });
+    expect(result).toEqual({ remaining: 2, firstIndex: 1, sounds: 3 });
   } finally { await dispose(page); }
 });

@@ -25,8 +25,8 @@
 - Original archive: https://opengameart.org/sites/default/files/sounds.zip
 - License: CC0 1.0 Universal — https://creativecommons.org/publicdomain/zero/1.0/
 - Original recordings: CZ-52 pistol, SKS rifle, Mosin Nagant rifle, shotgun.
-- Changes: one fixed muzzle-blast sample per weapon, spectral noise reduction, filtering, mono resampling, peak normalization and fades. No random sample or pitch variations are used during gameplay.
-- The 19 gameplay sound profiles are artistic edits of the four listed source recordings; they are not claimed to be original recordings of each named real-world weapon.
+- Changes: one audited isolated muzzle blast per weapon, spectral noise reduction, filtering, fixed mono resampling, exponential suppression of late echoes/mechanical tails, peak normalization and fades. No random sample or pitch variations are used during gameplay.
+- The 20 gameplay sound profiles are artistic edits of the four listed source recordings; they are not claimed to be original recordings of each named real-world weapon.
 - Prepared file list and hashes: `sounds/manifest.json`.
 - Reproduction tools: `scripts/prepare-character.py`, `scripts/prepare-audio.py` in the source repository. Downloaded archives and working files are not distributed.
 

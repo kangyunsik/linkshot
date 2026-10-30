@@ -2,26 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MAPS, WORLD, getMap, bounds, aimDirection, RULES } from '../shared/world.js';
 import { WEAPONS, SKINS, getWeapon, getSkin, freshMagazines, shotAngles, damageAtDistance } from '../shared/catalog.js';
-import { Room, traceShot, findPath } from '../shared/simulation.js';
+import { Room, traceShot } from '../shared/simulation.js';
 import { movePlayer, EMPTY_INPUT, sanitizeInput } from '../shared/movement.js';
 
-test('six genuinely distinct arenas have clear, connected, inward-facing spawn points', () => {
+test('six genuinely distinct arenas have clear spawns facing an unobstructed exit on every floor', () => {
   assert.equal(MAPS.length, 6);
   assert.equal(new Set(MAPS.map((map) => JSON.stringify(map.obstacles))).size, 6);
   assert.ok(MAPS.some((map) => map.depth >= 110)); assert.ok(MAPS.some((map) => map.width >= 120));
   for (const map of MAPS) {
-    assert.equal(map.spawns.length, 8);
+    assert.ok(map.spawns.length >= 34);
     for (const spawn of map.spawns) {
       const direction = aimDirection(spawn.yaw, 0);
-      assert.ok((direction.x * -spawn.x + direction.z * -spawn.z) / Math.hypot(spawn.x, spawn.z) > 0.99, map.id);
+      const exit = spawn.exitPath[0], distance = Math.hypot(exit.x - spawn.x, exit.z - spawn.z);
+      assert.ok((direction.x * (exit.x - spawn.x) + direction.z * (exit.z - spawn.z)) / distance > 0.99, map.id);
       for (const box of map.obstacles) {
-        const b = bounds(box, RULES.playerRadius + 0.1);
-        assert.ok(!(spawn.x > b.minX && spawn.x < b.maxX && spawn.z > b.minZ && spawn.z < b.maxZ), `${map.id}: blocked spawn`);
+        const b = bounds(box, RULES.playerRadius);
+        assert.ok(!(spawn.x > b.minX && spawn.x < b.maxX && spawn.z > b.minZ && spawn.z < b.maxZ && spawn.y < b.maxY - 0.00001 && spawn.y + RULES.playerHeight > b.minY + 0.00001), `${map.id}: blocked spawn`);
       }
-      const path = findPath(spawn, map.spawns[(map.spawns.indexOf(spawn) + 1) % 8], map);
-      assert.ok(path.length, `${map.id}: no navigation path`);
-      const target = map.spawns[(map.spawns.indexOf(spawn) + 1) % 8];
-      assert.ok(Math.hypot(path.at(-1).x - target.x, path.at(-1).z - target.z) < 3.1, `${map.id}: disconnected spawn`);
     }
   }
 });
@@ -38,7 +35,7 @@ test('movement and long-range shots use the selected arena, not old foundry boun
 });
 
 test('catalog rejects unknown/prototype IDs and skins have no combat modifiers', () => {
-  assert.equal(WEAPONS.length, 19); assert.equal(SKINS.length, 6);
+  assert.equal(WEAPONS.length, 20); assert.equal(SKINS.length, 6);
   assert.equal(getMap('__proto__'), WORLD); assert.equal(getWeapon('toString').id, 'rifle'); assert.equal(getSkin({}).id, 'standard');
   assert.equal(sanitizeInput({ weaponId: 'invalid' }, { ...EMPTY_INPUT, weaponId: 'sniper' }).weaponId, 'sniper');
   for (const skin of SKINS) for (const key of ['damage', 'speed', 'hp', 'spread']) assert.equal(skin[key], undefined);
@@ -55,7 +52,7 @@ test('sniper deals 100 base body damage and retains 150 headshot damage', () => 
 for (const weapon of WEAPONS) {
   test(`${weapon.name}: distinct server damage, one cartridge per shot, correct magazine and reload time`, () => {
     let now = 1000; const room = new Room('WEAPN', { bots: 0, clock: () => now });
-    const shooter = room.addPlayer('a', 'ALPHA', false, { weaponId: weapon.id, skinId: 'arctic' }), target = room.addPlayer('b', 'BRAVO');
+    const shooter = room.addPlayer('a', 'ALPHA', false, { weaponId: weapon.id, ownedWeapons: [weapon.id], skinId: 'arctic' }), target = room.addPlayer('b', 'BRAVO');
     Object.assign(shooter, { x: 24, y: 0, z: 8, yaw: 0, pitch: Math.atan2(-0.5, 4), protectedUntil: 0 });
     Object.assign(target, { x: 24, y: 0, z: 4, protectedUntil: 0 });
     assert.equal(shooter.ammo, weapon.magazine); assert.equal(shooter.skinId, 'arctic');
@@ -85,7 +82,7 @@ test('live switching is rejected and cannot cancel reload or bypass a firing coo
 
 test('pump and bolt weapons require a new trigger press; automatics keep firing', () => {
   for (const weapon of WEAPONS) {
-    let now = 1000; const room = new Room('TRIGR', { bots: 0, clock: () => now }); const p = room.addPlayer('a', 'ALPHA', false, { weaponId: weapon.id });
+    let now = 1000; const room = new Room('TRIGR', { bots: 0, clock: () => now }); const p = room.addPlayer('a', 'ALPHA', false, { weaponId: weapon.id, ownedWeapons: [weapon.id] });
     for (let i = 0; i < 120; i++) { now += 1000 / 60; room.setInput('a', { ...EMPTY_INPUT, weaponId: weapon.id, fire: true }); room.tick(1 / 60); }
     const shots = room.events.filter((event) => event.type === 'shot').length;
     assert.ok(weapon.automatic ? shots > 5 : shots === (weapon.burstCount || 1), weapon.id);

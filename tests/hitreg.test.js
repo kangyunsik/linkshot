@@ -7,7 +7,7 @@ import { normalizeRoundOptions, aimDirection } from '../shared/world.js';
 
 function setup(weaponId = 'sniper', isBot = false) {
   let now = 1000; const room = new Room('HITRG', { bots: 0, clock: () => now, random: () => 0 });
-  const shooter = room.addPlayer('a', 'ALPHA', isBot, { weaponId }), target = room.addPlayer('b', 'BRAVO');
+  const shooter = room.addPlayer('a', 'ALPHA', isBot, { weaponId, ownedWeapons: [weaponId] }), target = room.addPlayer('b', 'BRAVO');
   room.world = { ...room.world, width: 240, depth: 240, obstacles: [] };
   Object.assign(shooter, { x: 0, y: 0, z: 10, yaw: 0, pitch: 0, protectedUntil: 0 });
   Object.assign(target, { x: 0, y: 0, z: -40, protectedUntil: 0 });
@@ -62,7 +62,7 @@ test('seven bots receive seven distinct guns and use the same body damage as pla
   const roster = new Room('GUNS7', { bots: 7 }); assert.equal(new Set([...roster.players.values()].map((p) => p.weaponId)).size, 7);
   const observed = new Set([...roster.players.values()].map((p) => p.weaponId));
   for (let life = 0; life < 3; life++) for (const bot of roster.players.values()) { roster.spawn(bot); observed.add(bot.weaponId); }
-  assert.equal(observed.size, 19, 'respawning bots also rotate through the new real-world gun profiles');
+  assert.equal(observed.size, 20, 'respawning bots also rotate through the new real-world gun profiles');
   for (const weapon of WEAPONS) {
     const damages = [];
     for (const isBot of [false, true]) {

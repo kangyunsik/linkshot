@@ -23,6 +23,7 @@ test('HTTP serves the client and whitelisted modules without exposing project fi
   const base = `http://127.0.0.1:${info.port}`;
   assert.match(await (await fetch(base)).text(), /LINKSHOT/);
   const shared = await fetch(`${base}/shared/world.js`); assert.equal(shared.status, 200); assert.match(shared.headers.get('content-type'), /javascript/);
+  const spawns = await fetch(`${base}/shared/spawns.js`); assert.equal(spawns.status, 200); assert.match(spawns.headers.get('content-type'), /javascript/); assert.match(await spawns.text(), /export function addSpawnZones/);
   assert.equal((await fetch(`${base}/vendor/three.core.js`)).status, 200);
   assert.equal((await fetch(`${base}/package.json`)).status, 404);
   assert.equal((await fetch(`${base}/server/index.js`)).status, 404);
@@ -77,7 +78,7 @@ test('selected map, skin and starting weapon are shared with other LAN clients',
   t.after(() => { a.socket.terminate(); b.socket.terminate(); });
   let response = message(a.socket, 'joined'); a.send({ type: 'create', name: 'ALPHA', bots: 0, mapId: 'longrail', weaponId: 'sniper', skinId: 'arctic', fragLimit: 7, roundSeconds: 120 });
   const first = await response; assert.equal(first.room.mapId, 'longrail'); assert.equal(first.players[0].ammo, 5);
-  response = message(b.socket, 'joined'); b.send({ type: 'join', code: first.room.code, name: 'BRAVO', weaponId: 'smg', skinId: 'circuit', fragLimit: 1, roundSeconds: 60 });
+  response = message(b.socket, 'joined'); b.send({ type: 'join', code: first.room.code, name: 'BRAVO', weaponId: 'smg', ownedWeapons: ['smg'], skinId: 'circuit', fragLimit: 1, roundSeconds: 60 });
   const joined = await response; assert.equal(joined.room.mapId, 'longrail');
   assert.equal(joined.room.fragLimit, 7); assert.equal(joined.room.roundSeconds, 120);
   assert.equal(joined.players.find((p) => p.id === first.id).skinId, 'arctic'); assert.equal(joined.players.find((p) => p.id === joined.id).weaponId, 'smg');

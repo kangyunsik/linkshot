@@ -11,9 +11,9 @@ const input = (extra = {}) => ({ ...EMPTY_INPUT, ...extra });
 test('crouch lowers the eye/hitbox, slows movement, blocks sprint and releases normally', () => {
   const p = player();
   for (let i = 0; i < 60; i++) movePlayer(p, input({ forward: 1, crouch: true }), 1 / 60);
-  assert.equal(p.crouching, true); assert.ok(Math.abs(p.z - (18 - RULES.crouchSpeed)) < 0.001);
+  assert.equal(p.crouching, true); assert.ok(18 - p.z >= RULES.crouchSpeed && 18 - p.z < RULES.crouchSpeed + (RULES.walkSpeed - RULES.crouchSpeed) * RULES.crouchSeconds);
   assert.equal(playerPose(p).height, RULES.crouchHeight); assert.equal(playerPose(p).eyeHeight, RULES.crouchEyeHeight);
-  movePlayer(p, input(), 1 / 60); assert.equal(p.crouching, false); assert.equal(playerPose(p).eyeHeight, RULES.eyeHeight);
+  for (let i = 0; i < 6; i++) movePlayer(p, input(), 1 / 60); assert.equal(p.crouching, false); assert.equal(playerPose(p).eyeHeight, RULES.eyeHeight);
   const sanitized = sanitizeInput({ crouch: 'true', crouching: true, height: 0.01 });
   assert.equal(sanitized.crouch, false); assert.equal(sanitized.crouching, undefined); assert.equal(sanitized.height, undefined);
 });
@@ -95,7 +95,7 @@ test('incoming shot bearings follow camera rotation and reject unknown/coinciden
 test('damage events retain the shot origin rather than tracking the attacker afterward', () => {
   const room = new Room('HIT22', { bots: 0, clock: () => 1000 });
   const shooter = room.addPlayer('a', 'ALPHA'), target = room.addPlayer('b', 'BRAVO');
-  Object.assign(shooter, player({ id: 'a', x: 24, z: 8, crouching: true }));
+  Object.assign(shooter, player({ id: 'a', x: 24, z: 8, crouching: true, crouchAmount: 1 }));
   Object.assign(target, player({ id: 'b', x: 24, z: 4 }));
   room.shoot(shooter, 1000, true);
   const hit = room.events.find((event) => event.type === 'damage'); assert.ok(hit);

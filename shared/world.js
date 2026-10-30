@@ -1,5 +1,6 @@
 import { expandBuildings } from './buildings.js';
-export const NETWORK_PROTOCOL = 3;
+import { addSpawnZones } from './spawns.js';
+export const NETWORK_PROTOCOL = 6;
 
 export const RULES = Object.freeze({
   tickRate: 60, snapshotRate: 20, maxPlayers: 8, roundSeconds: 300,
@@ -11,6 +12,7 @@ export const RULES = Object.freeze({
   jumpSpeed: 9.2, gravity: 20,
   switchSeconds: 0.32,
   loadoutSelectSeconds: 15,
+  crouchSeconds: 0.1,
 });
 
 export function normalizeRoundOptions(options = {}) {
@@ -20,7 +22,12 @@ export function normalizeRoundOptions(options = {}) {
 
 const STANDING_POSE = Object.freeze({ height: RULES.playerHeight, eyeHeight: RULES.eyeHeight, headHeight: 1.58, headRadius: 0.25, bodyTop: 1.52, aimHeight: 1.05 });
 const CROUCHING_POSE = Object.freeze({ height: RULES.crouchHeight, eyeHeight: RULES.crouchEyeHeight, headHeight: 0.88, headRadius: 0.22, bodyTop: 0.90, aimHeight: 0.55 });
-export const playerPose = (player) => player?.crouching === true ? CROUCHING_POSE : STANDING_POSE;
+export function playerPose(player) {
+  const amount = typeof player?.crouchAmount === 'number' ? Math.max(0, Math.min(1, player.crouchAmount)) : player?.crouching === true ? 1 : 0;
+  if (!amount) return STANDING_POSE;
+  if (amount === 1) return CROUCHING_POSE;
+  return Object.fromEntries(Object.keys(STANDING_POSE).map((key) => [key, STANDING_POSE[key] + (CROUCHING_POSE[key] - STANDING_POSE[key]) * amount]));
+}
 
 // Horizontal bearing of an incoming shot relative to the viewer: front=0, right=+PI/2.
 export function damageBearing(viewer, source, yaw = viewer?.yaw ?? 0) {
@@ -173,8 +180,8 @@ function addTacticalFeatures(base) {
   return Object.freeze({ ...base, obstacles, platforms, extraCover });
 }
 
-export const WORLD = expandBuildings(addTacticalFeatures(FOUNDRY));
-export const MAPS = Object.freeze([WORLD, ...[longrail, drydock, blocknine, whiteout, redline].map((map) => expandBuildings(addTacticalFeatures(map)))]);
+export const WORLD = addSpawnZones(expandBuildings(addTacticalFeatures(FOUNDRY)), RULES);
+export const MAPS = Object.freeze([WORLD, ...[longrail, drydock, blocknine, whiteout, redline].map((map) => addSpawnZones(expandBuildings(addTacticalFeatures(map)), RULES))]);
 export const getMap = (id) => MAPS.find((map) => map.id === id) || WORLD;
 
 export function bounds(box, padding = 0) {
@@ -218,9 +225,11 @@ export function aimDirection(yaw, pitch) {
   return { x: -Math.sin(yaw) * Math.cos(pitch), y: Math.sin(pitch), z: -Math.cos(yaw) * Math.cos(pitch) };
 }
 
+const rayColliders = new WeakMap();
 export function wallDistance(origin, direction, maxDistance = 200, world = WORLD) {
   let nearest = maxDistance;
-  for (const box of world.obstacles) {
+  if (Object.isFrozen(world) && !rayColliders.has(world)) rayColliders.set(world, world.obstacles.map((box) => bounds(box)));
+  for (const box of rayColliders.get(world) || world.obstacles) {
     const hit = rayBox(origin, direction, box, nearest);
     if (hit !== null) nearest = hit;
   }

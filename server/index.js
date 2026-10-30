@@ -32,7 +32,7 @@ export function createGameServer({ port = Number(process.env.PORT) || 3000, host
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       response.end(request.method === 'HEAD' ? undefined : JSON.stringify(info())); return;
     }
-    const allowedShared = new Set(['/shared/world.js', '/shared/buildings.js', '/shared/movement.js', '/shared/catalog.js', '/shared/simulation.js', '/shared/progression.js', '/shared/outfits.js']);
+    const allowedShared = new Set(['/shared/world.js', '/shared/buildings.js', '/shared/spawns.js', '/shared/movement.js', '/shared/catalog.js', '/shared/simulation.js', '/shared/progression.js', '/shared/outfits.js']);
     const vendor = { '/vendor/three.module.js': 'three.module.js', '/vendor/three.core.js': 'three.core.js' };
     const addon = { '/vendor/addons/loaders/GLTFLoader.js': 'loaders/GLTFLoader.js', '/vendor/addons/utils/BufferGeometryUtils.js': 'utils/BufferGeometryUtils.js', '/vendor/addons/utils/SkeletonUtils.js': 'utils/SkeletonUtils.js' };
     let file;

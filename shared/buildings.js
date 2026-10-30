@@ -16,7 +16,7 @@ export function expandBuildings(world) {
     if (choices[0]) sources.push({ id: `operations-tower-${addition}`, ...choices[0], w: 6, d: 7, h: 6 });
   }
   for (const source of sources) {
-    const building = { id: source.id, x: source.x, z: source.z, w: Math.max(6, source.w), d: Math.max(6.6, source.d), storeys: source.w >= 10 && source.d >= 9 ? 3 : 2, windows: [], solidPanels: 0, route: [] };
+    const building = { id: source.id, x: source.x, z: source.z, w: Math.max(6, source.w), d: Math.max(6.6, source.d), storeys: source.id === 'operations-tower-0' || source.w >= 10 && source.d >= 9 ? 3 : 2, windows: [], solidPanels: 0, route: [] };
     const { w, d } = building, levelHeight = 3, thickness = 0.24;
     building.height = building.storeys * levelHeight;
     const left = -w / 2 + 0.95, right = left + 1.45, startZ = d / 2 - 1.25, run = 3.7, landingZ = startZ - run - 0.45;

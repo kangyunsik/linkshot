@@ -76,7 +76,8 @@ export class GameAudio {
 
   setEnvironment(indoors) { if (this.roomGain) this.roomGain.gain.setTargetAtTime(indoors ? 0.17 : 0.055, this.context.currentTime, 0.12); }
 
-  shot(volume = 1, pan = 0, weaponId = 'rifle', distance = 0) {
+  shot(volume = 1, pan = 0, weaponId = 'rifle', distance = 0, allowed = null) {
+    if (allowed && !allowed()) return;
     if (!this.context || this.context.state !== 'running') return;
     const available = (this.samples.get(weaponId) || []).filter(Boolean);
     if (available.length) {
@@ -91,7 +92,7 @@ export class GameAudio {
     // Never substitute a mechanical/beep-like fallback for a gunshot. A very
     // early first shot may wait briefly for the same canonical recording.
     const queuedAt = performance.now();
-    this.ready?.then(() => { if (performance.now() - queuedAt < 350 && this.samples.get(weaponId)?.some(Boolean)) this.shot(volume, pan, weaponId, distance); });
+    this.ready?.then(() => { if ((!allowed || allowed()) && performance.now() - queuedAt < 350 && this.samples.get(weaponId)?.some(Boolean)) this.shot(volume, pan, weaponId, distance, allowed); });
   }
   step(sprint = false, crouched = false) { this.burst(0.07, crouched ? 0.025 : sprint ? 0.085 : 0.05, 450); }
   reload() { this.tone(1100, 0.07, 0.08, 'triangle', 240); this.burst(0.1, 0.07, 1900); }

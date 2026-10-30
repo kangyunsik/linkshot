@@ -22,17 +22,9 @@ def read(name):
         return samples.reshape(-1, stream.getnchannels()).mean(axis=1), stream.getframerate()
 
 
-def events(samples, rate):
-    block = max(1, int(rate * 0.008))
-    envelope = np.array([np.sqrt(np.mean(samples[i:i + block] ** 2)) for i in range(0, len(samples), block)])
-    threshold = max(np.quantile(envelope, 0.4) * 5, envelope.max() * 0.24)
-    starts = []
-    for i in range(len(envelope)):
-        if envelope[i] > threshold and (i == 0 or envelope[i - 1] <= threshold):
-            index = i * block
-            if not starts or index - starts[-1] > rate * 0.38:
-                starts.append(index)
-    return starts or [int(np.argmax(np.abs(samples)))]
+# Audited isolated first blasts. Choosing the globally strongest region can
+# select a later rapid burst, and the shotgun's first click is not its blast.
+ISOLATED_BLASTS = {'sks.wav': 0.405, 'cz.wav': 0.275, 'mosin.wav': 0.470, 'shotty.wav': 0.245}
 
 
 def clean(samples, rate):
@@ -65,22 +57,27 @@ profiles = {
     'awp': ('mosin.wav', 1.10, 0.88), 'm82': ('mosin.wav', 1.24, 0.76),
     'spas12': ('shotty.wav', 0.90, 0.84), 'deagle': ('cz.wav', 0.72, 0.73),
     'm249': ('sks.wav', 0.77, 1.0), 'm14': ('mosin.wav', 0.80, 1.15),
+    'glock18c': ('cz.wav', 0.34, 1.24),
 }
 prepared = {}
 for name in {item[0] for item in profiles.values()}:
     samples, rate = read(name)
-    prepared[name] = (clean(samples, rate), rate, events(samples, rate))
+    prepared[name] = (clean(samples, rate), rate)
 
 files = []
 for weapon, (name, duration, pitch) in profiles.items():
-    samples, rate, starts = prepared[name]
+    samples, rate = prepared[name]
     for variant in range(1):
-        # Select the strongest sustained muzzle blast, not a nearby bolt click.
-        attack = max(starts, key=lambda index: float(np.mean(samples[index:index + int(rate * 0.05)] ** 2)))
+        attack = int(ISOLATED_BLASTS[name] * rate)
         start = max(0, attack - int(rate * 0.009))
         positions = start + np.arange(int(duration * SAMPLE_RATE)) * rate / SAMPLE_RATE * pitch
         clip = np.interp(positions, np.arange(len(samples)), samples, left=0, right=0)
         clip -= clip.mean()
+        # Retain one sharp report, not late echoes, bolt/pump clicks or another
+        # recorded shot. Pitch is baked in once; playback is always rate 1.
+        source_time = (positions - attack) / rate
+        clip *= np.exp(-np.maximum(0, source_time - 0.045) / 0.03)
+        clip[source_time >= 0.32] = 0
         fade = min(int(SAMPLE_RATE * 0.09), len(clip)); clip[-fade:] *= np.linspace(1, 0, fade) ** 2
         clip[:90] *= np.linspace(0, 1, min(90, len(clip)))
         clip *= 0.9 / max(0.01, np.max(np.abs(clip)))
@@ -88,6 +85,6 @@ for weapon, (name, duration, pitch) in profiles.items():
         with wave.open(str(OUTPUT / file), 'wb') as stream:
             stream.setnchannels(1); stream.setsampwidth(2); stream.setframerate(SAMPLE_RATE)
             stream.writeframes((np.clip(clip, -0.95, 0.95) * 32767).astype('<i2').tobytes())
-        files.append({'file': file, 'recording': name, 'variant': variant + 1, 'seconds': duration, 'sha256': hashlib.sha256((OUTPUT / file).read_bytes()).hexdigest()})
+        files.append({'file': file, 'recording': name, 'sourceAttack': ISOLATED_BLASTS[name], 'singleShot': True, 'variant': variant + 1, 'seconds': duration, 'sha256': hashlib.sha256((OUTPUT / file).read_bytes()).hexdigest()})
         print(file, 'prepared from', name)
-(OUTPUT / 'manifest.json').write_text(json.dumps({'creator': 'Tabasco', 'license': 'CC0-1.0', 'source': 'https://opengameart.org/content/gunshot-sounds', 'archive': 'https://opengameart.org/sites/default/files/sounds.zip', 'processing': 'One fixed muzzle-blast recording per weapon, spectral noise reduction, filtering, resampling, peak normalization and fade. No random variations or paid API.', 'files': files}, indent=2) + '\n')
+(OUTPUT / 'manifest.json').write_text(json.dumps({'creator': 'Tabasco', 'license': 'CC0-1.0', 'source': 'https://opengameart.org/content/gunshot-sounds', 'archive': 'https://opengameart.org/sites/default/files/sounds.zip', 'processing': 'One audited isolated muzzle blast per weapon, 9ms lead-in, spectral noise reduction, filtering, fixed resampling, exponential echo/mechanical-tail suppression, peak normalization and fade. No random variations or paid API.', 'files': files}, indent=2) + '\n')

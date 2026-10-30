@@ -43,7 +43,8 @@ export function canStand(player, world = WORLD) {
 export function movementSpeed(player, input) {
   const weapon = getWeapon(player.weaponId || input.weaponId);
   const sprinting = input.sprint && input.forward > 0 && !input.ads && !player.crouching;
-  const base = player.crouching ? RULES.crouchSpeed : sprinting ? RULES.sprintSpeed : RULES.walkSpeed;
+  const amount = player.crouchAmount ?? (player.crouching ? 1 : 0), standing = sprinting ? RULES.sprintSpeed : RULES.walkSpeed;
+  const base = standing + (RULES.crouchSpeed - standing) * amount;
   return base * (sprinting ? weapon.sprintMultiplier : weapon.walkMultiplier) * (input.ads ? weapon.adsMoveMultiplier : 1);
 }
 
@@ -52,10 +53,14 @@ export function movePlayer(player, input, dt, world = WORLD) {
   player.yaw = input.yaw;
   player.pitch = input.pitch;
   const startX = player.x, startZ = player.z;
-  const forcedCrouch = player.crouching === true && !canStand(player, world);
+  const previousCrouch = player.crouchAmount ?? (player.crouching ? 1 : 0);
+  const forcedCrouch = (player.crouching === true || previousCrouch > 0) && !canStand(player, world);
   const sprintRequested = input.sprint && input.forward > 0 && !input.ads;
   const jumpRequested = input.jump && !player.jumpHeld && player.grounded && !forcedCrouch;
   player.crouching = forcedCrouch || (player.grounded && !sprintRequested && !jumpRequested && input.crouch === true);
+  player.crouchAmount = !forcedCrouch && (jumpRequested || sprintRequested || !player.grounded) ? 0 : clamp(previousCrouch + (player.crouching ? 1 : -1) * dt / RULES.crouchSeconds, 0, 1);
+  if (player.crouchAmount < 0.00001) player.crouchAmount = 0;
+  if (player.crouchAmount > 0.99999) player.crouchAmount = 1;
   player.sprinting = sprintRequested && !player.crouching;
   const height = playerPose(player).height;
   let forward = input.forward, strafe = input.strafe;

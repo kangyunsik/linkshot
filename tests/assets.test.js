@@ -16,6 +16,12 @@ test('recorded firearm samples have verified CC0 provenance, valid PCM and safe 
     let peak = 0, energy = 0;
     for (let offset = 44; offset < data.length; offset += 2) { const value = data.readInt16LE(offset) / 32768; peak = Math.max(peak, Math.abs(value)); energy += value * value; }
     assert.ok(peak > 0.8 && peak < 0.93); assert.ok(energy > 1); assert.equal(createHash('sha256').update(data).digest('hex'), item.sha256);
+    assert.equal(item.singleShot, true); assert.ok(item.sourceAttack > 0);
+    const rms = [];
+    for (let start = 44; start < data.length; start += 882) {
+      let sum = 0, count = 0; for (let i = start; i < Math.min(data.length, start + 882); i += 2) { sum += (data.readInt16LE(i) / 32768) ** 2; count++; } rms.push(Math.sqrt(sum / count));
+    }
+    assert.ok(Math.max(...rms.slice(15)) < Math.max(...rms.slice(0, 8)) * 0.12, `${item.file}: a later blast/mechanical attack is audible`);
   }
 });
 

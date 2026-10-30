@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { createProfile } from '../../shared/progression.js';
+import { createGameServer } from '../../server/index.js';
 
 test.use({ baseURL: 'http://127.0.0.1:4173' });
 test.beforeEach(async ({ context }) => {
@@ -48,4 +49,44 @@ test('leaving before round completion does not grant participation points', asyn
   await page.getByRole('button', { name: '로비로 나가기', exact: true }).click(); await expect(page.locator('#profile-points')).toHaveText('0');
   await page.reload(); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1')).roundsPlayed)).toBe(0);
+});
+
+test('paid weapons preview without equipping, permanently unlock once, and retain personal mastery after refresh', async ({ context, page }) => {
+  const profile = createProfile('unlock-demo-0001', Date.now(), 'UNLOCK TEST'); Object.assign(profile, { points: 2000, kills: 51, weaponKills: { rifle: 50, pistol: 1 }, ownedOutfits: ['field', 'runner'], equippedOutfitId: 'runner' });
+  await context.addInitScript((profile) => { if (!localStorage.getItem('linkshot-profile-v1')) localStorage.setItem('linkshot-profile-v1', JSON.stringify(profile)); }, profile);
+  await page.goto('/'); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
+  await page.getByRole('button', { name: '무기 및 스킨 선택', exact: true }).click();
+  await expect(page.locator('#armory-level')).toHaveText('Lv.1'); await expect(page.locator('#armory-mastery-count')).toHaveText('0 / 100 KILLS → Lv.2');
+  await page.locator('#weapon-choices [data-weapon=smg]').click(); await expect(page.locator('#armory-owned-state')).toContainText('미해금');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('sector07-loadout')).weaponId)).toBe('rifle');
+  await page.locator('#armory-unlock').click(); await expect(page.locator('#purchase-description')).toContainText('600 LP'); await page.getByRole('button', { name: '영구 해금', exact: true }).click();
+  await expect(page.locator('#purchase-dialog')).toBeHidden(); await expect(page.locator('#armory-owned-state')).toContainText('영구 해금됨'); await expect(page.locator('#profile-points')).toHaveText('1,400');
+  await page.getByRole('button', { name: '장비 저장', exact: true }).click(); await page.reload(); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1'))); expect(saved.points).toBe(1400); expect(saved.ownedWeapons.filter((id) => id === 'smg')).toHaveLength(1); expect(saved.weaponKills.rifle).toBe(50); expect(saved.equippedOutfitId).toBe('runner');
+  await page.getByRole('button', { name: '무기 및 스킨 선택', exact: true }).click(); await expect(page.locator('#armory-unlock')).toBeDisabled();
+  await page.locator('#weapon-choices [data-weapon=m82]').click(); await expect(page.locator('#armory-unlock')).toBeDisabled(); await expect(page.locator('#armory-balance')).toContainText('600 LP 더 필요');
+  await page.getByRole('button', { name: '장비 저장', exact: true }).click();
+});
+
+test('an actual LAN kill persists mastery once and shows the killer gun level on the victim death card', async ({ browser }) => {
+  const server = createGameServer({ port: 0, host: '127.0.0.1', loop: false }), info = await server.listen(), url = `http://127.0.0.1:${info.port}`;
+  const attackerContext = await browser.newContext(), victimContext = await browser.newContext();
+  try {
+    const profile = createProfile('lan-mastery-demo-0001', Date.now(), 'MASTER'); profile.kills = 49; profile.weaponKills = { rifle: 49 };
+    await attackerContext.addInitScript((profile) => { localStorage.setItem('linkshot-profile-v1', JSON.stringify(profile)); }, profile);
+    const attacker = await attackerContext.newPage(), victim = await victimContext.newPage();
+    await attacker.goto(url); await expect(attacker.getByText('LAN SERVER ONLINE')).toBeVisible();
+    await attacker.getByRole('button', { name: '봇 한 명 줄이기' }).click(); await attacker.getByRole('button', { name: '봇 한 명 줄이기' }).click();
+    await attacker.getByRole('button', { name: '방 만들고 출격', exact: true }).click(); await expect(attacker.locator('#game-shell')).toBeVisible();
+    const room = [...server.rooms.values()][0], killer = [...room.players.values()][0];
+    await victim.goto(url); await expect(victim.getByText('LAN SERVER ONLINE')).toBeVisible(); await victim.getByLabel('참가할 방 코드').fill(room.code); await victim.getByRole('button', { name: '코드로 방 참가', exact: true }).click(); await expect(victim.locator('#game-shell')).toBeVisible();
+    const target = [...room.players.values()].find((p) => p.id !== killer.id);
+    Object.assign(killer, { x: 24, y: 0, z: 10, yaw: 0, pitch: 0, ammo: 30 }); Object.assign(target, { x: 24, y: 0, z: 0, hp: 1, protectedUntil: 0 });
+    room.shoot(killer, Date.now(), true); server.broadcast();
+    await expect(attacker.locator('#mastery-level')).toHaveText('Lv.1 · LEVEL UP!'); await expect(attacker.locator('#mastery-count')).toHaveText('0 / 100 KILLS → Lv.2');
+    await expect(victim.locator('#death-attacker')).toHaveText('MASTER'); await expect(victim.locator('#death-weapon')).toHaveText('VX–7'); await expect(victim.locator('#death-weapon-level')).toHaveText('Lv.1');
+    room.finish(); server.broadcast(); await expect(attacker.locator('#profile-points')).toHaveText('170'); server.broadcast();
+    const saved = await attacker.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1'))); expect(saved.kills).toBe(50); expect(saved.weaponKills.rifle).toBe(50); expect(saved.points).toBe(170);
+    await attacker.getByRole('button', { name: '로비로 돌아가기', exact: true }).click(); await attacker.getByRole('button', { name: '무기 및 스킨 선택', exact: true }).click(); await expect(attacker.locator('#armory-level')).toHaveText('Lv.1');
+  } finally { await attackerContext.close(); await victimContext.close(); await server.close(); }
 });

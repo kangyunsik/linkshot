@@ -63,7 +63,7 @@ test('outfits are cosmetic only: identical health, posture, speed and weapon sta
     for (const field of ['hp', 'damage', 'armorBonus', 'speed', 'walkMultiplier', 'hitbox']) assert.equal(outfit[field], undefined);
     const room = new Room('LOOK2', { bots: 0 }); const player = room.addPlayer('human', 'HUMAN', false, { outfitId: outfit.id, hp: 999, speed: 999 });
     assert.equal(player.hp, 100); assert.equal(player.outfitId, outfit.id); assert.equal(movementSpeed(player, { ...EMPTY_INPUT, forward: 1 }), speed);
-    assert.deepEqual(playerPose({ ...player, crouching: true }), baselinePose);
+    assert.deepEqual(playerPose({ ...player, crouching: true, crouchAmount: 1 }), baselinePose);
     assert.equal(room.snapshot().players[0].outfitId, outfit.id);
   }
   assert.equal(getOutfit('invalid').id, 'field');

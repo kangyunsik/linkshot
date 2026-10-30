@@ -29,7 +29,7 @@ test('every outfit and weapon finish retains human anatomy, facial features and 
     }
     models.dispose(); return { checks, firstPerson };
   });
-  expect(result.checks).toHaveLength(30); expect(result.firstPerson).toHaveLength(95);
+  expect(result.checks).toHaveLength(30); expect(result.firstPerson).toHaveLength(100);
   for (const check of result.checks) {
     expect(check.rig).toBe('human-v2'); expect(check.skinned).toBe(true); expect(check.bones).toBeGreaterThan(50); expect(check.materials).toBe(3); expect(check.triangles).toBeGreaterThan(10000);
     expect(check.standingTop).toBeGreaterThan(1.77); expect(check.standingTop).toBeLessThanOrEqual(1.85);

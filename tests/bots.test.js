@@ -8,7 +8,7 @@ function seededRandom(seed = 7) {
   return () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
 }
 function place(player, x, z, yaw = 0) {
-  Object.assign(player, { x, y: 0, z, yaw, pitch: 0, vy: 0, grounded: true, protectedUntil: 0 });
+  Object.assign(player, { x, y: 0, z, yaw, pitch: 0, vy: 0, grounded: true, protectedUntil: 0, spawnExitPath: [] });
   return player;
 }
 

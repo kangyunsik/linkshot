@@ -60,7 +60,7 @@ test('hitscan distinguishes heads and bodies, cover blocks shots, and spawn prot
 });
 
 test('server-authoritative fire consumes ammo, scores kills and respawns the victim', () => {
-  let now = 1000; const room = new Room('TEST2', { bots: 0, clock: () => now });
+  let now = 1000; const room = new Room('TEST2', { bots: 0, clock: () => now, random: () => 0 });
   const shooter = room.addPlayer('a', 'ALPHA'), victim = room.addPlayer('b', 'BRAVO');
   Object.assign(shooter, { x: 24, z: 10, y: 0, yaw: 0, pitch: 0, protectedUntil: 0 });
   Object.assign(victim, { x: 24, z: 0, y: 0, protectedUntil: 0 });
@@ -117,11 +117,11 @@ test('bots navigate, fire and score in a free-for-all match with humans and othe
   assert.ok([...room.players.values()].some((p) => p.isBot && Math.hypot(p.x - origins.get(p.id).x, p.z - origins.get(p.id).z) > 8));
 });
 
-test('every spawn faces into the arena rather than the outer wall', () => {
+test('every spawn faces its walkable exit rather than directly into its cover', () => {
   for (const spawn of WORLD.spawns) {
-    const direction = aimDirection(spawn.yaw, 0), distance = Math.hypot(spawn.x, spawn.z);
-    const dot = (direction.x * -spawn.x + direction.z * -spawn.z) / distance;
-    assert.ok(dot > 0.99, `spawn ${spawn.x}, ${spawn.z} faces outwards`);
+    const direction = aimDirection(spawn.yaw, 0), exit = spawn.exitPath[0], distance = Math.hypot(exit.x - spawn.x, exit.z - spawn.z);
+    const dot = (direction.x * (exit.x - spawn.x) + direction.z * (exit.z - spawn.z)) / distance;
+    assert.ok(dot > 0.99, `spawn ${spawn.x}, ${spawn.z} faces away from its exit`);
   }
 });
 

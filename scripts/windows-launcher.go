@@ -102,6 +102,7 @@ func fail(err error) {
 type roundProgress struct {
 	Kills int64 `json:"kills"`
 	Deaths int64 `json:"deaths"`
+	WeaponKills map[string]int64 `json:"weaponKills"`
 	Awarded bool `json:"awarded"`
 	UpdatedAt int64 `json:"updatedAt"`
 }
@@ -117,6 +118,8 @@ type localProfile struct {
 	Wins int64 `json:"wins"`
 	OwnedOutfits []string `json:"ownedOutfits"`
 	EquippedOutfitID string `json:"equippedOutfitId"`
+	OwnedWeapons []string `json:"ownedWeapons"`
+	WeaponKills map[string]int64 `json:"weaponKills"`
 	RoundLedger map[string]roundProgress `json:"roundLedger"`
 	CreatedAt int64 `json:"createdAt"`
 	UpdatedAt int64 `json:"updatedAt"`
@@ -125,6 +128,8 @@ type economyConfig struct {
 	Version int `json:"version"`
 	Points struct { Completion int64 `json:"completion"`; PerKill int64 `json:"perKill"`; Victory int64 `json:"victory"` } `json:"points"`
 	Outfits []struct { ID string `json:"id"`; Price int64 `json:"price"` } `json:"outfits"`
+	Weapons []struct { ID string `json:"id"`; Price int64 `json:"price"` } `json:"weapons"`
+	FreeWeapons []string `json:"freeWeapons"`
 }
 type profileOperation struct {
 	Type string `json:"type"`
@@ -135,6 +140,8 @@ type profileOperation struct {
 	Completed bool `json:"completed"`
 	Won bool `json:"won"`
 	OutfitID string `json:"outfitId"`
+	WeaponID string `json:"weaponId"`
+	WeaponKills map[string]int64 `json:"weaponKills"`
 }
 type profileStore struct {
 	mu sync.Mutex
@@ -142,6 +149,7 @@ type profileStore struct {
 	profile localProfile
 	economy economyConfig
 	prices map[string]int64
+	weaponPrices map[string]int64
 }
 var profileIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{7,99}$`)
 func validLocalID(id string) bool { return profileIDPattern.MatchString(id) && id != "constructor" && id != "prototype" && id != "__proto__" }
@@ -154,6 +162,16 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 func profileCount(value int64) int64 { if value < 0 { return 0 }; if value > 1000000000 { return 1000000000 }; return value }
 func hasOutfit(p localProfile, id string) bool { for _, owned := range p.OwnedOutfits { if owned == id { return true } }; return false }
+func hasWeapon(p localProfile, id string) bool { for _, owned := range p.OwnedWeapons { if owned == id { return true } }; return false }
+func (s *profileStore) weaponCounts(raw map[string]int64) map[string]int64 {
+	result := map[string]int64{}; for _, item := range s.economy.Weapons { if value := profileCount(raw[item.ID]); value > 0 { result[item.ID] = value } }; return result
+}
+func (s *profileStore) migrateWeapons() {
+	owned := s.profile.OwnedWeapons; s.profile.OwnedWeapons = []string{}
+	for _, item := range s.economy.Weapons { found := item.Price == 0; for _, id := range owned { if id == item.ID { found = true } }; if found { s.profile.OwnedWeapons = append(s.profile.OwnedWeapons, item.ID) } }
+	s.profile.WeaponKills = s.weaponCounts(s.profile.WeaponKills)
+	for id, entry := range s.profile.RoundLedger { entry.WeaponKills = s.weaponCounts(entry.WeaponKills); s.profile.RoundLedger[id] = entry }
+}
 func cleanCallsign(value string) string {
 	runes := []rune(strings.TrimSpace(strings.Map(func(r rune) rune { if unicode.IsControl(r) || r == '<' || r == '>' { return -1 }; return r }, value)))
 	if len(runes) > 16 { runes = runes[:16] }; if len(runes) == 0 { return "OPERATOR" }; return string(runes)
@@ -163,17 +181,20 @@ func openProfileStore(content fs.FS) (*profileStore, error) {
 	dir := os.Getenv("LINKSHOT_DATA_DIR")
 	if dir == "" { base, err := os.UserConfigDir(); if err != nil { return nil, err }; dir = filepath.Join(base, "LINKSHOT") }
 	if err := os.MkdirAll(dir, 0700); err != nil { return nil, err }
-	s := &profileStore{file: filepath.Join(dir, "profile.json"), prices: map[string]int64{}}
+	s := &profileStore{file: filepath.Join(dir, "profile.json"), prices: map[string]int64{}, weaponPrices: map[string]int64{}}
 	config, err := fs.ReadFile(content, "economy.json"); if err != nil { return nil, err }
 	if err := json.Unmarshal(config, &s.economy); err != nil || s.economy.Version != 1 { return nil, fmt.Errorf("invalid economy configuration") }
 	for _, outfit := range s.economy.Outfits { if outfit.Price < 0 || outfit.Price > 1000000 { return nil, fmt.Errorf("invalid cosmetic price") }; s.prices[outfit.ID] = outfit.Price }
 	if _, ok := s.prices["field"]; !ok { return nil, fmt.Errorf("missing default cosmetic") }
+	for _, item := range s.economy.Weapons { if item.Price != 0 && (item.Price < 600 || item.Price > 2000) { return nil, fmt.Errorf("invalid weapon price") }; s.weaponPrices[item.ID] = item.Price }
+	if price, ok := s.weaponPrices["rifle"]; !ok || price != 0 { return nil, fmt.Errorf("missing starter weapon") }
 	bytes, err := os.ReadFile(s.file)
 	if err == nil {
 		if len(bytes) > 1024*1024 || json.Unmarshal(bytes, &s.profile) != nil || s.profile.Version != 1 || !validLocalID(s.profile.ID) { return nil, fmt.Errorf("existing profile needs recovery") }
 		if s.profile.RoundLedger == nil { s.profile.RoundLedger = map[string]roundProgress{} }
 		if !hasOutfit(s.profile, "field") { s.profile.OwnedOutfits = append(s.profile.OwnedOutfits, "field") }
 		if !hasOutfit(s.profile, s.profile.EquippedOutfitID) { s.profile.EquippedOutfitID = "field" }
+		s.migrateWeapons()
 		return s, nil
 	}
 	if !os.IsNotExist(err) { return nil, err }
@@ -181,6 +202,7 @@ func openProfileStore(content fs.FS) (*profileStore, error) {
 	encoded := hex.EncodeToString(id[:]); uuid := encoded[:8]+"-"+encoded[8:12]+"-"+encoded[12:16]+"-"+encoded[16:20]+"-"+encoded[20:]
 	now := time.Now().UnixMilli()
 	s.profile = localProfile{Version: 1, ID: uuid, Callsign: "OPERATOR", OwnedOutfits: []string{"field"}, EquippedOutfitID: "field", RoundLedger: map[string]roundProgress{}, CreatedAt: now, UpdatedAt: now}
+	s.migrateWeapons()
 	if err := s.save(s.profile); err != nil { return nil, err }; return s, nil
 }
 func (s *profileStore) save(profile localProfile) error {
@@ -204,6 +226,7 @@ func (s *profileStore) serve(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body); decoder.DisallowUnknownFields(); var operation profileOperation
 	if decoder.Decode(&operation) != nil || decoder.Decode(new(any)) != io.EOF { writeJSON(w, 400, map[string]any{"message": "잘못된 프로필 요청입니다."}); return }
 	next := s.profile; next.OwnedOutfits = append([]string{}, s.profile.OwnedOutfits...); next.RoundLedger = map[string]roundProgress{}
+	next.OwnedWeapons = append([]string{}, s.profile.OwnedWeapons...); next.WeaponKills = s.weaponCounts(s.profile.WeaponKills)
 	for id, entry := range s.profile.RoundLedger { next.RoundLedger[id] = entry }
 	now := time.Now().UnixMilli(); changed := false; var award map[string]any; var cost int64
 	responseError := func(message string) { writeJSON(w, 409, map[string]any{"message": message, "profile": s.profile}) }
@@ -214,8 +237,13 @@ func (s *profileStore) serve(w http.ResponseWriter, r *http.Request) {
 		if !validLocalID(operation.RoundID) { responseError("라운드 ID가 올바르지 않습니다."); return }
 		prior := next.RoundLedger[operation.RoundID]; kills := max(prior.Kills, profileCount(operation.Kills)); deaths := max(prior.Deaths, profileCount(operation.Deaths))
 		pay := operation.Completed && !prior.Awarded; changed = kills != prior.Kills || deaths != prior.Deaths || pay
+		weapons := s.weaponCounts(prior.WeaponKills); remaining := kills; for _, value := range weapons { remaining -= value }; remaining = max(int64(0), remaining)
+		for _, item := range s.economy.Weapons {
+			delta := min(remaining, max(int64(0), profileCount(operation.WeaponKills[item.ID]) - weapons[item.ID]))
+			if delta > 0 { weapons[item.ID] += delta; next.WeaponKills[item.ID] = profileCount(next.WeaponKills[item.ID] + delta); remaining -= delta; changed = true }
+		}
 		next.Kills = profileCount(next.Kills + kills - prior.Kills); next.Deaths = profileCount(next.Deaths + deaths - prior.Deaths)
-		if changed { next.RoundLedger[operation.RoundID] = roundProgress{Kills: kills, Deaths: deaths, Awarded: prior.Awarded || pay, UpdatedAt: now} }
+		if changed { next.RoundLedger[operation.RoundID] = roundProgress{Kills: kills, Deaths: deaths, WeaponKills: weapons, Awarded: prior.Awarded || pay, UpdatedAt: now} }
 		if pay {
 			killBonus := min(kills, 10000) * s.economy.Points.PerKill; winBonus := int64(0); if operation.Won { winBonus = s.economy.Points.Victory; next.Wins = profileCount(next.Wins + 1) }
 			points := s.economy.Points.Completion + killBonus + winBonus; next.Points = profileCount(next.Points + points); next.TotalEarned = profileCount(next.TotalEarned + points); next.RoundsPlayed = profileCount(next.RoundsPlayed + 1)
@@ -229,6 +257,12 @@ func (s *profileStore) serve(w http.ResponseWriter, r *http.Request) {
 			next.Points -= price; cost = price; next.OwnedOutfits = append(next.OwnedOutfits, operation.OutfitID); changed = true
 		}
 		changed = changed || next.EquippedOutfitID != operation.OutfitID; next.EquippedOutfitID = operation.OutfitID
+	case "purchaseWeapon":
+		price, exists := s.weaponPrices[operation.WeaponID]; if !exists { responseError("존재하지 않는 무기입니다."); return }
+		if !hasWeapon(next, operation.WeaponID) {
+			if next.Points < price { responseError("포인트가 부족합니다."); return }
+			next.Points -= price; cost = price; next.OwnedWeapons = append(next.OwnedWeapons, operation.WeaponID); changed = true
+		}
 	default: responseError("지원하지 않는 프로필 작업입니다."); return
 	}
 	if len(next.RoundLedger) > 256 {

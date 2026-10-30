@@ -18,7 +18,7 @@ test('static solo build supports loadout selection, scope, live weapon lock and 
   await expect(page.locator('.map-choice')).toHaveCount(6);
   await page.getByRole('button', { name: '레드라인 전장 선택', exact: true }).click(); await expect(page.locator('#hero-map-name')).toHaveText('REDLINE 19');
   await page.getByRole('button', { name: '무기 및 스킨 선택' }).click();
-  await expect(page.locator('#weapon-choices button')).toHaveCount(19); await expect(page.locator('#skin-choices button')).toHaveCount(6);
+  await expect(page.locator('#weapon-choices button')).toHaveCount(20); await expect(page.locator('#skin-choices button')).toHaveCount(6);
   await page.getByRole('button', { name: '저격소총 SR–1 선택' }).click(); await page.getByRole('button', { name: '아크틱 고스트 스킨', exact: true }).click();
   await expect(page.locator('#weapon-stats')).toContainText('100 / HEAD 150');
   await expect(page.locator('#armory-skin-name')).toHaveText('ARCTIC GHOST');

@@ -172,6 +172,12 @@ export class WeaponModels {
       box([0.12, 0.12, 0.40], [0, 0.04, -0.08], steel, group.userData.slide); tube(0.028, 0.21, [0, 0.04, -0.28], steel); muzzleZ = -0.40;
       aimHeight = 0.12; group.userData.reticle.position.y = aimHeight;
       for (const side of [-1, 1]) box([0.012, 0.03, 0.02], [side * 0.029, aimHeight, 0.06], black, group.userData.slide);
+    } else if (weapon.id === 'glock18c') {
+      box([0.077, 0.25, 0.075], [0, -0.27, 0.115], black);
+      box([0.09, 0.025, 0.09], [0, -0.4, 0.115], accent);
+      box([0.095, 0.09, 0.26], [0, 0.035, -0.08], black, group.userData.slide);
+      for (const z of [-0.17, -0.20]) box([0.045, 0.008, 0.018], [0, 0.084, z], steel, group.userData.slide);
+      box([0.012, 0.025, 0.02], [-0.053, 0.04, 0.04], accent, group.userData.slide);
     } else if (weapon.id === 'm249') {
       box([0.31, 0.28, 0.25], [-0.12, -0.18, -0.1], black); box([0.115, 0.13, 0.46], [0, 0, -0.57], plate);
       box([0.026, 0.07, 0.20], [0.105, 0.14, -0.12], steel);

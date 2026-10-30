@@ -39,6 +39,15 @@ test('portable host keeps identity and purchases after browser storage is cleare
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1')).id)).toBe(initial.id);
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1')).equippedOutfitId)).toBe('runner');
     const saved = JSON.parse(await readFile(path.join(dataDir, 'profile.json'), 'utf8')); expect(saved.points).toBe(350); expect(saved.equippedOutfitId).toBe('runner');
+    await page.evaluate(async () => {
+      const response = await fetch('/api/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'round', roundId: 'native-browser-round-0001', kills: 30, weaponKills: { rifle: 30 }, completed: true }) });
+      if (!response.ok) throw new Error('Native mastery write failed');
+    });
+    await page.reload(); await expect(page.locator('#profile-points')).toHaveText('1,000'); await page.getByRole('button', { name: '무기 및 스킨 선택', exact: true }).click();
+    await expect(page.locator('#armory-mastery-count')).toHaveText('30 / 50 KILLS → Lv.1'); await page.locator('#weapon-choices [data-weapon=glock18c]').click(); await page.locator('#armory-unlock').click(); await page.getByRole('button', { name: '영구 해금', exact: true }).click();
+    await expect(page.locator('#purchase-dialog')).toBeHidden(); await expect(page.locator('#profile-points')).toHaveText('200');
+    await page.evaluate(() => localStorage.clear()); await page.reload(); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
+    const restored = await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1'))); expect(restored.points).toBe(200); expect(restored.ownedWeapons).toContain('glock18c'); expect(restored.weaponKills.rifle).toBe(30); expect(restored.equippedOutfitId).toBe('runner');
     expect(errors).toEqual([]);
   } finally {
     await context?.close();
