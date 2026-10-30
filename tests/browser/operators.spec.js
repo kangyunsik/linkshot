@@ -11,29 +11,31 @@ test('every outfit and weapon finish retains human anatomy, facial features and 
     const models = new WeaponModels(), checks = [], firstPerson = [];
     for (const outfit of OUTFITS) for (const skin of SKINS) {
       const operator = createOperator({ outfitId: outfit.id, skinId: skin.id }, models);
-      const head = operator.group.getObjectByName('human-head'), face = head.getObjectByName('face');
-      const humanMeshes = []; operator.group.traverse((child) => { if (child.isMesh && !operator.weapon.getObjectById(child.id)) humanMeshes.push(child); });
+      const head = operator.bones.Head;
+      let body; operator.group.traverse((child) => { if (child.isSkinnedMesh && child.name === 'SuperHero_Male') body = child; });
+      operator.group.traverse((child) => { if (child.isSkinnedMesh) child.computeBoundingBox(); });
       const standing = new THREE.Box3().setFromObject(operator.group);
       poseOperator(operator, 1); operator.group.updateMatrixWorld(true);
-      const crouched = new THREE.Box3().setFromObject(operator.group), facePosition = face.getWorldPosition(new THREE.Vector3());
-      checks.push({ outfit: outfit.id, skin: skin.id, rig: operator.group.userData.rig, eyes: head.children.filter((child) => child.name === 'eye').length, faceColor: face.material.color.getHexString(), boxAnatomy: humanMeshes.some((mesh) => mesh.geometry.type === 'BoxGeometry'), headShape: face.geometry.type, standingTop: standing.max.y, crouchedTop: crouched.max.y, feet: crouched.min.y, crouchedFace: facePosition.y, fingers: operator.group.getObjectByName('right-hand').userData.fingers });
+      operator.group.traverse((child) => { if (child.isSkinnedMesh) child.computeBoundingBox(); });
+      const crouched = new THREE.Box3().setFromObject(operator.group), facePosition = head.getWorldPosition(new THREE.Vector3());
+      checks.push({ outfit: outfit.id, skin: skin.id, rig: operator.group.userData.rig, bones: Object.keys(operator.bones).length, skinned: !!body, materials: body.material.length, triangles: body.geometry.index.count / 3, standingTop: standing.max.y, crouchedTop: crouched.max.y, headTop: facePosition.y + operator.headTop, engineMaterials: operator.group.userData.engineMaterials });
       disposeModel(operator.group);
     }
     for (const outfit of OUTFITS) for (const weapon of WEAPONS) {
       const model = models.create(weapon.id, 'standard', true, outfit.id), arms = model.getObjectByName('first-person-human-arms');
-      firstPerson.push({ outfit: outfit.id, weapon: weapon.id, hands: arms.children.filter((child) => child.userData.fingers === 5).length, rounded: arms.getObjectByName('right-sleeve').geometry.type !== 'BoxGeometry', noDepth: arms.getObjectByName('palm').material.depthTest === false });
+      const bounds = new THREE.Box3().setFromObject(model);
+      firstPerson.push({ outfit: outfit.id, weapon: weapon.id, hands: arms.children.filter((child) => child.userData.fingers === 5).length, rounded: arms.getObjectByName('right-sleeve').geometry.type !== 'BoxGeometry', noDepth: arms.getObjectByName('palm').material.depthTest === false, finite: [...bounds.min.toArray(), ...bounds.max.toArray(), ...model.userData.muzzle.position.toArray()].every(Number.isFinite) });
       disposeModel(model);
     }
     models.dispose(); return { checks, firstPerson };
   });
-  expect(result.checks).toHaveLength(30); expect(result.firstPerson).toHaveLength(35);
+  expect(result.checks).toHaveLength(30); expect(result.firstPerson).toHaveLength(95);
   for (const check of result.checks) {
-    expect(check.rig).toBe('human-v1'); expect(check.eyes).toBe(2); expect(check.faceColor).toBe('bf9278');
-    expect(check.boxAnatomy).toBe(false); expect(check.headShape).toBe('LatheGeometry'); expect(check.fingers).toBe(5);
-    expect(check.standingTop).toBeGreaterThan(1.77); expect(check.standingTop).toBeLessThanOrEqual(1.801);
-    expect(check.crouchedTop).toBeLessThanOrEqual(1.101); expect(check.crouchedFace).toBeCloseTo(0.92, 6); expect(check.feet).toBeGreaterThan(-0.005);
+    expect(check.rig).toBe('human-v2'); expect(check.skinned).toBe(true); expect(check.bones).toBeGreaterThan(50); expect(check.materials).toBe(3); expect(check.triangles).toBeGreaterThan(10000);
+    expect(check.standingTop).toBeGreaterThan(1.77); expect(check.standingTop).toBeLessThanOrEqual(1.85);
+    expect(check.headTop).toBeLessThanOrEqual(1.101); expect(check.engineMaterials).toContain('operator-fabric.png');
   }
-  for (const check of result.firstPerson) { expect(check.hands).toBe(2); expect(check.rounded).toBe(true); expect(check.noDepth).toBe(true); }
+  for (const check of result.firstPerson) { expect(check.hands).toBe(2); expect(check.rounded).toBe(true); expect(check.noDepth).toBe(true); expect(check.finite).toBe(true); }
   expect(errors).toEqual([]);
 });
 

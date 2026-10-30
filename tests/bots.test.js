@@ -111,12 +111,13 @@ test('bots fire short bursts with longer bullet intervals and recovery pauses', 
 test('extra bot spread lowers mid-range accuracy without nerfing player weapons', () => {
   function hitRate(isBot, distance) {
     const room = new Room('ACCRY', { bots: 0, clock: () => 1000, random: seededRandom(123) });
+    room.world = { ...room.world, width: 60, depth: 60, obstacles: [] };
     const shooter = place(room.addPlayer('shooter', 'SHOOTER', isBot), 24, 10);
     const target = place(room.addPlayer('target', 'TARGET'), 24, 10 - distance); target.hp = 1_000_000;
     shooter.pitch = Math.atan2(1.05 - 1.62, distance);
     let hits = 0;
     for (let i = 0; i < 500; i++) {
-      shooter.ammo = 30; room.shoot(shooter, 1000 + i * 1000);
+      shooter.ammo = 30; shooter.shotHeat = 0; room.shoot(shooter, 1000 + i * 1000);
       if (room.events.findLast((event) => event.type === 'shot').hit === target.id) hits++;
     }
     return hits / 500;
@@ -126,7 +127,7 @@ test('extra bot spread lowers mid-range accuracy without nerfing player weapons'
   assert.ok(botAccuracy > 0.1 && botAccuracy < 0.6);
   assert.ok(botAccuracy < playerAccuracy * 0.65);
   assert.ok(closeAccuracy > 0.8 && closeAccuracy > botAccuracy);
-  assert.equal(getWeapon('rifle').spread, 0.004);
+  assert.equal(getWeapon('rifle').spread, 0.008);
 });
 
 test('respawn resets bot reaction/burst state and snapshots do not expose AI internals', () => {

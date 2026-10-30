@@ -3,6 +3,9 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const executeFile = promisify(execFile);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const engine = process.env.ART_ENGINE_DIR || path.join(homedir(), 'engine');
@@ -47,9 +50,14 @@ const assets = [
     negative: 'worst quality, low quality, blurry, text, logo, watermark, signature, multiple people, crowd, cropped feet, close up, nude, naked, bikini, revealing clothes, blood, gore, weapon in hands, firearm, sword, robot, android, mannequin, blocky body, square head, mechanical face, (covered face:1.5), (faceless:1.5), full-face helmet, opaque visor, black face, mask over face, closed helmet, silhouette',
   })),
   { file: 'outfit-panels.png', width: 768, height: 768, seed: 7092800, prompt: 'masterpiece, best quality, no humans, neutral light gray futuristic polymer armor material texture, tiny geometric panel seams, fine matte microtexture, subtle fabric weave, clean abstract technical surface, even soft lighting, flat orthographic material swatch, seamless full frame pattern, no perspective' },
+  { file: 'operator-fabric.png', width: 768, height: 768, seed: 7094100, prompt: 'masterpiece, best quality, no humans, seamless neutral medium gray ripstop military uniform fabric texture, fine woven textile fibers, small subtle square ripstop grid, realistic matte cotton nylon cloth surface, monochrome gray material swatch, full frame flat orthographic view, uniform diffuse studio lighting, no objects, no folds, no symbols' },
+  { file: 'operator-armor.png', width: 768, height: 768, seed: 7094101, prompt: 'masterpiece, best quality, no humans, seamless neutral medium gray ballistic vest cordura fabric texture, fine technical woven textile surface, subtle scuffed polymer microtexture, realistic tactical protective equipment material swatch, monochrome gray, flat orthographic full frame, uniform diffuse studio lighting, no objects, no symbols, no large panels' },
+  { file: 'operator-jacket.png', width: 768, height: 768, crop: [210, 250, 560, 640], seed: 7094102, prompt: 'masterpiece, best quality, no humans, front view tactical combat jacket chest panel fabric texture, neutral light gray military field jacket, cordura fabric, sewn cargo pockets, practical stitching, zipper in center, small webbing straps, natural cloth folds, matte woven textile, realistic game clothing diffuse texture, flat orthographic studio lighting, square full frame material, no head, no hands, no body, no text, no insignia' },
 ];
 const negative = 'worst quality, low quality, lowres, blurry, text, logo, watermark, signature, people, person, character, face, organic, plants, oversaturated';
 const selectedOutfits = process.argv.find((arg) => arg.startsWith('--outfit='))?.slice('--outfit='.length).split(',');
+const selectedAsset = process.argv.find((arg) => arg.startsWith('--asset='))?.slice('--asset='.length);
+if (selectedAsset && !assets.some((asset) => asset.file === selectedAsset)) throw new Error('Unknown asset filename');
 if (selectedOutfits?.some((id) => !assets.some((asset) => asset.file === `outfit-${id}.png` && id !== 'panels'))) throw new Error('알 수 없는 외형입니다. --outfit=field,runner,hazmat,orbital,retrobot 중 선택하세요.');
 
 async function api(route, options = {}) {
@@ -74,6 +82,8 @@ const checkpoint = checkpoints.find((name) => name.includes('animagine-xl-4.0-op
 if (!checkpoint) throw new Error('ComfyUI에 체크포인트가 없습니다.');
 
 for (const asset of assets) {
+  if (selectedAsset && asset.file !== selectedAsset) continue;
+  if (process.argv.includes('--materials') && !asset.file.startsWith('operator-')) continue;
   if (selectedOutfits && !selectedOutfits.some((id) => asset.file === `outfit-${id}.png`)) continue;
   if (process.argv.includes('--outfits') && !/^outfit-(?:field|runner|hazmat|orbital|retrobot)\.png$/.test(asset.file)) continue;
   const target = path.join(root, 'public/assets', asset.file);
@@ -107,7 +117,9 @@ for (const asset of assets) {
   const response = await fetch(`${base}/view?${query}`, { signal: AbortSignal.timeout(60_000) });
   if (!response.ok) throw new Error(`이미지를 가져오지 못했습니다: ${response.status}`);
   const staged = path.join(root, 'artifacts/asset-staging', asset.file);
-  await writeFile(staged, Buffer.from(await response.arrayBuffer())); await rename(staged, target);
+  await writeFile(staged, Buffer.from(await response.arrayBuffer()));
+  if (asset.crop) await executeFile(path.join(engine, '.venv/bin/python'), ['-c', 'from PIL import Image; import json,sys; p=sys.argv[1]; Image.open(p).crop(tuple(json.loads(sys.argv[2]))).resize((768,768),Image.Resampling.LANCZOS).save(p)', staged, JSON.stringify(asset.crop)]);
+  await rename(staged, target);
   console.log(`저장 완료: public/assets/${asset.file}`);
 }
 
@@ -115,6 +127,6 @@ await writeFile(path.join(root, 'public/assets/asset-manifest.json'), JSON.strin
   engine: 'ComfyUI (local, ~/engine)', checkpoint, modelLicense: 'CreativeML Open RAIL++-M',
   modelSource: 'https://huggingface.co/cagliostrolab/animagine-xl-4.0',
   note: 'Locally generated images; no paid API or external image service used. Procedural meshes, UI and sounds are authored in this project.',
-  assets: assets.map(({ file, prompt, seed, width, height }) => ({ file, prompt, seed, width, height })),
+  assets: assets.map(({ file, prompt, seed, width, height, crop }) => ({ file, prompt, seed, width, height, ...(crop ? { crop } : {}) })),
 }, null, 2));
 console.log('모든 로컬 이미지 애셋이 준비되었습니다.');

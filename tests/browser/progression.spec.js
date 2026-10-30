@@ -32,7 +32,7 @@ test('main menu restores cumulative statistics and cosmetic purchases survive re
 });
 
 test('completion reward is paid once, persists after refresh, and a new round can earn separately', async ({ context, page }) => {
-  await context.route('**/shared/world.js', async (route) => { const response = await route.fetch(); await route.fulfill({ response, body: (await response.text()).replace('roundSeconds: 300', 'roundSeconds: 2') }); });
+  await context.route('**/shared/simulation.js', async (route) => { const response = await route.fetch(); await route.fulfill({ response, body: (await response.text()).replaceAll('this.startedAt + this.roundSeconds * 1000', 'this.startedAt + 2000') }); });
   await page.goto('/'); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible(); const identity = await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1')).id);
   await page.getByRole('button', { name: '연습전 시작', exact: true }).click(); await expect(page.locator('#round-overlay')).toBeVisible();
   await expect(page.locator('#round-reward')).toBeVisible(); await expect(page.locator('#round-points')).toHaveText('50'); await expect(page.locator('#profile-points')).toHaveText('50');

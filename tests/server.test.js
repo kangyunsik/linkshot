@@ -75,15 +75,16 @@ test('selected map, skin and starting weapon are shared with other LAN clients',
   const app = createGameServer({ port: 0, host: '127.0.0.1' }); const info = await app.listen(); t.after(() => app.close());
   const base = `http://127.0.0.1:${info.port}`, a = await client(base), b = await client(base);
   t.after(() => { a.socket.terminate(); b.socket.terminate(); });
-  let response = message(a.socket, 'joined'); a.send({ type: 'create', name: 'ALPHA', bots: 0, mapId: 'longrail', weaponId: 'sniper', skinId: 'arctic' });
+  let response = message(a.socket, 'joined'); a.send({ type: 'create', name: 'ALPHA', bots: 0, mapId: 'longrail', weaponId: 'sniper', skinId: 'arctic', fragLimit: 7, roundSeconds: 120 });
   const first = await response; assert.equal(first.room.mapId, 'longrail'); assert.equal(first.players[0].ammo, 5);
-  response = message(b.socket, 'joined'); b.send({ type: 'join', code: first.room.code, name: 'BRAVO', weaponId: 'smg', skinId: 'circuit' });
+  response = message(b.socket, 'joined'); b.send({ type: 'join', code: first.room.code, name: 'BRAVO', weaponId: 'smg', skinId: 'circuit', fragLimit: 1, roundSeconds: 60 });
   const joined = await response; assert.equal(joined.room.mapId, 'longrail');
+  assert.equal(joined.room.fragLimit, 7); assert.equal(joined.room.roundSeconds, 120);
   assert.equal(joined.players.find((p) => p.id === first.id).skinId, 'arctic'); assert.equal(joined.players.find((p) => p.id === joined.id).weaponId, 'smg');
   a.send({ type: 'input', weaponId: 'shotgun', yaw: 0, pitch: 0 });
   let state;
   for (let i = 0; i < 3; i++) { state = await message(b.socket, 'state'); if (state.players.find((p) => p.id === first.id).weaponId === 'shotgun') break; }
-  assert.equal(state.players.find((p) => p.id === first.id).weaponId, 'shotgun');
+  assert.equal(state.players.find((p) => p.id === first.id).weaponId, 'sniper', 'live input cannot swap the selected weapon');
   assert.equal((await (await fetch(`${base}/api/info`)).json()).rooms[0].mapId, 'longrail');
 });
 
@@ -105,4 +106,28 @@ test('real LAN input can jump from ground onto an elevated firing deck and remai
   a.send({ type: 'input', yaw: 0 });
   const settled = (await message(a.socket, 'state')).players.find((p) => p.id === joined.id);
   assert.equal(settled.y, platform.height); assert.equal(settled.grounded, true);
+});
+
+test('eight real LAN connections can join a full bot room; a ninth is rejected', async (t) => {
+  const app = createGameServer({ port: 0, host: '127.0.0.1', loop: false }); const info = await app.listen(); t.after(() => app.close());
+  const base = `http://127.0.0.1:${info.port}`, clients = [];
+  t.after(() => clients.forEach((c) => c.socket.terminate()));
+  const host = await client(base); clients.push(host);
+  let response = message(host.socket, 'joined'); host.send({ type: 'create', bots: 7 }); const joined = await response;
+  assert.equal(joined.players.length, 8);
+  for (let i = 1; i < 8; i++) { const c = await client(base); clients.push(c); response = message(c.socket, 'joined'); c.send({ type: 'join', code: joined.room.code, name: `HUMAN ${i}` }); await response; }
+  const room = app.rooms.get(joined.room.code); assert.equal(room.summary().players, 8); assert.equal(room.summary().bots, 0);
+  const ninth = await client(base); clients.push(ninth); response = message(ninth.socket, 'error'); ninth.send({ type: 'join', code: joined.room.code }); assert.match((await response).message, /가득/);
+});
+
+test('LAN loadout protocol rejects live changes and applies a dead selection on respawn', async (t) => {
+  const app = createGameServer({ port: 0, host: '127.0.0.1', loop: false }); const info = await app.listen(); t.after(() => app.close());
+  const c = await client(`http://127.0.0.1:${info.port}`); t.after(() => c.socket.terminate());
+  let response = message(c.socket, 'joined'); c.send({ type: 'create', bots: 0 }); const joined = await response, room = app.rooms.get(joined.room.code), p = room.players.get(joined.id);
+  const barrier = async () => { const pending = message(c.socket, 'pong'); c.send({ type: 'ping' }); await pending; };
+  c.send({ type: 'loadout', weaponId: 'sniper', open: true }); await barrier(); assert.equal(p.weaponId, 'rifle'); assert.equal(p.nextWeaponId, 'rifle');
+  Object.assign(p, { hp: 0, diedAt: Date.now(), respawnAt: Date.now() + 3000 });
+  c.send({ type: 'loadout', open: true }); await barrier(); assert.equal(p.loadoutSelecting, true);
+  c.send({ type: 'loadout', weaponId: 'sniper', open: false }); await barrier(); assert.equal(p.weaponId, 'rifle'); assert.equal(p.nextWeaponId, 'sniper');
+  p.respawnAt = Date.now() - 1; app.tick(); assert.equal(p.weaponId, 'sniper'); assert.equal(p.hp, 100); assert.equal(p.ammo, 5);
 });

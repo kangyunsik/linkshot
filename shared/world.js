@@ -1,3 +1,6 @@
+import { expandBuildings } from './buildings.js';
+export const NETWORK_PROTOCOL = 3;
+
 export const RULES = Object.freeze({
   tickRate: 60, snapshotRate: 20, maxPlayers: 8, roundSeconds: 300,
   fragLimit: 20, magazine: 30, reloadSeconds: 1.75, fireSeconds: 0.105,
@@ -7,10 +10,16 @@ export const RULES = Object.freeze({
   walkSpeed: 5.7, sprintSpeed: 8.55, stepHeight: 0.48,
   jumpSpeed: 9.2, gravity: 20,
   switchSeconds: 0.32,
+  loadoutSelectSeconds: 15,
 });
 
-const STANDING_POSE = Object.freeze({ height: RULES.playerHeight, eyeHeight: RULES.eyeHeight, headHeight: 1.58, headRadius: 0.25, bodyTop: 1.4, aimHeight: 1.05 });
-const CROUCHING_POSE = Object.freeze({ height: RULES.crouchHeight, eyeHeight: RULES.crouchEyeHeight, headHeight: 0.88, headRadius: 0.22, bodyTop: 0.7, aimHeight: 0.55 });
+export function normalizeRoundOptions(options = {}) {
+  const integer = (value, min, max, fallback) => typeof value === 'number' && Number.isFinite(value) ? Math.max(min, Math.min(max, Math.round(value))) : fallback;
+  return { fragLimit: integer(options.fragLimit, 1, 200, RULES.fragLimit), roundSeconds: integer(options.roundSeconds, 60, 3600, RULES.roundSeconds) };
+}
+
+const STANDING_POSE = Object.freeze({ height: RULES.playerHeight, eyeHeight: RULES.eyeHeight, headHeight: 1.58, headRadius: 0.25, bodyTop: 1.52, aimHeight: 1.05 });
+const CROUCHING_POSE = Object.freeze({ height: RULES.crouchHeight, eyeHeight: RULES.crouchEyeHeight, headHeight: 0.88, headRadius: 0.22, bodyTop: 0.90, aimHeight: 0.55 });
 export const playerPose = (player) => player?.crouching === true ? CROUCHING_POSE : STANDING_POSE;
 
 // Horizontal bearing of an incoming shot relative to the viewer: front=0, right=+PI/2.
@@ -164,8 +173,8 @@ function addTacticalFeatures(base) {
   return Object.freeze({ ...base, obstacles, platforms, extraCover });
 }
 
-export const WORLD = addTacticalFeatures(FOUNDRY);
-export const MAPS = Object.freeze([WORLD, ...[longrail, drydock, blocknine, whiteout, redline].map(addTacticalFeatures)]);
+export const WORLD = expandBuildings(addTacticalFeatures(FOUNDRY));
+export const MAPS = Object.freeze([WORLD, ...[longrail, drydock, blocknine, whiteout, redline].map((map) => expandBuildings(addTacticalFeatures(map)))]);
 export const getMap = (id) => MAPS.find((map) => map.id === id) || WORLD;
 
 export function bounds(box, padding = 0) {

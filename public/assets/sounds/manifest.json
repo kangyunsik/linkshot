@@ -1,0 +1,142 @@
+{
+  "creator": "Tabasco",
+  "license": "CC0-1.0",
+  "source": "https://opengameart.org/content/gunshot-sounds",
+  "archive": "https://opengameart.org/sites/default/files/sounds.zip",
+  "processing": "One fixed muzzle-blast recording per weapon, spectral noise reduction, filtering, resampling, peak normalization and fade. No random variations or paid API.",
+  "files": [
+    {
+      "file": "rifle-1.wav",
+      "recording": "sks.wav",
+      "variant": 1,
+      "seconds": 0.72,
+      "sha256": "12d4a5ea2700afe9229ade37c722d1b25ed95ff49d3b386f28915f36e557ebde"
+    },
+    {
+      "file": "smg-1.wav",
+      "recording": "cz.wav",
+      "variant": 1,
+      "seconds": 0.46,
+      "sha256": "bc9824df2f580253f31aa554b210be3312b1631d94d8d2d3117844461bf2b581"
+    },
+    {
+      "file": "shotgun-1.wav",
+      "recording": "shotty.wav",
+      "variant": 1,
+      "seconds": 0.78,
+      "sha256": "1e23db9e48dd09d334ccdbbe664d3acca350209a62108b12e24c6aecf71c35b9"
+    },
+    {
+      "file": "sniper-1.wav",
+      "recording": "mosin.wav",
+      "variant": 1,
+      "seconds": 1.0,
+      "sha256": "c8725b968a6a23344c6fcac8117020a22bc4c08b8d235862c87b2200d12859d6"
+    },
+    {
+      "file": "pistol-1.wav",
+      "recording": "cz.wav",
+      "variant": 1,
+      "seconds": 0.55,
+      "sha256": "7f7ab7946d38553e5d788ea1c3bf7dbd9ebe44c99b8dd71b3b49ca51afabed25"
+    },
+    {
+      "file": "lmg-1.wav",
+      "recording": "sks.wav",
+      "variant": 1,
+      "seconds": 0.8,
+      "sha256": "7870d64c566ab2c89917738f365fc4e31f9239176679bd5bfedd8c1d68071b0e"
+    },
+    {
+      "file": "dmr-1.wav",
+      "recording": "mosin.wav",
+      "variant": 1,
+      "seconds": 0.86,
+      "sha256": "2d05c91a9d530e3a55729c45be2b5eb23a229c32547f79f77b2442053a203402"
+    },
+    {
+      "file": "ak47-1.wav",
+      "recording": "sks.wav",
+      "variant": 1,
+      "seconds": 0.85,
+      "sha256": "f14505f38e186f8b15db56f8acd41cf5330ef16ea94464cead667cedff0bd97b"
+    },
+    {
+      "file": "m4a1-1.wav",
+      "recording": "sks.wav",
+      "variant": 1,
+      "seconds": 0.64,
+      "sha256": "b21c91d0d25129c834c448a5a3748fce46181f1badd8ab7c7a21629b76821fd0"
+    },
+    {
+      "file": "famas-1.wav",
+      "recording": "sks.wav",
+      "variant": 1,
+      "seconds": 0.52,
+      "sha256": "2d189f6dc61b6aed1bb8ea2c1accdf7b89ceeab51ee72e8d313133efb11cff2e"
+    },
+    {
+      "file": "mp5-1.wav",
+      "recording": "cz.wav",
+      "variant": 1,
+      "seconds": 0.4,
+      "sha256": "b9e1fe99b7f6f849d25564c535e70cadbbcf54716bc593b02f42e9541631e126"
+    },
+    {
+      "file": "p90-1.wav",
+      "recording": "cz.wav",
+      "variant": 1,
+      "seconds": 0.32,
+      "sha256": "19a79e4ceae20e44ca171d24ee44e0dcb124791fea0d1fff942acae01304d98e"
+    },
+    {
+      "file": "ump45-1.wav",
+      "recording": "cz.wav",
+      "variant": 1,
+      "seconds": 0.58,
+      "sha256": "bfa51ffa2f3b9e0ad6f69e809f2e3583d937dca0cb0f5d2ca2fa765cacad373a"
+    },
+    {
+      "file": "awp-1.wav",
+      "recording": "mosin.wav",
+      "variant": 1,
+      "seconds": 1.1,
+      "sha256": "f9b449fadb28dce729b09665aafca64158caa6a4a3df740297c394099ff76632"
+    },
+    {
+      "file": "m82-1.wav",
+      "recording": "mosin.wav",
+      "variant": 1,
+      "seconds": 1.24,
+      "sha256": "9eec4b9cdfa56a6ac6d41f6e7c782b52d043ef5167b4e5107a47f1bf1ff4811d"
+    },
+    {
+      "file": "spas12-1.wav",
+      "recording": "shotty.wav",
+      "variant": 1,
+      "seconds": 0.9,
+      "sha256": "163442b0d744b2d38524f2093595a74fa0c92a9a9a1234c52a84b4b2af29900b"
+    },
+    {
+      "file": "deagle-1.wav",
+      "recording": "cz.wav",
+      "variant": 1,
+      "seconds": 0.72,
+      "sha256": "3e66dc3cb8a40eeb6100a09095a5be381366088fcd6b1972438b0e7821b051b2"
+    },
+    {
+      "file": "m249-1.wav",
+      "recording": "sks.wav",
+      "variant": 1,
+      "seconds": 0.77,
+      "sha256": "fbce3c19fb66c1ad0777df789fbb6878e92229bcc22772fa97791c7a5a6b136f"
+    },
+    {
+      "file": "m14-1.wav",
+      "recording": "mosin.wav",
+      "variant": 1,
+      "seconds": 0.8,
+      "sha256": "bf827f975fa106e4f701fd72a595b67f831b20deadceeb62a720d3fc2fc1db62"
+    }
+  ]
+}

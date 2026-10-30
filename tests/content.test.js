@@ -38,7 +38,7 @@ test('movement and long-range shots use the selected arena, not old foundry boun
 });
 
 test('catalog rejects unknown/prototype IDs and skins have no combat modifiers', () => {
-  assert.equal(WEAPONS.length, 7); assert.equal(SKINS.length, 6);
+  assert.equal(WEAPONS.length, 19); assert.equal(SKINS.length, 6);
   assert.equal(getMap('__proto__'), WORLD); assert.equal(getWeapon('toString').id, 'rifle'); assert.equal(getSkin({}).id, 'standard');
   assert.equal(sanitizeInput({ weaponId: 'invalid' }, { ...EMPTY_INPUT, weaponId: 'sniper' }).weaponId, 'sniper');
   for (const skin of SKINS) for (const key of ['damage', 'speed', 'hp', 'spread']) assert.equal(skin[key], undefined);
@@ -73,16 +73,14 @@ for (const weapon of WEAPONS) {
   });
 }
 
-test('switching preserves separate magazines, cancels reload and cannot bypass sniper cooldown', () => {
+test('live switching is rejected and cannot cancel reload or bypass a firing cooldown', () => {
   let now = 1000; const room = new Room('SWICH', { bots: 0, clock: () => now }); const p = room.addPlayer('a', 'ALPHA');
   p.ammo = 12; room.setInput('a', { ...EMPTY_INPUT, reload: true }); room.tick(1 / 60); assert.ok(p.reloadUntil);
   room.setInput('a', { ...EMPTY_INPUT, weaponId: 'smg' }); room.tick(1 / 60);
-  assert.equal(p.ammo, 36); assert.equal(p.magazines.rifle, 12); assert.equal(p.reloadUntil, 0);
-  room.switchWeapon(p, 'rifle', now); assert.equal(p.ammo, 12);
-  room.switchWeapon(p, 'sniper', now); room.shoot(p, now); const cooldown = p.nextFireAt;
-  room.switchWeapon(p, 'smg', now); assert.equal(p.nextFireAt, cooldown);
-  now += 700; room.setInput('a', { ...EMPTY_INPUT, weaponId: 'smg', fire: true }); room.tick(1 / 60); assert.equal(p.ammo, 36);
-  now += 500; room.setInput('a', { ...EMPTY_INPUT, weaponId: 'smg', fire: true }); room.tick(1 / 60); assert.equal(p.ammo, 35);
+  assert.equal(p.ammo, 12); assert.equal(p.weaponId, 'rifle'); assert.ok(p.reloadUntil);
+  const reloadingUntil = p.reloadUntil; room.switchWeapon(p, 'sniper', now); assert.equal(p.reloadUntil, reloadingUntil);
+  now = reloadingUntil + 1; room.tick(1 / 60); room.shoot(p, now); const cooldown = p.nextFireAt;
+  room.switchWeapon(p, 'smg', now); assert.equal(p.nextFireAt, cooldown); assert.equal(p.weaponId, 'rifle');
 });
 
 test('pump and bolt weapons require a new trigger press; automatics keep firing', () => {
@@ -90,11 +88,11 @@ test('pump and bolt weapons require a new trigger press; automatics keep firing'
     let now = 1000; const room = new Room('TRIGR', { bots: 0, clock: () => now }); const p = room.addPlayer('a', 'ALPHA', false, { weaponId: weapon.id });
     for (let i = 0; i < 120; i++) { now += 1000 / 60; room.setInput('a', { ...EMPTY_INPUT, weaponId: weapon.id, fire: true }); room.tick(1 / 60); }
     const shots = room.events.filter((event) => event.type === 'shot').length;
-    assert.ok(weapon.automatic ? shots > 5 : shots === 1, weapon.id);
+    assert.ok(weapon.automatic ? shots > 5 : shots === (weapon.burstCount || 1), weapon.id);
     if (!weapon.automatic) {
       room.setInput('a', { ...EMPTY_INPUT, weaponId: weapon.id }); room.tick(1 / 60);
       room.setInput('a', { ...EMPTY_INPUT, weaponId: weapon.id, fire: true }); room.tick(1 / 60);
-      assert.equal(room.events.filter((event) => event.type === 'shot').length, 2);
+      assert.equal(room.events.filter((event) => event.type === 'shot').length, (weapon.burstCount || 1) + 1);
     }
   }
 });

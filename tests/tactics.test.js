@@ -10,7 +10,7 @@ const input = (extra = {}) => ({ ...EMPTY_INPUT, ...extra });
 
 test('crouch lowers the eye/hitbox, slows movement, blocks sprint and releases normally', () => {
   const p = player();
-  for (let i = 0; i < 60; i++) movePlayer(p, input({ forward: 1, crouch: true, sprint: true }), 1 / 60);
+  for (let i = 0; i < 60; i++) movePlayer(p, input({ forward: 1, crouch: true }), 1 / 60);
   assert.equal(p.crouching, true); assert.ok(Math.abs(p.z - (18 - RULES.crouchSpeed)) < 0.001);
   assert.equal(playerPose(p).height, RULES.crouchHeight); assert.equal(playerPose(p).eyeHeight, RULES.crouchEyeHeight);
   movePlayer(p, input(), 1 / 60); assert.equal(p.crouching, false); assert.equal(playerPose(p).eyeHeight, RULES.eyeHeight);

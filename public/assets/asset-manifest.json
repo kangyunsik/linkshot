@@ -116,6 +116,33 @@
       "seed": 7092800,
       "width": 768,
       "height": 768
+    },
+    {
+      "file": "operator-fabric.png",
+      "prompt": "masterpiece, best quality, no humans, seamless neutral medium gray ripstop military uniform fabric texture, fine woven textile fibers, small subtle square ripstop grid, realistic matte cotton nylon cloth surface, monochrome gray material swatch, full frame flat orthographic view, uniform diffuse studio lighting, no objects, no folds, no symbols",
+      "seed": 7094100,
+      "width": 768,
+      "height": 768
+    },
+    {
+      "file": "operator-armor.png",
+      "prompt": "masterpiece, best quality, no humans, seamless neutral medium gray ballistic vest cordura fabric texture, fine technical woven textile surface, subtle scuffed polymer microtexture, realistic tactical protective equipment material swatch, monochrome gray, flat orthographic full frame, uniform diffuse studio lighting, no objects, no symbols, no large panels",
+      "seed": 7094101,
+      "width": 768,
+      "height": 768
+    },
+    {
+      "file": "operator-jacket.png",
+      "prompt": "masterpiece, best quality, no humans, front view tactical combat jacket chest panel fabric texture, neutral light gray military field jacket, cordura fabric, sewn cargo pockets, practical stitching, zipper in center, small webbing straps, natural cloth folds, matte woven textile, realistic game clothing diffuse texture, flat orthographic studio lighting, square full frame material, no head, no hands, no body, no text, no insignia",
+      "seed": 7094102,
+      "width": 768,
+      "height": 768,
+      "crop": [
+        210,
+        250,
+        560,
+        640
+      ]
     }
   ]
 }

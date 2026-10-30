@@ -6,13 +6,18 @@ export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 export const angleDelta = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
 const CONTACT_EPSILON = 0.00001;
 const overlaps = (player, b) => player.x > b.minX + CONTACT_EPSILON && player.x < b.maxX - CONTACT_EPSILON && player.z > b.minZ + CONTACT_EPSILON && player.z < b.maxZ - CONTACT_EPSILON;
+const colliderCache = new WeakMap();
+function collidersFor(world) {
+  if (!Object.isFrozen(world)) return world.obstacles.map((box) => bounds(box, RULES.playerRadius));
+  if (!colliderCache.has(world)) colliderCache.set(world, world.obstacles.map((box) => bounds(box, RULES.playerRadius)));
+  return colliderCache.get(world);
+}
 
 // All contacts share the full horizontal footprint; a smaller landing radius lets
 // feet sink into ledges that the side solver then treats as an overlapping wall.
 export function supportHeight(player, world = WORLD, maxDrop = 0.02) {
   let floor = player.y >= -CONTACT_EPSILON && player.y <= maxDrop + CONTACT_EPSILON ? 0 : null;
-  for (const box of world.obstacles) {
-    const b = bounds(box, RULES.playerRadius);
+  for (const b of collidersFor(world)) {
     if (overlaps(player, b) && b.maxY <= player.y + CONTACT_EPSILON && player.y - b.maxY <= maxDrop + CONTACT_EPSILON) floor = Math.max(floor ?? 0, b.maxY);
   }
   return floor;
@@ -30,15 +35,14 @@ export function sanitizeInput(data, previous = EMPTY_INPUT) {
 }
 
 export function canStand(player, world = WORLD) {
-  return !world.obstacles.some((box) => {
-    const b = bounds(box, RULES.playerRadius);
+  return !collidersFor(world).some((b) => {
     return overlaps(player, b) && player.y < b.maxY - CONTACT_EPSILON && player.y + RULES.playerHeight > b.minY + CONTACT_EPSILON;
   });
 }
 
 export function movementSpeed(player, input) {
   const weapon = getWeapon(player.weaponId || input.weaponId);
-  const sprinting = input.sprint && input.forward > 0 && !input.fire && !input.ads && !player.crouching;
+  const sprinting = input.sprint && input.forward > 0 && !input.ads && !player.crouching;
   const base = player.crouching ? RULES.crouchSpeed : sprinting ? RULES.sprintSpeed : RULES.walkSpeed;
   return base * (sprinting ? weapon.sprintMultiplier : weapon.walkMultiplier) * (input.ads ? weapon.adsMoveMultiplier : 1);
 }
@@ -47,7 +51,12 @@ export function movePlayer(player, input, dt, world = WORLD) {
   dt = clamp(dt, 0, 1 / 30);
   player.yaw = input.yaw;
   player.pitch = input.pitch;
-  player.crouching = input.crouch === true || (player.crouching === true && !canStand(player, world));
+  const startX = player.x, startZ = player.z;
+  const forcedCrouch = player.crouching === true && !canStand(player, world);
+  const sprintRequested = input.sprint && input.forward > 0 && !input.ads;
+  const jumpRequested = input.jump && !player.jumpHeld && player.grounded && !forcedCrouch;
+  player.crouching = forcedCrouch || (player.grounded && !sprintRequested && !jumpRequested && input.crouch === true);
+  player.sprinting = sprintRequested && !player.crouching;
   const height = playerPose(player).height;
   let forward = input.forward, strafe = input.strafe;
   const length = Math.hypot(forward, strafe);
@@ -56,7 +65,7 @@ export function movePlayer(player, input, dt, world = WORLD) {
   const vx = (Math.cos(input.yaw) * strafe - Math.sin(input.yaw) * forward) * speed;
   const vz = (-Math.sin(input.yaw) * strafe - Math.cos(input.yaw) * forward) * speed;
   const radius = RULES.playerRadius;
-  const colliders = world.obstacles.map((box) => bounds(box, radius));
+  const colliders = collidersFor(world);
   const intersectsHeight = (b) => player.y < b.maxY - CONTACT_EPSILON && player.y + height > b.minY + CONTACT_EPSILON;
   const tryStep = (b) => {
     const rise = b.maxY - player.y;
@@ -67,7 +76,7 @@ export function movePlayer(player, input, dt, world = WORLD) {
   };
   // Consume the jump edge before auto-step so jumping at a riser cannot also
   // gain a free stair's height during the same frame.
-  if (input.jump && !player.jumpHeld && player.grounded) {
+  if (jumpRequested) {
     player.vy = RULES.jumpSpeed;
     player.grounded = false;
   }
@@ -108,5 +117,6 @@ export function movePlayer(player, input, dt, world = WORLD) {
       if (player.y <= floor) { player.y = floor; player.vy = 0; player.grounded = true; }
     }
   }
+  player.moveSpeed = dt > 0 ? Math.hypot(player.x - startX, player.z - startZ) / dt : 0;
   return player;
 }

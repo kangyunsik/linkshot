@@ -1,7 +1,7 @@
 import { FPSGame } from './game.js';
 import { GameAudio } from './audio.js';
 import { drawTacticalMap } from './map.js';
-import { MAPS, getMap, RULES } from '/shared/world.js';
+import { MAPS, getMap, RULES, normalizeRoundOptions, NETWORK_PROTOCOL } from '/shared/world.js';
 import { WEAPONS, SKINS, getWeapon, getSkin } from '/shared/catalog.js';
 import { ArmoryPreview } from './weapon-model.js';
 import { SoloConnection } from './solo-connection.js';
@@ -10,6 +10,7 @@ import { ProfileStore, PROFILE_KEY } from './profile.js';
 import { profileStats, POINT_RULES } from '/shared/progression.js';
 import { OUTFITS, getOutfit } from '/shared/outfits.js';
 import { OperatorPreview } from './operator-model.js';
+import { BOT_DIFFICULTIES, getBotDifficulty } from '/shared/simulation.js';
 
 const $ = (id) => document.getElementById(id);
 const defaults = { sensitivity: 1, fov: 82, volume: 65, quality: 'normal' };
@@ -35,6 +36,18 @@ selectedOutfitId = profileStore.profile.equippedOutfitId;
 const audio = new GameAudio(settings);
 audio.muted = stored('sector07-muted', 'false') === 'true';
 let socket, game = null, connected = false, mode = 'lan', botCount = 2, rooms = [], lanUrl = location.origin;
+let botDifficulty = getBotDifficulty(stored('linkshot-bot-difficulty', 'beginner')).id;
+let savedRound = {}; try { savedRound = JSON.parse(stored('linkshot-round-options', '{}')) || {}; } catch { /* Defaults. */ }
+let roundOptions = normalizeRoundOptions(savedRound);
+function updateRoundOptions() { $('frag-limit').value = roundOptions.fragLimit; $('round-minutes').value = roundOptions.roundSeconds / 60; }
+for (const id of ['frag-limit', 'round-minutes']) $(id).addEventListener('change', () => {
+  roundOptions = normalizeRoundOptions({ fragLimit: Number($('frag-limit').value), roundSeconds: Math.max(1, Number($('round-minutes').value) || 5) * 60 });
+  store('linkshot-round-options', JSON.stringify(roundOptions)); updateRoundOptions();
+});
+updateRoundOptions();
+for (const level of BOT_DIFFICULTIES) { const option = document.createElement('option'); option.value = level.id; option.textContent = level.label; $('bot-difficulty').append(option); }
+$('bot-difficulty').value = botDifficulty;
+$('bot-difficulty').addEventListener('change', () => { botDifficulty = getBotDifficulty($('bot-difficulty').value).id; store('linkshot-bot-difficulty', botDifficulty); });
 let busy = false, requestTimeout, reconnectTimeout, reconnectDelay = 1000, hasDeployed = false;
 let invitedCode = new URL(location.href).searchParams.get('room')?.toUpperCase();
 if (!/^[A-Z2-9]{5}$/.test(invitedCode || '')) invitedCode = null;
@@ -90,7 +103,7 @@ function updateRooms(list) {
     const row = document.createElement('div'); row.className = 'room-row';
     const details = document.createElement('div'); details.className = 'room-details';
     const code = document.createElement('strong'); code.textContent = room.code;
-    const name = document.createElement('small'); name.textContent = `${getMap(room.mapId).name} · ${room.name} · 봇 ${room.bots}명 · ${room.phase === 'ended' ? '종료' : '교전 중'}`;
+    const name = document.createElement('small'); name.textContent = `${getMap(room.mapId).name} · ${room.name} · 봇 ${room.bots}명 · ${room.fragLimit || RULES.fragLimit}킬/${Math.round((room.roundSeconds || RULES.roundSeconds) / 60)}분 · ${room.phase === 'ended' ? '종료' : '교전 중'}`;
     details.append(code, name);
     const count = document.createElement('span'); count.textContent = `${room.players}/${room.capacity}`;
     const button = document.createElement('button'); button.textContent = '참가'; button.disabled = room.players >= room.capacity;
@@ -161,6 +174,7 @@ function showMenu(visible) {
 }
 
 function enterGame(data) {
+  if (data.room?.protocolVersion !== NETWORK_PROTOCOL) { send({ type: 'leave' }); setBusy(false); toast('게임 서버가 이전 버전입니다. 진행 중인 방을 종료한 뒤 서버를 재시작하고 브라우저를 새로고침해 주세요.', true); return; }
   if (game) game.dispose();
   $('lobby').hidden = true; $('game-shell').hidden = false; hasDeployed = false;
   try {
@@ -205,7 +219,7 @@ function setMode(value) {
 
 function updateBots() {
   $('bot-count').textContent = botCount;
-  $('bots-minus').disabled = botCount <= (mode === 'practice' ? 1 : 0); $('bots-plus').disabled = botCount >= 4;
+  $('bots-minus').disabled = botCount <= (mode === 'practice' ? 1 : 0); $('bots-plus').disabled = botCount >= RULES.maxPlayers - 1;
 }
 
 function openDialog(id) {
@@ -216,7 +230,7 @@ function openDialog(id) {
     const world = getMap(loadout.mapId);
     drawTacticalMap($('briefing-map'), { world, spawns: true, detailed: true });
     $('briefing-map-title').textContent = world.name; $('briefing-map-size').textContent = `${world.width} × ${world.depth} M`;
-    $('briefing-map-description').textContent = `${world.description} 계단식 발판 ${world.platforms.length}개와 추가 엄폐물 ${world.extraCover.length}개를 활용하세요. 5분 또는 먼저 20킬을 달성하면 라운드가 끝납니다.`;
+    $('briefing-map-description').textContent = `${world.description} 건물 ${world.buildings.length}개·추가 엄폐벽 ${world.coverWalls.length}개와 계단식 발판을 활용하세요. ${roundOptions.roundSeconds / 60}분 또는 먼저 ${roundOptions.fragLimit}킬을 달성하면 라운드가 끝납니다.`;
   }
   dialog.showModal();
   if (id === 'armory-dialog') {
@@ -291,7 +305,8 @@ function updateSelections() {
   $('map-card-name').textContent = world.name; $('map-card-description').textContent = `${world.width} × ${world.depth} M · ${world.tag}`;
   $('loadout-weapon').replaceChildren(document.createTextNode(`${weapon.name} `));
   const type = document.createElement('span'); type.textContent = weapon.type; $('loadout-weapon').append(type);
-  $('loadout-description').textContent = `${weapon.label} · ${weapon.magazine}발 · 1–${WEAPONS.length} / 휠 교체`;
+  $('loadout-description').textContent = `${weapon.label} · ${weapon.magazine}발 · 사망 후 E로 변경`;
+  document.querySelector('#armory-dialog .dialog-footer span').textContent = '시작 무기는 여기서 선택 · 생존 중 교체 불가 · 사망 후 E로 다음 부활 장비 변경';
   $('loadout-heading').textContent = `YOUR LOADOUT / ${String(WEAPONS.length).padStart(2, '0')} WEAPONS`;
   $('loadout-skin').textContent = `${skin.name} · 장비 변경 ↗`;
   $('armory-button').style.setProperty('--finish', skin.color); $('armory-button').style.setProperty('--finish-accent', skin.accent);
@@ -372,7 +387,7 @@ function updateSettings() {
 
 $('create-button').addEventListener('click', () => {
   if (busy || !connected) return;
-  setBusy(true); send({ type: 'create', mode, bots: botCount, name: callsign(), ...loadout, outfitId: profileStore.profile.equippedOutfitId });
+  setBusy(true); send({ type: 'create', mode, bots: botCount, botDifficulty, ...roundOptions, name: callsign(), ...loadout, outfitId: profileStore.profile.equippedOutfitId });
 });
 $('join-form').addEventListener('submit', (event) => { event.preventDefault(); requestJoin($('room-code').value.trim().toUpperCase()); });
 $('room-code').addEventListener('input', () => { $('room-code').value = $('room-code').value.toUpperCase().replace(/[^A-Z2-9]/g, ''); });
@@ -380,7 +395,7 @@ $('player-name').addEventListener('change', () => callsign());
 $('mode-lan').addEventListener('click', () => setMode('lan'));
 $('mode-practice').addEventListener('click', () => setMode('practice'));
 $('bots-minus').addEventListener('click', () => { botCount = Math.max(mode === 'practice' ? 1 : 0, botCount - 1); updateBots(); });
-$('bots-plus').addEventListener('click', () => { botCount = Math.min(4, botCount + 1); updateBots(); });
+$('bots-plus').addEventListener('click', () => { botCount = Math.min(RULES.maxPlayers - 1, botCount + 1); updateBots(); });
 $('resume-button').addEventListener('click', () => game?.lock());
 $('leave-button').addEventListener('click', () => leaveGame());
 $('round-leave').addEventListener('click', () => leaveGame());
@@ -441,7 +456,7 @@ profileStore.addEventListener('change', renderProfile);
 profileStore.addEventListener('award', (event) => toast(`라운드 정산 완료 · +${event.award.points} LP`));
 window.addEventListener('storage', (event) => { if (event.key === PROFILE_KEY && !game) { profileStore.refreshLocal(); renderProfile(); } });
 if (profileStore.warning) toast(profileStore.warning, true);
-const extraControls = document.createElement('p'); extraControls.className = 'controls-addition'; extraControls.textContent = `1–${WEAPONS.length} 또는 마우스 휠: 무기 교체 · C / Ctrl 누르기: 앉기 · 낮은 계단은 걸어서 올라가며 Space로 발판 사이를 점프합니다. 피격 시 빨간 표시가 공격 방향을 알려줍니다. 반자동 무기는 클릭할 때마다 한 발씩 발사합니다.`; $('help-dialog').append(extraControls);
+const extraControls = document.createElement('p'); extraControls.className = 'controls-addition'; extraControls.textContent = `생존 중 무기 교체 불가 · 사망 후 E: ${WEAPONS.length}종 목록에서 클릭해 다음 부활 무기 선택 (처음 10종은 숫자 1–9, 0) · C / Ctrl: 앉기 (달리기·공중에서는 불가) · 계단으로 건물·옥상까지 이동할 수 있습니다. 달리거나 공중에서 쏘면 탄이 크게 퍼집니다. 피격 방향은 붉은 표시만으로 알립니다.`; $('help-dialog').append(extraControls);
 if (SOLO) {
   document.body.classList.add('solo-edition'); document.title = 'LINKSHOT · 링크샷 — Solo combat';
   document.querySelector('.page-heading h1').textContent = '여섯 개의 전장, 나만의 교전.';

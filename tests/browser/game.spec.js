@@ -66,7 +66,7 @@ test('two browser clients share a room; pointer lock, movement, firing, reload, 
   await context2.addInitScript(() => { try { localStorage.setItem('sector07-settings', JSON.stringify({ sensitivity: 1, fov: 82, volume: 0, quality: 'low' })); } catch { /* about:blank */ } });
   const second = await context2.newPage(); second.on('pageerror', (error) => errors.push(error.message));
   try {
-    await second.goto('http://127.0.0.1:3000/'); await expect(second.getByText('LAN SERVER ONLINE')).toBeVisible();
+    await second.goto(new URL('/', page.url()).href); await expect(second.getByText('LAN SERVER ONLINE')).toBeVisible();
     await second.getByLabel('플레이어 콜사인').fill('BRAVO'); await second.getByLabel('참가할 방 코드').fill(code);
     await second.getByRole('button', { name: '코드로 방 참가' }).click();
     await expect(second.locator('#game-shell')).toBeVisible(); await expect.poll(() => state?.players.length).toBe(2);

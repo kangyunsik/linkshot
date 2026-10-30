@@ -1,8 +1,17 @@
+import { WEAPONS } from '/shared/catalog.js';
+import { NETWORK_PROTOCOL } from '/shared/world.js';
+
 export class GameAudio {
   constructor(settings) {
     this.settings = settings;
     this.context = null;
     this.muted = false;
+    this.samples = new Map(); this.voices = new Set();
+    this.bytes = Promise.allSettled(WEAPONS.flatMap((weapon) => [1].map(async (variant) => {
+      const response = await fetch(`/assets/sounds/${weapon.id}-${variant}.wav?v=${NETWORK_PROTOCOL}`, { signal: AbortSignal.timeout(12000) });
+      if (!response.ok) throw new Error('Sound sample unavailable');
+      return { id: weapon.id, variant, bytes: await response.arrayBuffer() };
+    })));
   }
 
   async unlock() {
@@ -12,7 +21,13 @@ export class GameAudio {
         if (!Audio) return;
         this.context = new Audio();
         this.master = this.context.createGain();
-        this.master.connect(this.context.destination);
+        this.limiter = this.context.createDynamicsCompressor();
+        this.limiter.threshold.value = -10; this.limiter.knee.value = 12; this.limiter.ratio.value = 8; this.limiter.attack.value = 0.003; this.limiter.release.value = 0.12;
+        this.master.connect(this.limiter).connect(this.context.destination);
+        this.room = this.context.createConvolver(); this.roomGain = this.context.createGain(); this.roomGain.gain.value = 0.055;
+        const impulse = this.context.createBuffer(2, this.context.sampleRate * 0.32, this.context.sampleRate);
+        for (let channel = 0; channel < 2; channel++) { const data = impulse.getChannelData(channel); for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.context.sampleRate * 0.05)) * 0.18; }
+        this.room.buffer = impulse; this.room.connect(this.roomGain).connect(this.master);
         const length = this.context.sampleRate * 0.25;
         this.noise = this.context.createBuffer(1, length, this.context.sampleRate);
         const data = this.noise.getChannelData(0);
@@ -20,6 +35,11 @@ export class GameAudio {
       }
       await this.context.resume();
       this.updateVolume();
+      this.ready ||= this.bytes.then((results) => Promise.allSettled(results.filter((result) => result.status === 'fulfilled').map(async ({ value }) => {
+        const buffer = await this.context.decodeAudioData(value.bytes);
+        if (!this.samples.has(value.id)) this.samples.set(value.id, []);
+        this.samples.get(value.id)[value.variant - 1] = buffer;
+      })));
     } catch { /* Browsers without Web Audio can still play. */ }
   }
 
@@ -54,11 +74,24 @@ export class GameAudio {
     source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); panner.disconnect(); };
   }
 
-  shot(volume = 1, pan = 0, weaponId = 'rifle') {
-    const [duration, frequency, bass] = weaponId === 'smg' ? [0.08, 4700, 185] : weaponId === 'shotgun' ? [0.22, 1900, 85] : weaponId === 'sniper' ? [0.24, 2600, 70] : weaponId === 'pistol' ? [0.10, 4200, 170] : weaponId === 'lmg' ? [0.15, 3200, 110] : weaponId === 'dmr' ? [0.17, 2700, 95] : [0.13, 3600, 135];
-    this.burst(duration, volume * 0.55, frequency, pan);
-    this.tone(bass, duration, volume * 0.3, 'triangle', 30, pan);
-    this.tone(1800, 0.025, volume * 0.04, 'square', 260, pan);
+  setEnvironment(indoors) { if (this.roomGain) this.roomGain.gain.setTargetAtTime(indoors ? 0.17 : 0.055, this.context.currentTime, 0.12); }
+
+  shot(volume = 1, pan = 0, weaponId = 'rifle', distance = 0) {
+    if (!this.context || this.context.state !== 'running') return;
+    const available = (this.samples.get(weaponId) || []).filter(Boolean);
+    if (available.length) {
+      const source = this.context.createBufferSource(), gain = this.context.createGain(), filter = this.context.createBiquadFilter(), panner = this.context.createStereoPanner();
+      source.buffer = available[0]; source.playbackRate.value = 1;
+      gain.gain.value = Math.max(0, Math.min(1, volume)); filter.type = 'lowpass'; filter.frequency.value = Math.max(1800, 14500 * Math.exp(-distance / 32));
+      panner.pan.value = Math.max(-1, Math.min(1, pan)); source.connect(filter).connect(gain).connect(panner); panner.connect(this.master); panner.connect(this.room);
+      if (this.voices.size >= 40) { const oldest = this.voices.values().next().value; oldest.stop(); this.voices.delete(oldest); }
+      this.voices.add(source); source.onended = () => { this.voices.delete(source); source.disconnect(); filter.disconnect(); gain.disconnect(); panner.disconnect(); };
+      source.start(); return;
+    }
+    // Never substitute a mechanical/beep-like fallback for a gunshot. A very
+    // early first shot may wait briefly for the same canonical recording.
+    const queuedAt = performance.now();
+    this.ready?.then(() => { if (performance.now() - queuedAt < 350 && this.samples.get(weaponId)?.some(Boolean)) this.shot(volume, pan, weaponId, distance); });
   }
   step(sprint = false, crouched = false) { this.burst(0.07, crouched ? 0.025 : sprint ? 0.085 : 0.05, 450); }
   reload() { this.tone(1100, 0.07, 0.08, 'triangle', 240); this.burst(0.1, 0.07, 1900); }

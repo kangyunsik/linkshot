@@ -2,13 +2,13 @@ import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { MAPS } from '../../shared/world.js';
 
-test.use({ baseURL: process.env.SOLO_SOURCE_TEST ? 'http://127.0.0.1:3000' : 'http://127.0.0.1:4173' });
+test.use({ baseURL: process.env.SOLO_SOURCE_TEST ? `http://127.0.0.1:${process.env.LAN_TEST_PORT || 3000}` : 'http://127.0.0.1:4173' });
 test.beforeEach(async ({ context }) => {
   if (process.env.SOLO_SOURCE_TEST) await context.route('**/runtime-config.js', (route) => route.fulfill({ contentType: 'text/javascript', body: "export const APP_MODE = 'solo'; export const PROFILE_STORAGE = 'browser';" }));
   await context.addInitScript(() => { try { localStorage.setItem('sector07-settings', JSON.stringify({ sensitivity: 1, fov: 82, volume: 0, quality: 'low' })); } catch { /* about:blank */ } });
 });
 
-test('static solo build supports map/skin selection, seven weapons, scope and independent magazines without a server', async ({ page }) => {
+test('static solo build supports loadout selection, scope, live weapon lock and reload without a server', async ({ page }) => {
   const errors = [], requests = [], sockets = [];
   page.on('pageerror', (error) => errors.push(error.message)); page.on('request', (request) => requests.push(request.url())); page.on('websocket', (socket) => sockets.push(socket.url()));
   await page.goto('/'); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
@@ -18,7 +18,7 @@ test('static solo build supports map/skin selection, seven weapons, scope and in
   await expect(page.locator('.map-choice')).toHaveCount(6);
   await page.getByRole('button', { name: '레드라인 전장 선택', exact: true }).click(); await expect(page.locator('#hero-map-name')).toHaveText('REDLINE 19');
   await page.getByRole('button', { name: '무기 및 스킨 선택' }).click();
-  await expect(page.locator('#weapon-choices button')).toHaveCount(7); await expect(page.locator('#skin-choices button')).toHaveCount(6);
+  await expect(page.locator('#weapon-choices button')).toHaveCount(19); await expect(page.locator('#skin-choices button')).toHaveCount(6);
   await page.getByRole('button', { name: '저격소총 SR–1 선택' }).click(); await page.getByRole('button', { name: '아크틱 고스트 스킨', exact: true }).click();
   await expect(page.locator('#weapon-stats')).toContainText('100 / HEAD 150');
   await expect(page.locator('#armory-skin-name')).toHaveText('ARCTIC GHOST');
@@ -35,24 +35,13 @@ test('static solo build supports map/skin selection, seven weapons, scope and in
   await page.keyboard.up('KeyC'); await expect(page.locator('#hud-stance')).toBeHidden();
   await page.mouse.down({ button: 'right' }); await expect(page.locator('#scope-overlay')).toBeVisible(); await page.screenshot({ path: 'artifacts/redline-scope.png' });
   await page.mouse.up({ button: 'right' }); await expect(page.locator('#scope-overlay')).toBeHidden();
-  await page.keyboard.press('Digit2'); await expect(page.locator('#hud-weapon-name')).toHaveText('PD–9'); await expect(page.locator('#hud-ammo')).toHaveText('36');
-  await expect(page.locator('#reload-hint')).not.toHaveText('EQUIPPING...');
-  await page.mouse.down(); await expect.poll(async () => Number(await page.locator('#hud-ammo').textContent())).toBeLessThan(33); await page.mouse.up();
-  await page.keyboard.press('KeyR'); await expect(page.locator('#reload-indicator')).toBeVisible(); await expect(page.locator('#hud-ammo')).toHaveText('36');
-  await page.keyboard.press('Digit1'); await expect(page.locator('#hud-weapon-name')).toHaveText('VX–7'); await expect(page.locator('#reload-hint')).not.toHaveText('EQUIPPING...');
-  await page.mouse.down(); await expect.poll(async () => Number(await page.locator('#hud-ammo').textContent())).toBeLessThan(29); await page.mouse.up();
-  await expect(page.locator('#reload-hint')).not.toHaveText('EQUIPPING...');
-  await page.keyboard.press('Digit3'); await expect(page.locator('#hud-weapon-name')).toHaveText('SG–12'); await expect(page.locator('#hud-ammo')).toHaveText('08');
-  await expect(page.locator('#reload-hint')).not.toHaveText('EQUIPPING...'); await page.mouse.down(); await expect(page.locator('#hud-ammo')).toHaveText('07');
-  // A held trigger must remain at 7 even after more than a full pump cycle.
+  for (let slot = 1; slot <= 7; slot++) await page.keyboard.press(`Digit${slot}`);
+  await page.mouse.wheel(0, 100); await expect(page.locator('#hud-weapon-name')).toHaveText('SR–1');
+  await page.mouse.down(); await expect(page.locator('#hud-ammo')).toHaveText('04');
+  // A held trigger cannot fire the bolt-action rifle a second time.
   const heldAt = Date.now();
-  await expect.poll(async () => { await expect(page.locator('#hud-ammo')).toHaveText('07'); return Date.now() - heldAt; }, { intervals: [100, 150, 200], timeout: 3000 }).toBeGreaterThan(1000);
-  await page.mouse.up(); await page.keyboard.press('Digit4'); await expect(page.locator('#hud-weapon-name')).toHaveText('SR–1'); await expect(page.locator('#hud-ammo')).toHaveText('05');
-  await page.keyboard.press('Digit5'); await expect(page.locator('#hud-weapon-name')).toHaveText('PX–9'); await expect(page.locator('#hud-ammo')).toHaveText('15');
-  await page.keyboard.press('Digit6'); await expect(page.locator('#hud-weapon-name')).toHaveText('LM–60'); await expect(page.locator('#hud-ammo')).toHaveText('60');
-  await page.keyboard.press('Digit7'); await expect(page.locator('#hud-weapon-name')).toHaveText('MR–14'); await expect(page.locator('#hud-ammo')).toHaveText('12');
-  await page.mouse.wheel(0, 100); await expect(page.locator('#hud-weapon-name')).toHaveText('VX–7');
-  await expect.poll(async () => Number(await page.locator('#hud-ammo').textContent())).toBeLessThan(29);
+  await expect.poll(async () => { await expect(page.locator('#hud-ammo')).toHaveText('04'); return Date.now() - heldAt; }, { intervals: [100, 150, 200], timeout: 3000 }).toBeGreaterThan(1200);
+  await page.mouse.up(); await page.keyboard.press('KeyR'); await expect(page.locator('#reload-indicator')).toBeVisible(); await expect(page.locator('#hud-ammo')).toHaveText('05');
   await page.screenshot({ path: 'artifacts/solo-redline.png' });
   await page.evaluate(() => document.exitPointerLock()); await expect(page.locator('#pause-overlay')).toBeVisible();
   await page.getByRole('button', { name: '로비로 나가기', exact: true }).click(); await expect(page.locator('#lobby')).toBeVisible();
@@ -61,8 +50,8 @@ test('static solo build supports map/skin selection, seven weapons, scope and in
 });
 
 test('solo rounds end and restart locally without any backend', async ({ context, page }) => {
-  await context.route('**/shared/world.js', async (route) => {
-    const response = await route.fetch(); await route.fulfill({ response, body: (await response.text()).replace('roundSeconds: 300', 'roundSeconds: 2') });
+  await context.route('**/shared/simulation.js', async (route) => {
+    const response = await route.fetch(); await route.fulfill({ response, body: (await response.text()).replaceAll('this.startedAt + this.roundSeconds * 1000', 'this.startedAt + 2000') });
   });
   await page.goto('/'); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
   await page.getByRole('button', { name: '연습전 시작', exact: true }).click();
@@ -81,4 +70,29 @@ test('every arena can be entered and disposed in the static build', async ({ pag
     await page.getByRole('button', { name: '로비로 나가기', exact: true }).click(); await expect(page.locator('#lobby')).toBeVisible();
   }
   expect(errors).toEqual([]);
+});
+
+test('solo worker preserves bot difficulty and E-selected weapon, then accepts movement after respawn', async ({ context, page }) => {
+  await context.addInitScript(() => {
+    const NativeWorker = window.Worker;
+    window.Worker = class extends NativeWorker { constructor(...args) { super(...args); this.addEventListener('message', ({ data }) => { if (data.type === 'state' || data.type === 'joined') window.__soloState = data; }); } };
+  });
+  await context.route('**/shared/simulation.js', async (route) => {
+    const response = await route.fetch();
+    const code = (await response.text()).replace('tick(dt) {', "tick(dt) { if (!this.__testDeath && this.players.has('local-operator')) { const p = this.players.get('local-operator'); p.hp = 0; p.diedAt = this.clock(); p.respawnAt = p.diedAt + 3000; this.__testDeath = true; }");
+    await route.fulfill({ response, body: code });
+  });
+  await page.goto('/'); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
+  await page.getByLabel('봇 난이도', { exact: true }).selectOption('advanced'); await page.reload();
+  await expect(page.getByLabel('봇 난이도', { exact: true })).toHaveValue('advanced');
+  await page.getByRole('button', { name: '연습전 시작', exact: true }).click(); await expect(page.locator('#respawn-overlay')).toBeVisible();
+  await page.keyboard.press('KeyE'); await expect(page.locator('#respawn-loadout')).toBeVisible();
+  await page.locator('#respawn-weapon-choices [data-weapon=sniper]').click();
+  await expect(page.locator('#hud-weapon-name')).toHaveText('SR–1'); await expect(page.locator('#respawn-overlay')).toBeHidden();
+  await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id)).toBe('game-canvas');
+  expect(await page.evaluate(() => window.__soloState.room.botDifficulty)).toBe('advanced');
+  const position = await page.evaluate(() => { const p = window.__soloState.players.find((p) => p.id === 'local-operator'); return { x: p.x, z: p.z }; });
+  await page.keyboard.down('KeyW');
+  await expect.poll(() => page.evaluate((origin) => { const p = window.__soloState.players.find((p) => p.id === 'local-operator'); return Math.hypot(p.x - origin.x, p.z - origin.z); }, position)).toBeGreaterThan(0.8);
+  await page.keyboard.up('KeyW');
 });

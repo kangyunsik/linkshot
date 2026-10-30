@@ -41,9 +41,9 @@ test('rifle ADS reticle stays centered and visual recoil cannot change authorita
     await page.mouse.down({ button: 'right' });
     await expect.poll(() => page.evaluate(async () => {
       const { Vector3 } = await import('/vendor/three.module.js');
-      const { game } = window.__tacticalTest, reticle = game.activeModel.userData.reticle;
-      if (!reticle.visible) return 1;
-      const point = reticle.getWorldPosition(new Vector3()).project(game.camera);
+      const { game } = window.__tacticalTest;
+      if (!game.sightAligned) return 1;
+      const point = game.activeModel.localToWorld(game.activeModel.userData.aimPoint.clone()).project(game.camera);
       return Math.hypot(point.x, point.y);
     })).toBeLessThan(0.001);
     const recoilError = await page.evaluate(async () => {
@@ -73,7 +73,7 @@ test('real damage events show a red incoming direction, rotate with the camera a
     expect(impactMeshes).toBe(0); // A head impact at the camera must not obscure the warning with a giant spark.
     await expect(page.locator('.damage-direction')).toHaveCount(1);
     await expect(page.locator('.damage-direction')).toHaveAttribute('data-direction', 'right');
-    await expect(page.locator('#damage-direction-caption')).toHaveText('오른쪽에서 피격');
+    await expect(page.locator('#damage-direction-caption')).toBeHidden();
     await page.evaluate(() => { window.__tacticalTest.game.yaw = 0; });
     await expect(page.locator('.damage-direction')).toHaveAttribute('data-direction', 'front');
     await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/incoming-damage.png' });

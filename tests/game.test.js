@@ -15,7 +15,8 @@ test('movement is normalized, frame-rate independent, and cannot cross cover', (
   movePlayer(diagonal, input({ forward: 1, strafe: 1 }), 1 / 60);
   assert.ok(Math.abs(Math.hypot(diagonal.x - 21, diagonal.z - 19) - RULES.walkSpeed / 60) < 0.001);
   const cover = player({ x: 0, z: -12 });
-  for (let i = 0; i < 120; i++) movePlayer(cover, input({ forward: 1 }), 1 / 60);
+  const coverWorld = { ...WORLD, obstacles: [WORLD.obstacles.find((box) => box.id === 'low-n')] };
+  for (let i = 0; i < 120; i++) movePlayer(cover, input({ forward: 1 }), 1 / 60, coverWorld);
   assert.ok(cover.z >= -14.66 - 0.001);
   assert.ok(cover.z <= -14.65);
 });
@@ -95,9 +96,10 @@ test('match clock, host-only restart, host migration and bot replacement work', 
 });
 
 test('navigation produces a path around solid cover rather than through it', () => {
-  const path = findPath({ x: 0, z: 8 }, { x: 0, z: -8 });
+  const world = { ...WORLD, id: 'navigation-regression', obstacles: [WORLD.obstacles.find((box) => box.id === 'reactor')] };
+  const path = findPath({ x: 0, z: 8 }, { x: 0, z: -8 }, world);
   assert.ok(path.length > 4);
-  for (const point of path) for (const box of WORLD.obstacles) {
+  for (const point of path) for (const box of world.obstacles) {
     const b = bounds(box, 0.5);
     assert.ok(!(point.x > b.minX && point.x < b.maxX && point.z > b.minZ && point.z < b.maxZ));
   }

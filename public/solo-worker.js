@@ -7,7 +7,7 @@ const send = (data) => self.postMessage(data);
 function stop() { clearInterval(tickTimer); clearInterval(snapshotTimer); room = null; }
 function start(data) {
   stop();
-  room = new Room('SOLO7', { mode: 'practice', mapId: data.mapId, bots: Math.max(1, Number(data.bots) || 2) });
+  room = new Room('SOLO7', { mode: 'practice', mapId: data.mapId, bots: Math.max(1, Number(data.bots) || 2), botDifficulty: data.botDifficulty, fragLimit: data.fragLimit, roundSeconds: data.roundSeconds });
   room.addPlayer(playerId, data.name, false, data);
   send({ ...room.snapshot(), type: 'joined', id: playerId, events: [] });
   previousTick = performance.now();
@@ -18,6 +18,7 @@ self.addEventListener('message', ({ data }) => {
   try {
     if (data.type === 'create') start(data);
     if (data.type === 'input') room?.setInput(playerId, data);
+    if (data.type === 'loadout') room?.selectLoadout(playerId, data);
     if (data.type === 'restart') room?.restart(playerId);
     if (data.type === 'leave') { stop(); send({ type: 'left' }); }
     if (data.type === 'ping') send({ type: 'pong', sent: data.sent });

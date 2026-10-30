@@ -1,0 +1,33 @@
+# LINKSHOT asset sources
+
+## Human character anatomy and hairstyle
+
+- Author: Quaternius
+- Pack: Universal Base Characters, Standard (free version)
+- Source: https://quaternius.com/packs/universalbasecharacters.html
+- Download: https://quaternius.itch.io/universal-base-characters
+- License: CC0 1.0 Universal — https://creativecommons.org/publicdomain/zero/1.0/
+- Files: `models/operator-human-v2.glb`, `models/operator-hair-v2.glb`
+- Changes: self-contained GLB packaging, resized textures, runtime clothing materials, tactical equipment and procedural skeletal posing/IK. Only the free Standard assets are included; no paid Source assets are used.
+- Original license: `models/LICENSE-Quaternius.txt`
+
+## Operator clothing materials
+
+- `operator-fabric.png`, `operator-armor.png`, `operator-jacket.png`: generated locally with ComfyUI and Animagine XL 4.0 Opt in the user's image engine, then used on the actual in-game skinned character and equipment, not only on shop cards. The jacket image is cropped to its garment panel before UV mapping.
+- Model source and license: https://huggingface.co/cagliostrolab/animagine-xl-4.0 — CreativeML Open RAIL++-M.
+- Prompts, seeds and image model provenance: `asset-manifest.json`.
+- The image engine generates materials; the 3D anatomical base is the separately licensed Quaternius asset above. No claim is made that a 2D image model generated the 3D rig.
+
+## Recorded firearm sounds
+
+- Author/recordist: Tabasco
+- Source: https://opengameart.org/content/gunshot-sounds
+- Original archive: https://opengameart.org/sites/default/files/sounds.zip
+- License: CC0 1.0 Universal — https://creativecommons.org/publicdomain/zero/1.0/
+- Original recordings: CZ-52 pistol, SKS rifle, Mosin Nagant rifle, shotgun.
+- Changes: one fixed muzzle-blast sample per weapon, spectral noise reduction, filtering, mono resampling, peak normalization and fades. No random sample or pitch variations are used during gameplay.
+- The 19 gameplay sound profiles are artistic edits of the four listed source recordings; they are not claimed to be original recordings of each named real-world weapon.
+- Prepared file list and hashes: `sounds/manifest.json`.
+- Reproduction tools: `scripts/prepare-character.py`, `scripts/prepare-audio.py` in the source repository. Downloaded archives and working files are not distributed.
+
+Three.js and its glTF/skeleton utilities are by the Three.js authors, under the MIT license. The full notice is included as `LICENSE-three.txt`: https://github.com/mrdoob/three.js/blob/dev/LICENSE.

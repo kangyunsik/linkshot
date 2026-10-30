@@ -39,7 +39,7 @@ const instructions = Buffer.from(`LINKSHOT · 링크샷 — 1인 플레이 / Win
 
 [조작]
 WASD 이동 / 마우스 조준 / 좌클릭 사격 / 우클릭 정조준
-1~7 또는 마우스 휠 무기 교체 / R 재장전
+생존 중 무기 교체 불가 / 사망 후 E로 다음 부활 무기 선택 / R 재장전
 C 또는 Ctrl 누르기: 앉기 (브라우저에서는 C 권장)
 Shift 달리기 / Space 점프 / Tab 점수판 / Esc 메뉴 / F 전체 화면
 반자동 무기는 클릭할 때마다 한 발씩 발사합니다.

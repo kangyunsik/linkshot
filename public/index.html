@@ -8,6 +8,7 @@
   <title>LINKSHOT · 링크샷 — Local combat. Real connection.</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/style.css">
+  <script type="importmap">{"imports":{"three":"/vendor/three.module.js"}}</script>
 </head>
 <body>
   <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -80,7 +81,9 @@
             <div class="mode-switch" role="tablist" aria-label="플레이 모드"><button id="mode-lan" role="tab" aria-selected="true" class="selected"><svg><use href="#i-people"/></svg> LAN 대전</button><button id="mode-practice" role="tab" aria-selected="false"><svg><use href="#i-target"/></svg> 혼자 연습</button></div>
             <label class="field-label" for="player-name">콜사인 <span>CALLSIGN</span></label>
             <div class="name-input"><svg><use href="#i-user"/></svg><input id="player-name" maxlength="16" placeholder="OPERATOR" value="" autocomplete="nickname" spellcheck="false" aria-label="플레이어 콜사인"><span class="input-mark">01</span></div>
-            <div class="bot-row"><div><span>연습 봇</span><small id="bot-description">친구를 기다리는 동안 가볍게</small></div><div class="stepper"><button id="bots-minus" aria-label="봇 한 명 줄이기"><svg><use href="#i-minus"/></svg></button><output id="bot-count" aria-live="polite">2</output><button id="bots-plus" aria-label="봇 한 명 늘리기"><svg><use href="#i-plus"/></svg></button></div></div>
+             <div class="bot-row"><div><span>연습 봇</span><small id="bot-description">친구를 기다리는 동안 가볍게</small></div><div class="stepper"><button id="bots-minus" aria-label="봇 한 명 줄이기"><svg><use href="#i-minus"/></svg></button><output id="bot-count" aria-live="polite">2</output><button id="bots-plus" aria-label="봇 한 명 늘리기"><svg><use href="#i-plus"/></svg></button></div></div>
+             <label class="bot-level-row" for="bot-difficulty"><span>봇 난이도<small>다양한 무기 · 무기별 실제 피해 적용</small></span><select id="bot-difficulty" aria-label="봇 난이도"></select></label>
+             <div class="match-options"><label for="frag-limit">목표 킬 수<input id="frag-limit" aria-label="목표 킬 수" type="number" min="1" max="200" step="1" value="20"></label><label for="round-minutes">제한 시간 (분)<input id="round-minutes" aria-label="제한 시간 (분)" type="number" min="1" max="60" step="1" value="5"></label></div>
             <button id="create-button" class="primary-button deploy-button"><span>방 만들고 출격</span><svg><use href="#i-arrow"/></svg></button>
             <p class="deploy-note" id="deploy-note"><svg><use href="#i-shield"/></svg> 방 코드로 친구를 초대할 수 있어요</p>
             <div id="join-section"><div class="or-divider"><span></span> 이미 방이 있나요? <span></span></div><form id="join-form" class="join-form"><input id="room-code" placeholder="방 코드 5자리" aria-label="참가할 방 코드" maxlength="5" minlength="5" required pattern="[A-Za-z2-9]{5}" autocomplete="off" spellcheck="false"><button type="submit" aria-label="코드로 방 참가">참가 <svg><use href="#i-arrow"/></svg></button></form></div>
@@ -105,19 +108,20 @@
     <canvas id="game-canvas" aria-label="3D 전장"></canvas>
     <div class="game-hud">
       <div class="hud-top-left"><div class="hud-location"><span class="tiny-live"></span><span id="hud-map-name">FOUNDRY 07</span><small>FREE-FOR-ALL</small></div><canvas id="minimap" width="256" height="216" aria-label="미니맵"></canvas><div class="hud-room"><span id="hud-connection-kind">ROOM</span> <strong id="hud-room-code">-----</strong><span id="hud-ping">-- MS</span></div></div>
-      <div class="match-clock"><span>DEATHMATCH</span><strong id="hud-timer">05:00</strong><small>FIRST TO 20</small></div>
+      <div class="match-clock"><span>DEATHMATCH</span><strong id="hud-timer">05:00</strong><small id="hud-frag-limit">FIRST TO 20</small></div>
       <div id="killfeed" class="killfeed" aria-live="polite"></div>
       <div id="scope-overlay" class="scope-overlay" hidden><div class="scope-lens"><i></i><b></b><span>SR–1 &nbsp; / &nbsp; PRECISION OPTICS</span></div></div>
-      <div id="crosshair" class="crosshair"><i></i><i></i><i></i><i></i><b></b></div><div id="hitmarker" class="hitmarker">╳</div>
+      <div id="crosshair" class="crosshair"><i></i><i></i><i></i><i></i><b></b></div><span id="ads-reticle" class="ads-reticle" hidden></span><div id="hitmarker" class="hitmarker">╳</div>
       <div class="hud-bottom-left"><span id="hud-stance" class="hud-stance" hidden>CROUCHED · LOW PROFILE</span><div class="hud-health"><svg><use href="#i-plus"/></svg><strong id="hud-health">100</strong><span>HP</span></div><div class="health-track"><i id="health-fill"></i></div><div class="hud-small"><span id="hud-kd">0 K &nbsp; / &nbsp; 0 D</span><span id="hud-fps">60 FPS</span></div></div>
       <div class="hud-bottom-center"><span id="kill-confirmation"></span><span id="protection-hint" hidden>SPAWN PROTECTION</span><span class="game-control-hint"><kbd>TAB</kbd> 점수판 <i>·</i> <kbd>ESC</kbd> 메뉴</span></div>
-      <div id="weapon-slots" class="weapon-slots" aria-label="무기 단축키"></div>
+      <div id="weapon-slots" class="weapon-slots" aria-label="무기 목록 · 생존 중 교체 불가"></div>
       <div class="hud-ammo"><span class="weapon-label"><span id="hud-weapon-name">VX–7</span> <i id="hud-weapon-action">AUTO</i></span><div><strong id="hud-ammo">30</strong><span>/ ∞</span></div><span id="reload-hint">5.56 MM <i>·</i> ASSAULT RIFLE</span><small id="hud-skin-name">FIELD ISSUE</small></div>
       <div id="damage-vignette" class="damage-vignette"></div>
       <div id="incoming-damage" class="incoming-damage" aria-label="피격 방향 표시"></div><span id="damage-direction-caption" class="damage-direction-caption" hidden></span>
       <div id="reload-indicator" class="reload-indicator" hidden><span>RELOADING</span><i></i></div>
     </div>
-    <div id="respawn-overlay" class="respawn-overlay" hidden><span class="eyebrow">SIGNAL LOST</span><h2>다시 연결하는 중</h2><strong id="respawn-count">3</strong><p>잠시 후 전장으로 복귀합니다</p></div>
+    <div id="respawn-overlay" class="respawn-overlay" hidden><span class="eyebrow">SIGNAL LOST</span><h2>다시 연결하는 중</h2><strong id="respawn-count">3</strong><p>잠시 후 전장으로 복귀합니다</p><p><kbd>E</kbd> 다음 부활 무기 선택</p><small id="respawn-next-weapon"></small></div>
+    <div id="respawn-loadout" class="game-overlay respawn-loadout" hidden><div class="respawn-loadout-card"><span class="eyebrow">NEXT DEPLOYMENT / LOADOUT</span><h2>다음 부활 무기 선택</h2><p>무기를 고르면 다음 부활부터 적용됩니다. 생존 중에는 교체할 수 없습니다.</p><div id="respawn-weapon-choices" class="respawn-weapon-choices"></div><button id="respawn-loadout-close" class="secondary-button">현재 장비 유지 · 닫기 (E)</button><small>선택 대기는 사망 후 최대 15초입니다. 숫자 1–7로도 선택할 수 있습니다.</small></div></div>
     <div id="pause-overlay" class="game-overlay" hidden><div class="pause-card"><span class="eyebrow"><span class="accent-slash">//</span> LINKSHOT</span><h2 id="pause-title">READY TO BREACH</h2><p id="pause-description">준비되었다면, 전장에 진입하세요.</p><button id="resume-button" class="primary-button"><span>교전 시작</span><svg><use href="#i-arrow"/></svg></button><button id="copy-invite" class="secondary-button"><svg><use href="#i-link"/></svg> 친구 초대 링크 복사 <strong id="pause-room-code"></strong></button><div class="pause-bottom"><button data-open="settings-dialog"><svg><use href="#i-settings"/></svg> 설정</button><button id="leave-button">로비로 나가기 <svg><use href="#i-arrow"/></svg></button></div><small>메뉴를 여는 동안에도 다른 플레이어의 교전은 계속됩니다.</small></div></div>
     <div id="scoreboard-overlay" class="scoreboard-overlay" hidden><div class="scoreboard-card"><div class="scoreboard-heading"><div><span class="eyebrow">LIVE SCOREBOARD</span><h2>전장 현황</h2></div><span id="scoreboard-map-name">FOUNDRY 07</span></div><div id="scoreboard-table"></div><p><kbd>TAB</kbd> 키를 놓으면 돌아갑니다</p></div></div>
     <div id="round-overlay" class="game-overlay" hidden><div class="round-card"><span class="eyebrow">OPERATION COMPLETE</span><h2>ROUND OVER<span>.</span></h2><p id="round-winner"></p><div id="round-table"></div><section id="round-reward" class="round-reward" hidden><div><span>ROUND REWARD</span><strong>+<b id="round-points">0</b> LP</strong></div><p><span>완주 <b id="reward-completion">50</b></span><span>킬 보상 <b id="reward-kills">0</b></span><span>승리 <b id="reward-win">0</b></span></p><small id="round-reward-status">프로필에 저장됨</small></section><button id="restart-button" class="primary-button"><span>다시 출격</span><svg><use href="#i-refresh"/></svg></button><p id="wait-host" hidden>방장이 다음 라운드를 시작할 때까지 기다려 주세요.</p><button id="round-leave" class="text-button">로비로 돌아가기</button></div></div>

@@ -7,10 +7,10 @@ import { networkInterfaces } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Room, createRoomCode } from './game.js';
-import { RULES } from '../shared/world.js';
+import { RULES, NETWORK_PROTOCOL } from '../shared/world.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8', '.webp': 'image/webp', '.ico': 'image/x-icon' };
+const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8', '.webp': 'image/webp', '.ico': 'image/x-icon', '.glb': 'model/gltf-binary', '.wav': 'audio/wav' };
 
 export function lanUrls(port) {
   const addresses = Object.entries(networkInterfaces()).sort(([a], [b]) => Number(b === 'en0') - Number(a === 'en0'));
@@ -21,7 +21,7 @@ export function createGameServer({ port = Number(process.env.PORT) || 3000, host
   const rooms = new Map(), clients = new Map();
   let actualPort = port;
   const roomList = () => [...rooms.values()].filter((r) => r.mode === 'lan' && r.hostId).map((r) => r.summary());
-  const info = () => ({ name: 'LINKSHOT', version: '0.1.0', port: actualPort, urls: lanUrls(actualPort), rooms: roomList(), totalPlayers: [...clients.values()].filter((c) => c.room).length });
+  const info = () => ({ name: 'LINKSHOT', version: '0.1.0', protocolVersion: NETWORK_PROTOCOL, port: actualPort, urls: lanUrls(actualPort), rooms: roomList(), totalPlayers: [...clients.values()].filter((c) => c.room).length });
   const server = http.createServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'same-origin');
@@ -32,10 +32,12 @@ export function createGameServer({ port = Number(process.env.PORT) || 3000, host
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       response.end(request.method === 'HEAD' ? undefined : JSON.stringify(info())); return;
     }
-    const allowedShared = new Set(['/shared/world.js', '/shared/movement.js', '/shared/catalog.js', '/shared/simulation.js', '/shared/progression.js', '/shared/outfits.js']);
+    const allowedShared = new Set(['/shared/world.js', '/shared/buildings.js', '/shared/movement.js', '/shared/catalog.js', '/shared/simulation.js', '/shared/progression.js', '/shared/outfits.js']);
     const vendor = { '/vendor/three.module.js': 'three.module.js', '/vendor/three.core.js': 'three.core.js' };
+    const addon = { '/vendor/addons/loaders/GLTFLoader.js': 'loaders/GLTFLoader.js', '/vendor/addons/utils/BufferGeometryUtils.js': 'utils/BufferGeometryUtils.js', '/vendor/addons/utils/SkeletonUtils.js': 'utils/SkeletonUtils.js' };
     let file;
     if (vendor[pathname]) file = path.join(root, 'node_modules/three/build', vendor[pathname]);
+    else if (addon[pathname]) file = path.join(root, 'node_modules/three/examples/jsm', addon[pathname]);
     else if (allowedShared.has(pathname)) file = path.join(root, pathname);
     else {
       const publicRoot = path.join(root, 'public');
@@ -88,13 +90,14 @@ export function createGameServer({ port = Number(process.env.PORT) || 3000, host
         if (data.type === 'list') { send(socket, { type: 'rooms', rooms: roomList() }); return; }
         if (data.type === 'leave') { leave(client); send(socket, { type: 'left' }); return; }
         if (data.type === 'input') { rooms.get(client.room)?.setInput(client.id, data); return; }
+        if (data.type === 'loadout') { rooms.get(client.room)?.selectLoadout(client.id, data); return; }
         if (data.type === 'restart') { rooms.get(client.room)?.restart(client.id); return; }
         if (data.type === 'create' || data.type === 'join') {
           if (client.room) throw new Error('먼저 현재 방에서 나가 주세요.');
           if (data.type === 'create') {
             if (rooms.size >= 24) throw new Error('서버의 방이 모두 사용 중입니다.');
             const code = createRoomCode(rooms);
-            const room = new Room(code, { mode: data.mode === 'practice' ? 'practice' : 'lan', bots: data.bots, mapId: data.mapId });
+            const room = new Room(code, { mode: data.mode === 'practice' ? 'practice' : 'lan', bots: data.bots, mapId: data.mapId, botDifficulty: data.botDifficulty, fragLimit: data.fragLimit, roundSeconds: data.roundSeconds });
             rooms.set(code, room); enter(client, room, data.name, data);
           } else {
             const code = typeof data.code === 'string' ? data.code.toUpperCase().trim() : '';
