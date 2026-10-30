@@ -9,6 +9,7 @@ import { getOutfit } from '/shared/outfits.js';
 import { reconcileMovement } from './prediction.js';
 import { drawBuildings } from './building-view.js';
 import { CombatEffects } from './combat-effects.js';
+import { AimRecoil } from './aim-recoil.js';
 
 const $ = (id) => document.getElementById(id);
 const lerp = THREE.MathUtils.lerp;
@@ -57,6 +58,7 @@ export class FPSGame {
     this.send = send; this.onMenu = onMenu; this.onFatal = onFatal;
     this.abort = new AbortController(); this.keys = new Set(); this.remote = new Map(); this.effects = [];
     this.players = []; this.selfId = null; this.local = null; this.predicted = null; this.room = null;
+    this.aimRecoil = new AimRecoil();
     this.yaw = 0; this.pitch = 0; this.fireHeld = false; this.ads = false; this.disposed = false;
     this.lastFire = 0; this.lastSend = 0; this.lastMap = 0; this.lastScoreboard = 0; this.stepDistance = 0;
     this.reloadPressedUntil = 0; this.jumpPressedUntil = 0; this.recoil = 0; this.muzzleUntil = 0; this.serverOffset = 0; this.hadReload = false;
@@ -80,6 +82,8 @@ export class FPSGame {
     this.animate = this.animate.bind(this); this.frameId = requestAnimationFrame(this.animate);
   }
 
+  get pitch() { return this.aimRecoil.pitch; }
+  set pitch(value) { this.aimRecoil.reset(value); }
   get locked() { return document.pointerLockElement === this.canvas; }
   get serverNow() { return Date.now() + this.serverOffset; }
 
@@ -238,6 +242,7 @@ export class FPSGame {
     for (const [weaponId, model] of this.weaponModels) model.visible = weaponId === this.activeWeaponId;
     this.activeModel = this.weaponModels.get(this.activeWeaponId); this.muzzleFlash = this.activeModel.userData.flash;
     this.recoil = 0; this.switchAnimation = 1; this.muzzleUntil = 0; this.hadReload = false; this.localBurstLeft = 0; this.predictedShots = [];
+    this.aimRecoil.reset(this.aimRecoil.aimPitch);
   }
 
   playLocalShot(weapon, now, predicted = true) {
@@ -246,7 +251,7 @@ export class FPSGame {
     if (predicted) { this.predictedShots.push({ id: weapon.id, at: now }); while (this.predictedShots.length > 32) this.predictedShots.shift(); }
     if (weapon.type === 'SNIPER') { this.ads = false; $('scope-overlay').hidden = true; $('ads-reticle').hidden = true; }
     if (this.local?.hp > 0) {
-      this.pitch = clamp(this.pitch + weapon.recoil * (weapon.type === 'ASSAULT' ? 0.008 : 0.0045), -1.48, 1.48); this.camera.rotation.x = this.pitch; this.send(this.input());
+      this.aimRecoil.kick(weapon.recoil * (weapon.type === 'ASSAULT' ? 0.008 : 0.0045), now); this.camera.rotation.x = this.pitch; this.send(this.input());
     }
     this.muzzleFlash.rotation.y = Math.random() * Math.PI;
   }
@@ -289,7 +294,7 @@ export class FPSGame {
       const sensitivity = this.settings.sensitivity * 0.0020 * (this.ads ? getWeapon(this.activeWeaponId).type === 'SNIPER' ? Math.max(0.25, getWeapon(this.activeWeaponId).zoom) : 0.67 : 1);
       this.yaw -= event.movementX * sensitivity;
       this.yaw = Math.atan2(Math.sin(this.yaw), Math.cos(this.yaw));
-      this.pitch = clamp(this.pitch - event.movementY * sensitivity, -1.48, 1.48);
+      this.aimRecoil.move(-event.movementY * sensitivity);
     }, options);
     document.addEventListener('mousedown', (event) => {
       if (!this.locked) return;
@@ -566,6 +571,7 @@ export class FPSGame {
     if (this.disposed) return;
     this.frameId = requestAnimationFrame(this.animate);
     const dt = Math.min((now - this.previousFrame) / 1000, 1 / 30); this.previousFrame = now;
+    this.aimRecoil.update(now);
     const input = this.input();
     if (now - this.lastSend >= 1000 / 30 && this.local) { this.send(input); this.lastSend = now; }
     if (this.predicted && this.local) {
@@ -578,7 +584,8 @@ export class FPSGame {
       const moving = Math.abs(input.forward) + Math.abs(input.strafe) > 0;
       const ads = this.ads && this.locked && !this.hadReload && this.local.switchUntil <= this.serverNow && this.requestedWeaponId === this.local.weaponId && this.local.hp > 0;
       const bob = !ads && moving && this.predicted.grounded ? Math.sin(now * (sprinting ? 0.017 : 0.012)) : 0;
-      // View kick modifies this.pitch (and outgoing aim), not an unreported camera offset.
+      // Recoil recovers toward mouse aim; the composed pitch is also sent to
+      // the server, so recovery never creates a camera-only aiming offset.
       this.camera.position.set(this.predicted.x, this.predicted.y + playerPose(this.predicted).eyeHeight, this.predicted.z);
       this.audio.setEnvironment?.((this.world.buildings || []).some((building) => Math.abs(this.predicted.x - building.x) < building.w / 2 && Math.abs(this.predicted.z - building.z) < building.d / 2 && this.predicted.y < building.height - 0.1));
       if (this.local.hp <= 0) this.camera.position.y = this.predicted.y + lerp(playerPose(this.predicted).eyeHeight, 0.45, Math.min(1, (now - (this.deathAt || now)) / 700));

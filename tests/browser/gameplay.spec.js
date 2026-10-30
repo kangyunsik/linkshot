@@ -168,3 +168,33 @@ test('FAMAS fires a three-round burst on one press and does not repeat while hel
     await expect.poll(() => page.evaluate(() => window.__rules.sounds.filter((id) => id === 'famas').length)).toBe(6);
   } finally { await dispose(page); }
 });
+
+test('view recoil returns to the pre-shot aim after both a tap and sustained fire', async ({ page }) => {
+  await fixture(page);
+  try {
+    const initial = await page.evaluate(() => window.__rules.game.pitch);
+    await page.mouse.down(); await page.mouse.up();
+    await expect.poll(() => page.evaluate((initial) => window.__rules.game.pitch - initial, initial)).toBeGreaterThan(0.001);
+    await expect.poll(() => page.evaluate((initial) => Math.abs(window.__rules.game.pitch - initial), initial), { timeout: 3000, intervals: [50, 100] }).toBeLessThan(0.00001);
+    await page.mouse.down(); await expect.poll(() => page.evaluate((initial) => window.__rules.game.pitch - initial, initial)).toBeGreaterThan(0.06); await page.mouse.up();
+    await expect.poll(() => page.evaluate((initial) => Math.abs(window.__rules.game.pitch - initial), initial), { timeout: 3000, intervals: [50, 100] }).toBeLessThan(0.00001);
+    await expect.poll(() => page.evaluate((initial) => Math.abs(window.__rules.player.pitch - initial), initial)).toBeLessThan(0.00001);
+    const alignment = await page.evaluate(() => { const { game } = window.__rules; return Math.abs(game.camera.rotation.x - game.input().pitch); });
+    expect(alignment).toBeLessThan(1e-9);
+  } finally { await dispose(page); }
+});
+
+test('mouse aiming during recoil is preserved when the recoil recovers', async ({ page }) => {
+  await fixture(page);
+  try {
+    await page.mouse.down(); await page.mouse.up();
+    await expect.poll(() => page.evaluate(() => window.__rules.game.pitch)).toBeGreaterThan(0.001);
+    await page.evaluate(() => {
+      const event = new MouseEvent('mousemove', { bubbles: true });
+      Object.defineProperties(event, { movementY: { value: -20 }, movementX: { value: 6 } }); document.dispatchEvent(event);
+    });
+    await expect.poll(() => page.evaluate(() => Math.abs(window.__rules.game.pitch - 0.04)), { timeout: 3000, intervals: [50, 100] }).toBeLessThan(0.00001);
+    expect(await page.evaluate(() => window.__rules.game.yaw)).toBeCloseTo(-0.012, 8);
+    await expect.poll(() => page.evaluate(() => Math.abs(window.__rules.player.pitch - 0.04))).toBeLessThan(0.00001);
+  } finally { await dispose(page); }
+});
