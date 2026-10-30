@@ -169,6 +169,21 @@ test('FAMAS fires a three-round burst on one press and does not repeat while hel
   } finally { await dispose(page); }
 });
 
+test('an empty magazine reloads automatically after a tap, updating the HUD and playing one reload sound', async ({ page }) => {
+  await fixture(page);
+  try {
+    await page.evaluate(() => {
+      const f = window.__rules; f.player.ammo = 1; f.player.magazines.rifle = 1; f.game.applySnapshot(f.room.snapshot());
+      f.reloads = 0; f.game.audio.reload = () => { f.reloads++; };
+    });
+    await page.mouse.down(); await page.mouse.up(); await expect(page.locator('#reload-indicator')).toBeVisible();
+    expect(await page.evaluate(() => window.__rules.game.fireHeld)).toBe(false);
+    await expect(page.locator('#hud-ammo')).toHaveText('30'); await expect(page.locator('#reload-indicator')).toBeHidden();
+    expect(await page.evaluate(() => window.__rules.reloads)).toBe(1);
+    expect(await page.evaluate(() => window.__rules.sounds.filter((id) => id === 'rifle').length)).toBe(1);
+  } finally { await dispose(page); }
+});
+
 test('view recoil returns to the pre-shot aim after both a tap and sustained fire', async ({ page }) => {
   await fixture(page);
   try {

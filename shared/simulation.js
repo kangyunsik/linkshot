@@ -342,7 +342,7 @@ export class Room {
       player.shotHeat = Math.max(0, (player.shotHeat || 0) - dt * 1.35);
       const weapon = getWeapon(player.weaponId);
       if (player.reloadUntil && now >= player.reloadUntil) { player.ammo = weapon.magazine; player.reloadUntil = 0; }
-      if ((input.reload || (input.fire && player.ammo === 0 && now >= player.nextFireAt)) && player.ammo < weapon.magazine && !player.reloadUntil && now >= player.switchUntil) {
+      if ((input.reload || (player.ammo === 0 && now >= player.nextFireAt)) && player.ammo < weapon.magazine && !player.reloadUntil && now >= player.switchUntil) {
         player.burstLeft = 0; player.pendingShot = null;
         player.reloadUntil = now + weapon.reloadSeconds * 1000;
         this.events.push({ type: 'reload', id: player.id, weaponId: player.weaponId });

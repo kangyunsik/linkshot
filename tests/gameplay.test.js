@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RULES, MAPS, hasLineOfSight } from '../shared/world.js';
 import { EMPTY_INPUT, movePlayer } from '../shared/movement.js';
-import { getWeapon, shotSpread } from '../shared/catalog.js';
+import { WEAPONS, getWeapon, shotSpread } from '../shared/catalog.js';
 import { Room, BOT_DIFFICULTIES, BOT_BEHAVIOR, getBotDifficulty } from '../shared/simulation.js';
 
 const input = (extra = {}) => ({ ...EMPTY_INPUT, ...extra });
@@ -78,6 +78,22 @@ test('the sniper last shot cannot start an automatic reload sound during its fir
   now += 100; room.setInput('a', input({ weaponId: 'sniper', fire: true })); room.tick(1 / 60); assert.equal(p.reloadUntil, 0);
   assert.equal(room.events.filter((event) => event.type === 'reload').length, 0);
   now = p.nextFireAt + 1; room.setInput('a', input({ weaponId: 'sniper', reload: true })); room.tick(1 / 60); assert.ok(p.reloadUntil > now);
+});
+
+test('every empty weapon automatically reloads after its final shot even after releasing the trigger', () => {
+  for (const weapon of WEAPONS) {
+    let now = 1000; const room = new Room('AUTOR', { bots: 0, clock: () => now }), p = room.addPlayer('a', 'ALPHA', false, { weaponId: weapon.id, ownedWeapons: [weapon.id] });
+    p.ammo = 1; room.setInput(p.id, input({ weaponId: weapon.id, fire: true })); room.tick(1 / 60);
+    assert.equal(p.ammo, 0, weapon.id); assert.equal(p.reloadUntil, 0);
+    room.setInput(p.id, input({ weaponId: weapon.id }));
+    now = p.nextFireAt - 1; room.tick(1 / 60); assert.equal(p.reloadUntil, 0, `${weapon.id}: wait for the final firing cycle`);
+    now = p.nextFireAt; room.tick(1 / 60);
+    assert.equal(p.reloadUntil, now + weapon.reloadSeconds * 1000, `${weapon.id}: reload without fire or R`);
+    const until = p.reloadUntil; now = until - 1; room.tick(1 / 60); assert.equal(p.ammo, 0); assert.equal(p.reloadUntil, until);
+    now = until; room.tick(1 / 60); assert.equal(p.ammo, weapon.magazine); assert.equal(p.reloadUntil, 0);
+    assert.equal(room.events.filter((event) => event.type === 'reload').length, 1, `${weapon.id}: no duplicate reload event`);
+    assert.equal(room.events.filter((event) => event.type === 'shot').length, 1, `${weapon.id}: do not fire again after release`);
+  }
 });
 
 test('FAMAS delivers exactly three rounds per press, finishes a released burst and cancels for reload', () => {
