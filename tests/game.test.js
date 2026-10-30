@@ -23,7 +23,7 @@ test('movement is normalized, frame-rate independent, and cannot cross cover', (
 test('jump returns to the ground, holding jump cannot auto-bounce, and release re-arms it', () => {
   const p = player(); let highest = 0;
   for (let i = 0; i < 100; i++) { movePlayer(p, input({ jump: true }), 1 / 60); highest = Math.max(highest, p.y); }
-  assert.ok(highest > 1 && highest < 1.3);
+  assert.ok(highest > 2 && highest < 2.15);
   assert.equal(p.y, 0); assert.equal(p.grounded, true);
   movePlayer(p, input(), 1 / 60); movePlayer(p, input({ jump: true }), 1 / 60);
   assert.ok(p.y > 0);

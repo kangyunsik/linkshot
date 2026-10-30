@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, access } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, access, rename } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -36,19 +36,21 @@ const assets = [
     ['camo', 'white gray black digital camouflage pattern texture, irregular angular geometric polygon patches, arctic military camouflage, flat graphic pattern, matte painted surface, seamless all over pattern, no perspective'],
   ].map(([id, pattern], i) => ({ file: `skin-${id}.png`, width: 768, height: 768, seed: 7092600 + i, prompt: `masterpiece, best quality, no humans, ${pattern}, game weapon skin texture, top down orthographic material swatch, flat even lighting, full frame abstract pattern` })),
   ...[
-    ['field', 'adult androgynous futuristic tactical operator, fully covered face, olive gray armored field uniform, orange narrow visor, compact military helmet, utilitarian clean silhouette'],
-    ['runner', 'adult androgynous futuristic reconnaissance operative, charcoal hood over a full face helmet, mint cyan narrow visor, dark layered tactical suit, subtle mint circuit accents, clean stealth scout silhouette'],
-    ['hazmat', 'adult androgynous industrial science fiction hazard operative, mustard yellow fully sealed protective suit, full face breathing mask, pale teal glass visor, compact twin filter respirator, small breathing tanks on the back, thick protective panels'],
-    ['orbital', 'adult androgynous orbital space guard, white and pale blue full protective space armor, rounded full face astronaut combat helmet, cyan glass visor, compact life support backpack, blue chest control panel, clean science fiction silhouette'],
-    ['retrobot', 'friendly retro futuristic combat android, orange and charcoal mechanical armored body, rectangular helmet face display, two small mint green digital eyes, boxy segmented limbs, industrial 1980s science fiction robot design'],
+    ['field', 'military, soldier, olive green jacket, tactical vest, cargo pants, boots, orange trim, fingerless gloves, headset, goggles on forehead, uncovered head, practical field uniform'],
+    ['runner', 'scout, (hood down:1.4), uncovered head, dark gray hooded jacket with hood resting behind neck, mint green trim, tactical vest, cargo pants, boots, fingerless gloves, futuristic reconnaissance uniform'],
+    ['hazmat', 'hazmat specialist, yellow protective jacket, yellow cargo pants, dark gloves, boots, clear face shield raised above forehead, respirator hanging below chin, compact oxygen backpack, practical industrial workwear'],
+    ['orbital', 'astronaut, (transparent glass helmet:1.2), (face visible through glass:1.4), white and pale blue spacesuit, gloves, boots, compact life support backpack, blue chest control panel'],
+    ['retrobot', 'human pilot, orange armored vest over dark gray fabric uniform, orange shoulder guards, cargo pants, boots, fingerless gloves, headset, goggles on forehead, uncovered head, green equipment lights, retro futuristic pilot clothing'],
   ].map(([id, character], i) => ({
-    file: `outfit-${id}.png`, width: 768, height: 1024, seed: 7092700 + i,
-    prompt: `masterpiece, best quality, very aesthetic, rating:general, solo, full body, standing neutral pose, ${character}, fully clothed, no exposed skin, original character design, game character concept art, professional model sheet style, entire body visible including boots, centered composition, plain dark blue gray studio background, soft cinematic rim lighting, detailed hard surface armor, anime concept illustration`,
-    negative: 'worst quality, low quality, blurry, text, logo, watermark, signature, multiple people, crowd, cropped feet, close up, nude, naked, bikini, revealing clothes, exposed skin, blood, gore, weapon in hands, firearm, sword',
+    file: `outfit-${id}.png`, width: 768, height: 1024, seed: 7093700 + i,
+    prompt: `masterpiece, best quality, very aesthetic, rating:general, 1boy, adult man, solo, (human:1.3), (uncovered human face:1.5), (visible eyes nose and mouth:1.4), short black hair, brown eyes, looking at viewer, full body, standing, ${character}, fully clothed, natural human anatomy, original character, game character concept illustration, entire body including boots, centered, plain dark blue gray background, soft studio lighting, detailed fabric`,
+    negative: 'worst quality, low quality, blurry, text, logo, watermark, signature, multiple people, crowd, cropped feet, close up, nude, naked, bikini, revealing clothes, blood, gore, weapon in hands, firearm, sword, robot, android, mannequin, blocky body, square head, mechanical face, (covered face:1.5), (faceless:1.5), full-face helmet, opaque visor, black face, mask over face, closed helmet, silhouette',
   })),
   { file: 'outfit-panels.png', width: 768, height: 768, seed: 7092800, prompt: 'masterpiece, best quality, no humans, neutral light gray futuristic polymer armor material texture, tiny geometric panel seams, fine matte microtexture, subtle fabric weave, clean abstract technical surface, even soft lighting, flat orthographic material swatch, seamless full frame pattern, no perspective' },
 ];
 const negative = 'worst quality, low quality, lowres, blurry, text, logo, watermark, signature, people, person, character, face, organic, plants, oversaturated';
+const selectedOutfits = process.argv.find((arg) => arg.startsWith('--outfit='))?.slice('--outfit='.length).split(',');
+if (selectedOutfits?.some((id) => !assets.some((asset) => asset.file === `outfit-${id}.png` && id !== 'panels'))) throw new Error('알 수 없는 외형입니다. --outfit=field,runner,hazmat,orbital,retrobot 중 선택하세요.');
 
 async function api(route, options = {}) {
   const response = await fetch(`${base}${route}`, { ...options, signal: AbortSignal.timeout(30_000) });
@@ -58,6 +60,7 @@ async function api(route, options = {}) {
 
 await mkdir(path.join(root, 'public/assets'), { recursive: true });
 await mkdir(path.join(root, 'artifacts/workflows'), { recursive: true });
+await mkdir(path.join(root, 'artifacts/asset-staging'), { recursive: true });
 try {
   await api('/system_stats');
 } catch (error) {
@@ -71,6 +74,8 @@ const checkpoint = checkpoints.find((name) => name.includes('animagine-xl-4.0-op
 if (!checkpoint) throw new Error('ComfyUI에 체크포인트가 없습니다.');
 
 for (const asset of assets) {
+  if (selectedOutfits && !selectedOutfits.some((id) => asset.file === `outfit-${id}.png`)) continue;
+  if (process.argv.includes('--outfits') && !/^outfit-(?:field|runner|hazmat|orbital|retrobot)\.png$/.test(asset.file)) continue;
   const target = path.join(root, 'public/assets', asset.file);
   if (!process.argv.includes('--force')) {
     try { await access(target); console.log(`기존 애셋 유지: ${asset.file}`); continue; } catch { /* Generate missing assets. */ }
@@ -101,7 +106,8 @@ for (const asset of assets) {
   const query = new URLSearchParams({ filename: image.filename, subfolder: image.subfolder || '', type: image.type });
   const response = await fetch(`${base}/view?${query}`, { signal: AbortSignal.timeout(60_000) });
   if (!response.ok) throw new Error(`이미지를 가져오지 못했습니다: ${response.status}`);
-  await writeFile(target, Buffer.from(await response.arrayBuffer()));
+  const staged = path.join(root, 'artifacts/asset-staging', asset.file);
+  await writeFile(staged, Buffer.from(await response.arrayBuffer())); await rename(staged, target);
   console.log(`저장 완료: public/assets/${asset.file}`);
 }
 

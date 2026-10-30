@@ -4,8 +4,9 @@ import { WEAPONS, getWeapon, getSkin } from '/shared/catalog.js';
 import { EMPTY_INPUT, movePlayer, clamp, angleDelta } from '/shared/movement.js';
 import { drawTacticalMap } from './map.js';
 import { WeaponModels, disposeModel } from './weapon-model.js';
-import { createOperator } from './operator-model.js';
+import { createOperator, poseOperator } from './operator-model.js';
 import { getOutfit } from '/shared/outfits.js';
+import { reconcileMovement } from './prediction.js';
 
 const $ = (id) => document.getElementById(id);
 const lerp = THREE.MathUtils.lerp;
@@ -56,7 +57,7 @@ export class FPSGame {
     this.players = []; this.selfId = null; this.local = null; this.predicted = null; this.room = null;
     this.yaw = 0; this.pitch = 0; this.fireHeld = false; this.ads = false; this.disposed = false;
     this.lastFire = 0; this.lastSend = 0; this.lastMap = 0; this.lastScoreboard = 0; this.stepDistance = 0;
-    this.reloadPressedUntil = 0; this.recoil = 0; this.muzzleUntil = 0; this.serverOffset = 0; this.hadReload = false;
+    this.reloadPressedUntil = 0; this.jumpPressedUntil = 0; this.recoil = 0; this.muzzleUntil = 0; this.serverOffset = 0; this.hadReload = false;
     this.world = getMap(mapId); this.skinId = getSkin(skinId).id; this.requestedWeaponId = getWeapon(weaponId).id;
     this.outfitId = getOutfit(outfitId).id;
     this.models = new WeaponModels(); this.fireLatched = false; this.switchAnimation = 0; this.localNextFire = 0;
@@ -281,6 +282,7 @@ export class FPSGame {
       if (weaponKey && !event.repeat) { const weapon = WEAPONS.find((item) => item.slot === Number(weaponKey[2])); if (weapon) { event.preventDefault(); this.selectWeapon(weapon.id); } }
       if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'ControlLeft', 'ControlRight', 'Tab'].includes(event.code)) event.preventDefault();
       this.keys.add(event.code);
+      if (event.code === 'Space' && !event.repeat) { this.jumpPressedUntil = performance.now() + 120; this.send(this.input()); }
       if (event.code === 'KeyR' && !event.repeat) this.reloadPressedUntil = performance.now() + 180;
       if (event.code === 'KeyF' && !event.repeat) {
         if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
@@ -298,7 +300,7 @@ export class FPSGame {
   }
 
   clearInput() {
-    this.keys.clear(); this.fireHeld = false; this.firePressedUntil = 0; this.ads = false; this.reloadPressedUntil = 0;
+    this.keys.clear(); this.fireHeld = false; this.firePressedUntil = 0; this.ads = false; this.reloadPressedUntil = 0; this.jumpPressedUntil = 0;
     $('scoreboard-overlay').hidden = true;
     this.send({ type: 'input', ...EMPTY_INPUT, yaw: this.yaw, pitch: this.pitch, weaponId: this.requestedWeaponId });
   }
@@ -335,12 +337,7 @@ export class FPSGame {
       this.requestedWeaponId = local.weaponId; this.localNextFire = 0; this.fireLatched = false;
       this.clearDamageDirections();
     } else {
-      const error = Math.hypot(local.x - this.predicted.x, local.z - this.predicted.z);
-      const factor = error > 3 ? 1 : 0.36;
-      this.predicted.x = lerp(this.predicted.x, local.x, factor); this.predicted.z = lerp(this.predicted.z, local.z, factor);
-      if (Math.abs(local.y - this.predicted.y) > 1.5) { this.predicted.y = local.y; this.predicted.vy = local.vy; }
-      else { this.predicted.y = lerp(this.predicted.y, local.y, 0.18); this.predicted.vy = lerp(this.predicted.vy, local.vy, 0.18); }
-      if (local.grounded && this.predicted.y < 0.08) { this.predicted.y = local.y; this.predicted.grounded = true; this.predicted.vy = 0; }
+      reconcileMovement(this.predicted, local, this.world);
     }
     this.local = local;
     this.predicted.weaponId = local.weaponId;
@@ -485,7 +482,7 @@ export class FPSGame {
     return {
       type: 'input', forward: active ? Number(this.keys.has('KeyW')) - Number(this.keys.has('KeyS')) : 0,
       strafe: active ? Number(this.keys.has('KeyD')) - Number(this.keys.has('KeyA')) : 0,
-      yaw: this.yaw, pitch: this.pitch, jump: active && this.keys.has('Space'),
+      yaw: this.yaw, pitch: this.pitch, jump: active && (this.keys.has('Space') || performance.now() < this.jumpPressedUntil),
       sprint: active && (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) && !this.ads && !crouch,
       crouch,
       fire: active && (this.fireHeld || performance.now() < this.firePressedUntil), reload: active && performance.now() < this.reloadPressedUntil,
@@ -554,11 +551,10 @@ export class FPSGame {
       avatar.weapon.rotation.x = target.pitch;
       avatar.weapon.userData.flash.visible = now < avatar.flashUntil;
       avatar.crouchAmount = lerp(avatar.crouchAmount, target.crouching ? 1 : 0, Math.min(1, dt * 14));
-      for (const part of avatar.crouchParts) { part.mesh.position.y = part.y - part.lowerBy * avatar.crouchAmount; part.mesh.scale.y = part.height * lerp(1, part.scaleY, avatar.crouchAmount); }
-      avatar.weapon.position.y = 1.05 - avatar.crouchAmount * 0.49; avatar.label.position.y = 2.15 - avatar.crouchAmount * 0.7;
+      avatar.label.position.y = 2.15 - avatar.crouchAmount * 0.7;
       const speed = Math.hypot(position.x - avatar.lastX, position.z - avatar.lastZ) / Math.max(dt, 0.001);
       const stride = Math.sin(now * 0.011) * Math.min(0.5, speed * 0.08) * (1 - avatar.crouchAmount * 0.65);
-      for (let i = 0; i < avatar.legs.length; i++) { const leg = avatar.legs[i]; leg.position.y = lerp(0.72, 0.53, avatar.crouchAmount); leg.rotation.x = avatar.crouchAmount * 1.1 + (i ? -stride : stride); leg.userData.knee.rotation.x = -avatar.crouchAmount * 1.1; }
+      poseOperator(avatar, avatar.crouchAmount, stride);
       avatar.lastX = position.x; avatar.lastZ = position.z;
     }
     if (now - this.lastMap > 100 && this.predicted) {

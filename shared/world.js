@@ -5,6 +5,7 @@ export const RULES = Object.freeze({
   playerRadius: 0.34, playerHeight: 1.8, eyeHeight: 1.62,
   crouchHeight: 1.1, crouchEyeHeight: 0.92, crouchSpeed: 2.565,
   walkSpeed: 5.7, sprintSpeed: 8.55, stepHeight: 0.48,
+  jumpSpeed: 9.2, gravity: 20,
   switchSeconds: 0.32,
 });
 

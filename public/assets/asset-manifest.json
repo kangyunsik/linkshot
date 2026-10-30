@@ -77,36 +77,36 @@
     },
     {
       "file": "outfit-field.png",
-      "prompt": "masterpiece, best quality, very aesthetic, rating:general, solo, full body, standing neutral pose, adult androgynous futuristic tactical operator, fully covered face, olive gray armored field uniform, orange narrow visor, compact military helmet, utilitarian clean silhouette, fully clothed, no exposed skin, original character design, game character concept art, professional model sheet style, entire body visible including boots, centered composition, plain dark blue gray studio background, soft cinematic rim lighting, detailed hard surface armor, anime concept illustration",
-      "seed": 7092700,
+      "prompt": "masterpiece, best quality, very aesthetic, rating:general, 1boy, adult man, solo, (human:1.3), (uncovered human face:1.5), (visible eyes nose and mouth:1.4), short black hair, brown eyes, looking at viewer, full body, standing, military, soldier, olive green jacket, tactical vest, cargo pants, boots, orange trim, fingerless gloves, headset, goggles on forehead, uncovered head, practical field uniform, fully clothed, natural human anatomy, original character, game character concept illustration, entire body including boots, centered, plain dark blue gray background, soft studio lighting, detailed fabric",
+      "seed": 7093700,
       "width": 768,
       "height": 1024
     },
     {
       "file": "outfit-runner.png",
-      "prompt": "masterpiece, best quality, very aesthetic, rating:general, solo, full body, standing neutral pose, adult androgynous futuristic reconnaissance operative, charcoal hood over a full face helmet, mint cyan narrow visor, dark layered tactical suit, subtle mint circuit accents, clean stealth scout silhouette, fully clothed, no exposed skin, original character design, game character concept art, professional model sheet style, entire body visible including boots, centered composition, plain dark blue gray studio background, soft cinematic rim lighting, detailed hard surface armor, anime concept illustration",
-      "seed": 7092701,
+      "prompt": "masterpiece, best quality, very aesthetic, rating:general, 1boy, adult man, solo, (human:1.3), (uncovered human face:1.5), (visible eyes nose and mouth:1.4), short black hair, brown eyes, looking at viewer, full body, standing, scout, (hood down:1.4), uncovered head, dark gray hooded jacket with hood resting behind neck, mint green trim, tactical vest, cargo pants, boots, fingerless gloves, futuristic reconnaissance uniform, fully clothed, natural human anatomy, original character, game character concept illustration, entire body including boots, centered, plain dark blue gray background, soft studio lighting, detailed fabric",
+      "seed": 7093701,
       "width": 768,
       "height": 1024
     },
     {
       "file": "outfit-hazmat.png",
-      "prompt": "masterpiece, best quality, very aesthetic, rating:general, solo, full body, standing neutral pose, adult androgynous industrial science fiction hazard operative, mustard yellow fully sealed protective suit, full face breathing mask, pale teal glass visor, compact twin filter respirator, small breathing tanks on the back, thick protective panels, fully clothed, no exposed skin, original character design, game character concept art, professional model sheet style, entire body visible including boots, centered composition, plain dark blue gray studio background, soft cinematic rim lighting, detailed hard surface armor, anime concept illustration",
-      "seed": 7092702,
+      "prompt": "masterpiece, best quality, very aesthetic, rating:general, 1boy, adult man, solo, (human:1.3), (uncovered human face:1.5), (visible eyes nose and mouth:1.4), short black hair, brown eyes, looking at viewer, full body, standing, hazmat specialist, yellow protective jacket, yellow cargo pants, dark gloves, boots, clear face shield raised above forehead, respirator hanging below chin, compact oxygen backpack, practical industrial workwear, fully clothed, natural human anatomy, original character, game character concept illustration, entire body including boots, centered, plain dark blue gray background, soft studio lighting, detailed fabric",
+      "seed": 7093702,
       "width": 768,
       "height": 1024
     },
     {
       "file": "outfit-orbital.png",
-      "prompt": "masterpiece, best quality, very aesthetic, rating:general, solo, full body, standing neutral pose, adult androgynous orbital space guard, white and pale blue full protective space armor, rounded full face astronaut combat helmet, cyan glass visor, compact life support backpack, blue chest control panel, clean science fiction silhouette, fully clothed, no exposed skin, original character design, game character concept art, professional model sheet style, entire body visible including boots, centered composition, plain dark blue gray studio background, soft cinematic rim lighting, detailed hard surface armor, anime concept illustration",
-      "seed": 7092703,
+      "prompt": "masterpiece, best quality, very aesthetic, rating:general, 1boy, adult man, solo, (human:1.3), (uncovered human face:1.5), (visible eyes nose and mouth:1.4), short black hair, brown eyes, looking at viewer, full body, standing, astronaut, (transparent glass helmet:1.2), (face visible through glass:1.4), white and pale blue spacesuit, gloves, boots, compact life support backpack, blue chest control panel, fully clothed, natural human anatomy, original character, game character concept illustration, entire body including boots, centered, plain dark blue gray background, soft studio lighting, detailed fabric",
+      "seed": 7093703,
       "width": 768,
       "height": 1024
     },
     {
       "file": "outfit-retrobot.png",
-      "prompt": "masterpiece, best quality, very aesthetic, rating:general, solo, full body, standing neutral pose, friendly retro futuristic combat android, orange and charcoal mechanical armored body, rectangular helmet face display, two small mint green digital eyes, boxy segmented limbs, industrial 1980s science fiction robot design, fully clothed, no exposed skin, original character design, game character concept art, professional model sheet style, entire body visible including boots, centered composition, plain dark blue gray studio background, soft cinematic rim lighting, detailed hard surface armor, anime concept illustration",
-      "seed": 7092704,
+      "prompt": "masterpiece, best quality, very aesthetic, rating:general, 1boy, adult man, solo, (human:1.3), (uncovered human face:1.5), (visible eyes nose and mouth:1.4), short black hair, brown eyes, looking at viewer, full body, standing, human pilot, orange armored vest over dark gray fabric uniform, orange shoulder guards, cargo pants, boots, fingerless gloves, headset, goggles on forehead, uncovered head, green equipment lights, retro futuristic pilot clothing, fully clothed, natural human anatomy, original character, game character concept illustration, entire body including boots, centered, plain dark blue gray background, soft studio lighting, detailed fabric",
+      "seed": 7093704,
       "width": 768,
       "height": 1024
     },

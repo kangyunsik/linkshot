@@ -1,6 +1,7 @@
 import * as THREE from '/vendor/three.module.js';
 import { getWeapon, getSkin } from '/shared/catalog.js';
 import { getOutfit } from '/shared/outfits.js';
+import { HumanParts } from './human-model.js';
 
 export function disposeModel(group) {
   const geometries = new Set(), materials = new Set();
@@ -130,10 +131,14 @@ export class WeaponModels {
     if (firstPerson) {
       const outfit = getOutfit(outfitId);
       const sleeve = material(outfit.id === 'field' ? skin.suit : outfit.suit, { roughness: 0.95, metalness: 0 });
-      const rightArm = box([0.12, 0.12, 0.35], [0.08, -0.23, 0.30], sleeve); rightArm.rotation.x = -0.3; rightArm.rotation.z = 0.14;
-      box([0.10, 0.12, 0.13], [0.055, -0.14, 0.14], rubber);
-      const leftArm = box([0.1, 0.1, 0.32], [-0.14, -0.2, weapon.id === 'pistol' ? 0.14 : -0.17], sleeve); leftArm.rotation.y = -0.55; leftArm.rotation.x = -0.3;
-      box([0.12, 0.09, 0.12], [-0.03, weapon.id === 'pistol' ? -0.14 : -0.09, weapon.id === 'pistol' ? 0.12 : -0.34], rubber);
+      const gloves = material(outfit.id === 'field' ? skin.dark : outfit.dark, { roughness: 0.94, metalness: 0 });
+      const fingers = outfit.id === 'hazmat' || outfit.id === 'orbital' ? gloves : material('#bf9278', { roughness: 0.92, metalness: 0 });
+      const anatomy = new HumanParts(), arms = new THREE.Group(); arms.name = 'first-person-human-arms'; group.add(arms);
+      anatomy.segment(arms, [0.16, -0.30, 0.46], [0.063, -0.19, 0.17], 0.125, sleeve, 'right-sleeve');
+      const right = anatomy.hand(arms, [0.055, -0.15, 0.14], gloves, fingers, 'right-hand'); right.rotation.set(-0.25, 0, 0.15);
+      const support = weapon.id === 'pistol' ? [-0.025, -0.16, 0.12] : [-0.035, -0.105, -0.34];
+      anatomy.segment(arms, [-0.25, -0.28, 0.26], [support[0] - 0.03, support[1] - 0.055, support[2] + 0.03], 0.115, sleeve, 'left-sleeve');
+      const left = anatomy.hand(arms, support, gloves, fingers, 'left-hand'); left.rotation.set(weapon.id === 'pistol' ? -0.4 : -1.15, -0.35, -1.1);
     }
     const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.02, muzzleZ); group.add(muzzle);
     const flash = new THREE.Mesh(new THREE.ConeGeometry(weapon.id === 'shotgun' ? 0.11 : 0.07, 0.23, 5), new THREE.MeshBasicMaterial({ color: '#ffda98', transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: !firstPerson }));

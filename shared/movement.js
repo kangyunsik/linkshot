@@ -4,6 +4,19 @@ import { DEFAULT_WEAPON, isWeaponId, getWeapon } from './catalog.js';
 export const EMPTY_INPUT = Object.freeze({ forward: 0, strafe: 0, yaw: 0, pitch: 0, jump: false, sprint: false, crouch: false, fire: false, reload: false, ads: false, weaponId: DEFAULT_WEAPON });
 export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 export const angleDelta = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+const CONTACT_EPSILON = 0.00001;
+const overlaps = (player, b) => player.x > b.minX + CONTACT_EPSILON && player.x < b.maxX - CONTACT_EPSILON && player.z > b.minZ + CONTACT_EPSILON && player.z < b.maxZ - CONTACT_EPSILON;
+
+// All contacts share the full horizontal footprint; a smaller landing radius lets
+// feet sink into ledges that the side solver then treats as an overlapping wall.
+export function supportHeight(player, world = WORLD, maxDrop = 0.02) {
+  let floor = player.y >= -CONTACT_EPSILON && player.y <= maxDrop + CONTACT_EPSILON ? 0 : null;
+  for (const box of world.obstacles) {
+    const b = bounds(box, RULES.playerRadius);
+    if (overlaps(player, b) && b.maxY <= player.y + CONTACT_EPSILON && player.y - b.maxY <= maxDrop + CONTACT_EPSILON) floor = Math.max(floor ?? 0, b.maxY);
+  }
+  return floor;
+}
 
 export function sanitizeInput(data, previous = EMPTY_INPUT) {
   const finite = (value, fallback = 0) => typeof value === 'number' && Number.isFinite(value) ? value : fallback;
@@ -19,7 +32,7 @@ export function sanitizeInput(data, previous = EMPTY_INPUT) {
 export function canStand(player, world = WORLD) {
   return !world.obstacles.some((box) => {
     const b = bounds(box, RULES.playerRadius);
-    return player.x > b.minX && player.x < b.maxX && player.z > b.minZ && player.z < b.maxZ && player.y < b.maxY - 0.02 && player.y + RULES.playerHeight > b.minY + 0.02;
+    return overlaps(player, b) && player.y < b.maxY - CONTACT_EPSILON && player.y + RULES.playerHeight > b.minY + CONTACT_EPSILON;
   });
 }
 
@@ -40,67 +53,60 @@ export function movePlayer(player, input, dt, world = WORLD) {
   const length = Math.hypot(forward, strafe);
   if (length > 1) { forward /= length; strafe /= length; }
   const speed = movementSpeed(player, input);
-  const dx = (Math.cos(input.yaw) * strafe - Math.sin(input.yaw) * forward) * speed * dt;
-  const dz = (-Math.sin(input.yaw) * strafe - Math.cos(input.yaw) * forward) * speed * dt;
+  const vx = (Math.cos(input.yaw) * strafe - Math.sin(input.yaw) * forward) * speed;
+  const vz = (-Math.sin(input.yaw) * strafe - Math.cos(input.yaw) * forward) * speed;
   const radius = RULES.playerRadius;
-  const intersectsHeight = (b) => player.y + 0.02 < b.maxY && player.y + height > b.minY;
+  const colliders = world.obstacles.map((box) => bounds(box, radius));
+  const intersectsHeight = (b) => player.y < b.maxY - CONTACT_EPSILON && player.y + height > b.minY + CONTACT_EPSILON;
   const tryStep = (b) => {
     const rise = b.maxY - player.y;
-    if (!player.grounded || rise <= 0.02 || rise > RULES.stepHeight) return false;
-    const blocked = world.obstacles.some((box) => {
-      const other = bounds(box, radius);
-      return player.x > other.minX && player.x < other.maxX && player.z > other.minZ && player.z < other.maxZ && b.maxY + 0.02 < other.maxY && b.maxY + height > other.minY + 0.02;
-    });
+    if (!player.grounded || rise <= CONTACT_EPSILON || rise > RULES.stepHeight + CONTACT_EPSILON) return false;
+    const blocked = colliders.some((other) => overlaps(player, other) && b.maxY < other.maxY - CONTACT_EPSILON && b.maxY + height > other.minY + CONTACT_EPSILON);
     if (blocked) return false;
     player.y = b.maxY; player.vy = 0; return true;
   };
-
-  player.x += dx;
-  for (const box of world.obstacles) {
-    const b = bounds(box, radius);
-    if (intersectsHeight(b) && player.x > b.minX && player.x < b.maxX && player.z > b.minZ && player.z < b.maxZ) {
-      if (dx && tryStep(b)) continue;
-      if (dx > 0) player.x = b.minX;
-      else if (dx < 0) player.x = b.maxX;
-    }
-  }
-  player.z += dz;
-  for (const box of world.obstacles) {
-    const b = bounds(box, radius);
-    if (intersectsHeight(b) && player.x > b.minX && player.x < b.maxX && player.z > b.minZ && player.z < b.maxZ) {
-      if (dz && tryStep(b)) continue;
-      if (dz > 0) player.z = b.minZ;
-      else if (dz < 0) player.z = b.maxZ;
-    }
-  }
-
+  // Consume the jump edge before auto-step so jumping at a riser cannot also
+  // gain a free stair's height during the same frame.
   if (input.jump && !player.jumpHeld && player.grounded) {
-    player.vy = 6.8;
+    player.vy = RULES.jumpSpeed;
     player.grounded = false;
   }
   player.jumpHeld = input.jump;
-  const previousY = player.y;
-  player.vy = (player.vy || 0) - 20 * dt;
-  player.y += player.vy * dt;
-  player.grounded = false;
-  if (player.vy > 0) {
-    for (const box of world.obstacles) {
-      const b = bounds(box, radius * 0.7);
-      if (player.x > b.minX && player.x < b.maxX && player.z > b.minZ && player.z < b.maxZ && previousY + height <= b.minY + 0.02 && player.y + height >= b.minY) {
-        player.y = b.minY - height; player.vy = 0;
+  // Small collision steps and analytic gravity give 30–144Hz clients the same
+  // jump arc as the authoritative 60Hz server/solo worker.
+  const steps = Math.max(1, Math.ceil(dt / (1 / 120))), step = dt / steps;
+  for (let i = 0; i < steps; i++) {
+    for (const [axis, delta, lo, hi] of [['x', vx * step, 'minX', 'maxX'], ['z', vz * step, 'minZ', 'maxZ']]) {
+      player[axis] += delta;
+      for (const b of colliders) {
+        if (!delta || !intersectsHeight(b) || !overlaps(player, b)) continue;
+        if (tryStep(b)) continue;
+        player[axis] = delta > 0 ? b[lo] : b[hi];
       }
     }
-  }
-  if (player.vy <= 0) {
-    let floor = 0;
-    for (const box of world.obstacles) {
-      const b = bounds(box, radius * 0.7);
-      if (player.x > b.minX && player.x < b.maxX && player.z > b.minZ && player.z < b.maxZ && previousY >= b.maxY - 0.02 && player.y <= b.maxY) floor = Math.max(floor, b.maxY);
+    player.x = clamp(player.x, -world.width / 2 + radius, world.width / 2 - radius);
+    player.z = clamp(player.z, -world.depth / 2 + radius, world.depth / 2 - radius);
+    if (player.grounded) {
+      const floor = supportHeight(player, world, RULES.stepHeight);
+      if (floor !== null) { player.y = floor; player.vy = 0; continue; }
+      player.grounded = false;
     }
-    if (player.y <= floor) { player.y = floor; player.vy = 0; player.grounded = true; }
+    const previousY = player.y, velocity = player.vy || 0;
+    player.y += velocity * step - RULES.gravity * step * step / 2;
+    player.vy = velocity - RULES.gravity * step;
+    if (player.y > previousY) {
+      let ceiling = Infinity;
+      for (const b of colliders) {
+        if (overlaps(player, b) && previousY + height <= b.minY + CONTACT_EPSILON && player.y + height >= b.minY) ceiling = Math.min(ceiling, b.minY);
+      }
+      if (ceiling !== Infinity) { player.y = ceiling - height; player.vy = 0; }
+    } else {
+      let floor = 0;
+      for (const b of colliders) {
+        if (overlaps(player, b) && previousY >= b.maxY - CONTACT_EPSILON && player.y <= b.maxY) floor = Math.max(floor, b.maxY);
+      }
+      if (player.y <= floor) { player.y = floor; player.vy = 0; player.grounded = true; }
+    }
   }
-  player.x = clamp(player.x, -world.width / 2 + radius, world.width / 2 - radius);
-  player.z = clamp(player.z, -world.depth / 2 + radius, world.depth / 2 - radius);
-  if (player.y < 0) { player.y = 0; player.vy = 0; player.grounded = true; }
   return player;
 }

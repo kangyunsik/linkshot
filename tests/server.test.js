@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WebSocket } from 'ws';
 import { createGameServer } from '../server/index.js';
+import { RULES } from '../shared/world.js';
 
 function message(socket, type) {
   return new Promise((resolve, reject) => {
@@ -84,4 +85,24 @@ test('selected map, skin and starting weapon are shared with other LAN clients',
   for (let i = 0; i < 3; i++) { state = await message(b.socket, 'state'); if (state.players.find((p) => p.id === first.id).weaponId === 'shotgun') break; }
   assert.equal(state.players.find((p) => p.id === first.id).weaponId, 'shotgun');
   assert.equal((await (await fetch(`${base}/api/info`)).json()).rooms[0].mapId, 'longrail');
+});
+
+test('real LAN input can jump from ground onto an elevated firing deck and remain grounded', async (t) => {
+  const app = createGameServer({ port: 0, host: '127.0.0.1' }); const info = await app.listen(); t.after(() => app.close());
+  const a = await client(`http://127.0.0.1:${info.port}`); t.after(() => a.socket.terminate());
+  const response = message(a.socket, 'joined'); a.send({ type: 'create', bots: 0, mode: 'lan' }); const joined = await response;
+  const room = app.rooms.get(joined.room.code), platform = room.world.platforms[0], player = room.players.get(joined.id);
+  Object.assign(player, { x: platform.x, y: 0, z: platform.z + 2.5 + RULES.playerRadius, vy: 0, grounded: true, jumpHeld: false, yaw: 0 });
+  a.send({ type: 'input', forward: 1, jump: true, yaw: 0 });
+  let airborne = false, landed = false, stopped = false;
+  for (let i = 0; i < 30; i++) {
+    const state = await message(a.socket, 'state'), current = state.players.find((p) => p.id === joined.id);
+    airborne ||= current.y > 0.2 && !current.grounded;
+    if (!stopped && current.z < platform.z + 1.8) { a.send({ type: 'input', jump: true, yaw: 0 }); stopped = true; }
+    if (airborne && current.grounded && current.y === platform.height) { landed = true; break; }
+  }
+  assert.equal(airborne, true); assert.equal(landed, true);
+  a.send({ type: 'input', yaw: 0 });
+  const settled = (await message(a.socket, 'state')).players.find((p) => p.id === joined.id);
+  assert.equal(settled.y, platform.height); assert.equal(settled.grounded, true);
 });
