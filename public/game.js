@@ -5,7 +5,7 @@ import { EMPTY_INPUT, movePlayer, clamp, angleDelta } from '/shared/movement.js'
 import { drawTacticalMap } from './map.js';
 import { WeaponModels, disposeModel } from './weapon-model.js';
 import { createOperator, poseOperator } from './operator-model.js';
-import { getOutfit } from '/shared/outfits.js';
+import { getOutfit, getCharacter } from '/shared/outfits.js';
 import { reconcileMovement } from './prediction.js';
 import { drawBuildings } from './building-view.js';
 import { CombatEffects } from './combat-effects.js';
@@ -55,7 +55,7 @@ function signTexture(title, subtitle, orange = false) {
 }
 
 export class FPSGame {
-  constructor({ canvas, minimap, settings, audio, send, onMenu, onFatal, mapId, weaponId = 'rifle', skinId = 'standard', outfitId = 'field' }) {
+  constructor({ canvas, minimap, settings, audio, send, onMenu, onFatal, mapId, weaponId = 'rifle', skinId = 'standard', outfitId = 'field', characterId = 'male' }) {
     this.canvas = canvas; this.minimap = minimap; this.settings = settings; this.audio = audio;
     this.send = send; this.onMenu = onMenu; this.onFatal = onFatal;
     this.abort = new AbortController(); this.keys = new Set(); this.remote = new Map(); this.effects = [];
@@ -67,6 +67,7 @@ export class FPSGame {
     this.reloadPressedUntil = 0; this.jumpPressedUntil = 0; this.recoil = 0; this.muzzleUntil = 0; this.serverOffset = 0; this.hadReload = false;
     this.world = getMap(mapId); this.skinId = getSkin(skinId).id; this.requestedWeaponId = getWeapon(weaponId).id;
     this.outfitId = getOutfit(outfitId).id;
+    this.characterId = getCharacter(characterId).id;
     this.models = new WeaponModels(); this.fireLatched = false; this.switchAnimation = 0; this.localNextFire = 0;
     this.damageDirections = [];
     this.firePressedUntil = 0;
@@ -232,7 +233,7 @@ export class FPSGame {
     $('weapon-slots').replaceChildren();
     $('weapon-slots').style.setProperty('--weapon-count', WEAPONS.length);
     for (const weapon of WEAPONS) {
-      const model = this.models.create(weapon.id, this.skinId, true, this.outfitId); model.visible = false;
+      const model = this.models.create(weapon.id, this.skinId, true, this.outfitId, this.characterId); model.visible = false;
       this.weapon.add(model); this.weaponModels.set(weapon.id, model);
       const slot = document.createElement('div'); slot.className = 'weapon-slot'; slot.dataset.weapon = weapon.id;
       const key = document.createElement('kbd'); key.textContent = weapon.slot;
@@ -422,12 +423,16 @@ export class FPSGame {
     for (const player of data.players) {
       if (player.id === id) continue;
       present.add(player.id);
+      const existing = this.remote.get(player.id);
+      if (existing && (existing.group.userData.characterId !== getCharacter(player.characterId).id || existing.group.userData.outfitId !== getOutfit(player.outfitId).id || existing.group.userData.skinId !== getSkin(player.skinId).id)) {
+        this.scene.remove(existing.group); this.disposeObject(existing.group, false); this.remote.delete(player.id);
+      }
       if (!this.remote.has(player.id)) this.remote.set(player.id, this.makeAvatar(player));
       const avatar = this.remote.get(player.id); avatar.target = player;
       avatar.targetTime = data.serverTime; avatar.renderTime ??= data.serverTime;
       if (avatar.weapon.userData.weaponId !== player.weaponId) {
         avatar.group.remove(avatar.weapon); disposeModel(avatar.weapon);
-        avatar.weapon = this.models.create(player.weaponId, player.skinId); avatar.weapon.position.set(0.19, 1.05, -0.22); avatar.group.add(avatar.weapon);
+        avatar.weapon = this.models.create(player.weaponId, player.skinId, false, player.outfitId, player.characterId); avatar.weapon.position.set(0.19, 1.05, -0.22); avatar.group.add(avatar.weapon);
       }
     }
     for (const [remoteId, avatar] of this.remote) if (!present.has(remoteId)) { this.scene.remove(avatar.group); this.disposeObject(avatar.group, false); this.remote.delete(remoteId); }

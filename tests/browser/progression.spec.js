@@ -68,6 +68,25 @@ test('paid weapons preview without equipping, permanently unlock once, and retai
   await page.getByRole('button', { name: '장비 저장', exact: true }).click();
 });
 
+test('female operator selection is free, survives refresh and is used by the solo worker', async ({ context, page }) => {
+  const profile = createProfile('character-demo-0001', Date.now(), 'LYRA TEST'); Object.assign(profile, { points: 600, kills: 7, ownedOutfits: ['field', 'runner'], equippedOutfitId: 'runner' });
+  await context.addInitScript((profile) => {
+    if (!localStorage.getItem('linkshot-profile-v1')) localStorage.setItem('linkshot-profile-v1', JSON.stringify(profile));
+    const NativeWorker = window.Worker;
+    window.Worker = class extends NativeWorker { constructor(...args) { super(...args); this.addEventListener('message', ({ data }) => { if (data.type === 'joined') window.__characterJoined = data; }); } };
+  }, profile);
+  await page.goto('/'); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
+  await page.getByRole('button', { name: '캐릭터 외형 상점', exact: true }).click(); await expect(page.locator('#character-choices button')).toHaveCount(2);
+  await page.getByRole('button', { name: '여성 오퍼레이터 선택', exact: true }).click(); await expect(page.getByRole('button', { name: '여성 오퍼레이터 선택', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#character-status')).toContainText('LYRA'); await expect(page.locator('#shop-points')).toHaveText('600');
+  await page.getByRole('button', { name: '외형 상점 닫기', exact: true }).click(); await page.reload(); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1'))); expect(saved.characterId).toBe('female'); expect(saved.points).toBe(600); expect(saved.kills).toBe(7); expect(saved.equippedOutfitId).toBe('runner');
+  await expect(page.locator('#profile-portrait')).toHaveAttribute('alt', '여성 오퍼레이터');
+  await page.getByRole('button', { name: '연습전 시작', exact: true }).click(); await expect(page.locator('#game-shell')).toBeVisible();
+  expect(await page.evaluate(() => window.__characterJoined.players.find((p) => p.id === 'local-operator').characterId)).toBe('female');
+  await page.getByRole('button', { name: '로비로 나가기', exact: true }).click();
+});
+
 test('an actual LAN kill persists mastery once and shows the killer gun level on the victim death card', async ({ browser }) => {
   const server = createGameServer({ port: 0, host: '127.0.0.1', loop: false }), info = await server.listen(), url = `http://127.0.0.1:${info.port}`;
   const attackerContext = await browser.newContext(), victimContext = await browser.newContext();

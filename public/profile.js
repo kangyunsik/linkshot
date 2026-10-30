@@ -113,6 +113,7 @@ export class ProfileStore extends EventTarget {
   }
 
   setName(callsign) { return this.operate({ type: 'name', callsign }); }
+  setCharacter(characterId) { return this.operate({ type: 'character', characterId }); }
   syncRound(data) { return this.operate({ type: 'round', ...data }); }
   purchase(outfitId) { return this.operate({ type: 'purchase', outfitId }); }
   purchaseWeapon(weaponId) { return this.operate({ type: 'purchaseWeapon', weaponId }); }

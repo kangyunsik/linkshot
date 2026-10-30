@@ -1,6 +1,6 @@
 import * as THREE from '/vendor/three.module.js';
 import { getWeapon, getSkin, weaponModel } from '/shared/catalog.js';
-import { getOutfit } from '/shared/outfits.js';
+import { getOutfit, getCharacter } from '/shared/outfits.js';
 import { HumanParts } from './human-model.js';
 import { NETWORK_PROTOCOL } from '/shared/world.js';
 
@@ -30,7 +30,7 @@ export class WeaponModels {
     return this.textures.get(file);
   }
 
-  create(weaponId, skinId, firstPerson = false, outfitId = 'field') {
+  create(weaponId, skinId, firstPerson = false, outfitId = 'field', characterId = 'male') {
     const weapon = getWeapon(weaponId), skin = getSkin(skinId), group = new THREE.Group();
     const shape = weaponModel(weapon); group.name = `weapon-${weapon.id}`;
     const material = (color, options = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.46, metalness: 0.65, ...(firstPerson ? { depthTest: false, depthWrite: false, fog: false } : {}), ...options });
@@ -188,20 +188,23 @@ export class WeaponModels {
     box([0.008, 0.026, 0.08], [-0.07, 0.005, 0.02], accent);
     if (firstPerson) {
       const outfit = getOutfit(outfitId);
+      const female = getCharacter(characterId).id === 'female';
       const sleeve = material(outfit.id === 'field' ? skin.suit : outfit.suit, { roughness: 0.95, metalness: 0 });
       const gloves = material(outfit.id === 'field' ? skin.dark : outfit.dark, { roughness: 0.94, metalness: 0 });
       const fingers = outfit.id === 'hazmat' || outfit.id === 'orbital' ? gloves : material('#bf9278', { roughness: 0.92, metalness: 0 });
       const anatomy = new HumanParts(), arms = new THREE.Group(); arms.name = 'first-person-human-arms'; group.add(arms);
-      anatomy.segment(arms, [0.16, -0.30, 0.46], [0.063, -0.19, 0.17], 0.125, sleeve, 'right-sleeve');
+      anatomy.segment(arms, [0.16, -0.30, 0.46], [0.063, -0.19, 0.17], female ? 0.114 : 0.125, sleeve, 'right-sleeve');
       const right = anatomy.hand(arms, [0.055, -0.15, 0.14], gloves, fingers, 'right-hand'); right.rotation.set(-0.25, 0, 0.15);
+      if (female) right.scale.setScalar(0.94);
       const support = shape === 'pistol' ? [-0.025, -0.16, 0.12] : [-0.035, -0.105, -0.34];
-      anatomy.segment(arms, [-0.25, -0.28, 0.26], [support[0] - 0.03, support[1] - 0.055, support[2] + 0.03], 0.115, sleeve, 'left-sleeve');
+      anatomy.segment(arms, [-0.25, -0.28, 0.26], [support[0] - 0.03, support[1] - 0.055, support[2] + 0.03], female ? 0.105 : 0.115, sleeve, 'left-sleeve');
       const left = anatomy.hand(arms, support, gloves, fingers, 'left-hand'); left.rotation.set(shape === 'pistol' ? -0.4 : -1.15, -0.35, -1.1);
+      if (female) left.scale.setScalar(0.94);
     }
     const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.02, muzzleZ); group.add(muzzle);
     const flash = new THREE.Mesh(new THREE.ConeGeometry(shape === 'shotgun' ? 0.11 : 0.07, 0.23, 5), new THREE.MeshBasicMaterial({ color: '#ffda98', transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: !firstPerson }));
     flash.rotation.x = -Math.PI / 2; flash.position.set(0, 0.02, muzzleZ - 0.10); flash.visible = false; group.add(flash);
-    Object.assign(group.userData, { weaponId: weapon.id, modelBase: shape, skinId: skin.id, muzzle, flash, aimHeight, aimPoint: new THREE.Vector3(0, aimHeight, 0.015) });
+    Object.assign(group.userData, { weaponId: weapon.id, modelBase: shape, skinId: skin.id, characterId: getCharacter(characterId).id, muzzle, flash, aimHeight, aimPoint: new THREE.Vector3(0, aimHeight, 0.015) });
     group.traverse((child) => { child.castShadow = !firstPerson; child.receiveShadow = !firstPerson; if (firstPerson) { child.renderOrder = 10; child.frustumCulled = false; } });
     return group;
   }

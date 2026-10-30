@@ -3,20 +3,20 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MAPS } from '../shared/world.js';
 import { SKINS, WEAPONS, FREE_WEAPON_IDS } from '../shared/catalog.js';
-import { OUTFITS } from '../shared/outfits.js';
+import { OUTFITS, CHARACTERS } from '../shared/outfits.js';
 import { POINT_RULES } from '../shared/progression.js';
 import { publicationRisk } from './security-audit.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const output = path.join(root, 'dist');
-const images = [...new Set([...MAPS.map((map) => map.image), ...SKINS.map((skin) => skin.pattern).filter(Boolean), ...OUTFITS.flatMap((outfit) => [outfit.image, outfit.pattern]).filter(Boolean), 'foundry-panel.png', 'operator-fabric.png', 'operator-armor.png', 'operator-jacket.png'])];
+const images = [...new Set([...MAPS.map((map) => map.image), ...SKINS.map((skin) => skin.pattern).filter(Boolean), ...OUTFITS.flatMap((outfit) => [outfit.image, outfit.pattern]).filter(Boolean), ...CHARACTERS.map((character) => character.image), 'foundry-panel.png', 'operator-fabric.png', 'operator-armor.png', 'operator-jacket.png'])];
 for (const image of images) {
   try {
     const bytes = await readFile(path.join(root, 'public/assets', image));
     if (bytes.length < 100 || bytes.readUInt32BE(0) !== 0x89504e47) throw new Error('Invalid PNG');
   } catch { console.error(`빌드에 필요한 이미지가 준비되지 않았습니다: public/assets/${image}\n먼저 npm run assets:generate로 애셋을 준비하세요. GitHub에는 생성된 public/assets도 함께 올려야 합니다.`); process.exit(1); }
 }
-for (const file of ['operator-human-v2.glb', 'operator-hair-v2.glb']) { const bytes = await readFile(path.join(root, 'public/assets/models', file)); if (bytes.readUInt32LE(0) !== 0x46546c67 || bytes.readUInt32LE(8) !== bytes.length) throw new Error(`Invalid character model: ${file}`); }
+for (const file of CHARACTERS.flatMap((character) => [character.model, character.hair, character.helmetHair].filter(Boolean))) { const bytes = await readFile(path.join(root, 'public/assets/models', file)); if (bytes.readUInt32LE(0) !== 0x46546c67 || bytes.readUInt32LE(8) !== bytes.length) throw new Error(`Invalid character model: ${file}`); }
 const sounds = JSON.parse(await readFile(path.join(root, 'public/assets/sounds/manifest.json'), 'utf8'));
 if (sounds.license !== 'CC0-1.0' || sounds.files.length !== WEAPONS.length) throw new Error('Missing licensed firearm recordings');
 for (const { file } of sounds.files) { if (!/^[a-z][a-z0-9]*-1\.wav$/.test(file)) throw new Error('Invalid sound path'); const bytes = await readFile(path.join(root, 'public/assets/sounds', file)); if (bytes.toString('ascii', 0, 4) !== 'RIFF') throw new Error(`Invalid firearm sample: ${file}`); }

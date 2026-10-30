@@ -65,6 +65,9 @@ test('portable launcher serves embedded files on loopback without Node or extern
   update = await operate({ type: 'purchaseWeapon', weaponId: 'glock18c' }); assert.equal(update.data.cost, 0); assert.equal(update.data.profile.points, 20);
   update = await operate({ type: 'purchaseWeapon', weaponId: 'm82' }); assert.equal(update.status, 409);
   const saved = JSON.parse(await readFile(path.join(profileData, 'profile.json'), 'utf8')); assert.ok(saved.ownedWeapons.includes('glock18c')); assert.equal(saved.weaponKills.rifle, 37); assert.equal(saved.equippedOutfitId, 'runner');
+  update = await operate({ type: 'character', characterId: 'female' }); assert.equal(update.status, 200); assert.equal(update.data.profile.characterId, 'female'); assert.equal(update.data.profile.points, 20); assert.equal(update.data.profile.equippedOutfitId, 'runner');
+  assert.equal((await operate({ type: 'character', characterId: '__proto__' })).status, 409);
+  assert.equal(JSON.parse(await readFile(path.join(profileData, 'profile.json'), 'utf8')).characterId, 'female');
   assert.equal((await fetch(`${url}/api/profile`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://unrelated.invalid' }, body: '{}' })).status, 403);
   assert.equal((await operate({ type: 'round', points: 999999 })).status, 400);
 });

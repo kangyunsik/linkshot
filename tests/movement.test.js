@@ -71,7 +71,7 @@ test('every actual 1.8m firing deck can be jumped onto from its non-stair side',
   for (const world of MAPS) for (const platform of world.platforms) for (const hz of [30, 60, 144]) {
     const p = player({ x: platform.x, z: platform.z + 2.5 + RULES.playerRadius }); let landed = false;
     for (let i = 0; i < hz * 1.3; i++) {
-      movePlayer(p, input({ jump: true, forward: p.z > platform.z + 1.5 ? 1 : 0 }), 1 / hz, world);
+      movePlayer(p, input({ jump: true, forward: p.z > platform.z + 1.5 ? 0.35 : 0 }), 1 / hz, world);
       assert.ok(clearBody(p, world), `${world.id}/${platform.id}: jump never enters solid geometry`);
       landed ||= p.grounded && p.y === platform.height;
     }
@@ -116,4 +116,32 @@ test('upward collision uses the full footprint and cannot pass through a ceiling
     for (let i = 0; i < hz; i++) { movePlayer(p, input({ jump: true }), 1 / hz, world); head = Math.max(head, p.y + playerPose(p).height); }
     assert.ok(head <= 2.00001); assert.equal(p.y, 0);
   }
+});
+
+test('airborne direction and speed remain fixed despite WASD, mouse turns, sprint and ADS changes', () => {
+  for (const hz of rates) for (const sprint of [false, true]) {
+    const world = { width: 100, depth: 100, obstacles: [] }, p = player({ x: 0, z: 0 });
+    movePlayer(p, input({ jump: true, forward: 1, sprint }), 1 / hz, world);
+    const vx = p.vx, vz = p.vz, speed = Math.hypot(vx, vz);
+    for (let frame = 0; frame < hz / 2; frame++) {
+      const before = { x: p.x, z: p.z };
+      movePlayer(p, input({ yaw: frame % 2 ? Math.PI / 2 : Math.PI, pitch: 0.4, forward: frame % 3 - 1, strafe: frame % 2 ? -1 : 1, sprint: !sprint, ads: true }), 1 / hz, world);
+      assert.equal(p.grounded, false); assert.equal(p.vx, vx); assert.equal(p.vz, vz);
+      assert.ok(Math.abs(p.x - before.x - vx / hz) < 1e-9); assert.ok(Math.abs(p.z - before.z - vz / hz) < 1e-9);
+      assert.ok(Math.abs(p.moveSpeed - speed) < 1e-9); assert.equal(p.pitch, 0.4, 'aiming is independent of the locked trajectory');
+    }
+    while (!p.grounded) movePlayer(p, input(), 1 / hz, world);
+    const before = { x: p.x, z: p.z }; movePlayer(p, input({ strafe: 1 }), 1 / hz, world);
+    assert.ok(p.x > before.x); assert.equal(p.z, before.z, 'landing restores ground steering');
+  }
+});
+
+test('a standing jump cannot gain movement in midair and a ledge fall retains its departure momentum', () => {
+  const world = arena(), p = player({ x: 0, z: 0 }); movePlayer(p, input({ jump: true }), 1 / 60, world);
+  for (let i = 0; i < 30; i++) movePlayer(p, input({ forward: 1, strafe: 1, sprint: true, yaw: Math.PI / 2 }), 1 / 60, world);
+  assert.equal(p.x, 0); assert.equal(p.z, 0);
+  const falling = player({ x: 2.3, y: 1.8, z: 0 }); const ledge = arena([deck]);
+  while (falling.grounded) movePlayer(falling, input({ strafe: 1 }), 1 / 60, ledge);
+  const before = { x: falling.x, z: falling.z }; movePlayer(falling, input({ forward: -1, yaw: Math.PI, ads: true }), 1 / 60, ledge);
+  assert.ok(falling.x > before.x); assert.equal(falling.z, before.z);
 });

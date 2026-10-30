@@ -1,7 +1,7 @@
 import { RULES, WORLD, getMap, aimDirection, rayBox, raySphere, wallDistance, hasLineOfSight, bounds, playerPose, normalizeRoundOptions, NETWORK_PROTOCOL } from './world.js';
 import { EMPTY_INPUT, sanitizeInput, movePlayer, clamp, angleDelta } from './movement.js';
 import { WEAPONS, SKINS, getWeapon, getSkin, freshMagazines, damageAtDistance, shotAngles, isWeaponId, normalizeOwnedWeapons, ownsWeapon } from './catalog.js';
-import { getOutfit } from './outfits.js';
+import { getOutfit, getCharacter, CHARACTERS } from './outfits.js';
 import { roundReward, normalizeWeaponKills, weaponMastery } from './progression.js';
 
 const BOT_NAMES = ['GHOST', 'RIVET', 'ECHO', 'CINDER', 'STATIC', 'ONYX', 'NOVA'];
@@ -133,6 +133,7 @@ export class Room {
       nextWeaponId: chosenWeapon, loadoutSelecting: false, diedAt: 0, pendingShot: null, history: [], shotSerial: 0,
       skinId: getSkin(isBot ? SKINS[(this.players.size + 1) % SKINS.length].id : loadout.skinId).id,
       outfitId: getOutfit(loadout.outfitId).id,
+      characterId: getCharacter(isBot ? CHARACTERS[this.players.size % CHARACTERS.length].id : loadout.characterId).id,
       magazines: freshMagazines(), switchUntil: 0, nextFireAt: 0, fireLatched: false,
     };
     this.players.set(id, player);
@@ -169,7 +170,7 @@ export class Room {
     const uses = Math.min(...pool.map((s) => s.uses)); pool = pool.filter((s) => s.uses === uses);
     const choice = pool[Math.min(pool.length - 1, Math.floor(this.random() * pool.length))], spawn = choice.point;
     this.spawnUses.set(choice.key, choice.uses + 1);
-    Object.assign(player, { x: spawn.x, y: spawn.y || 0, z: spawn.z, yaw: spawn.yaw, spawnId: spawn.spawnId || null, spawnLevel: spawn.roof ? 'ROOF' : `${spawn.level || 1}F`, pitch: 0, vy: 0, hp: 100, ammo: getWeapon(player.weaponId).magazine, magazines: freshMagazines(), reloadUntil: 0, switchUntil: 0, nextFireAt: 0, fireLatched: false, respawnAt: 0, protectedUntil: this.clock() + RULES.protectionSeconds * 1000, grounded: true, jumpHeld: false, crouching: false, crouchAmount: 0, sprinting: false, moveSpeed: 0, shotHeat: 0, loadoutSelecting: false, diedAt: 0, lastDeath: null, botPath: [], nextPathAt: 0, stairRouteKey: null });
+    Object.assign(player, { x: spawn.x, y: spawn.y || 0, z: spawn.z, yaw: spawn.yaw, spawnId: spawn.spawnId || null, spawnLevel: spawn.roof ? 'ROOF' : `${spawn.level || 1}F`, pitch: 0, vx: 0, vy: 0, vz: 0, hp: 100, ammo: getWeapon(player.weaponId).magazine, magazines: freshMagazines(), reloadUntil: 0, switchUntil: 0, nextFireAt: 0, fireLatched: false, respawnAt: 0, protectedUntil: this.clock() + RULES.protectionSeconds * 1000, grounded: true, jumpHeld: false, crouching: false, crouchAmount: 0, sprinting: false, moveSpeed: 0, shotHeat: 0, loadoutSelecting: false, diedAt: 0, lastDeath: null, botPath: [], nextPathAt: 0, stairRouteKey: null });
     player.botBrain = player.isBot ? freshBotBrain() : null;
     player.input = { ...EMPTY_INPUT, yaw: player.yaw, weaponId: player.weaponId };
     player.pendingShot = null; player.viewTime = null; player.burstLeft = 0; player.triggerSeq = null; player.triggerShotIndex = 0;
@@ -432,9 +433,9 @@ export class Room {
       room: { protocolVersion: NETWORK_PROTOCOL, code: this.code, roundId: this.roundId, result: this.result, mapId: this.world.id, botDifficulty: this.botDifficulty, mode: this.mode, hostId: this.hostId, phase: this.phase, timeLeft: Math.max(0, Math.ceil((this.endsAt - now) / 1000)), fragLimit: this.fragLimit, roundSeconds: this.roundSeconds },
       players: [...this.players.values()].map((p) => ({
         id: p.id, name: p.name, isBot: p.isBot, x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yaw: p.yaw, pitch: p.pitch,
-        vy: p.vy, grounded: p.grounded, crouching: p.crouching, crouchAmount: p.crouchAmount, sprinting: p.sprinting, moveSpeed: p.moveSpeed, shotHeat: p.shotHeat, hp: p.hp, ammo: p.ammo, kills: p.kills, deaths: p.deaths, spawnId: p.spawnId, spawnLevel: p.spawnLevel, lastDeath: p.lastDeath,
+        vx: p.vx, vy: p.vy, vz: p.vz, grounded: p.grounded, crouching: p.crouching, crouchAmount: p.crouchAmount, sprinting: p.sprinting, moveSpeed: p.moveSpeed, shotHeat: p.shotHeat, hp: p.hp, ammo: p.ammo, kills: p.kills, deaths: p.deaths, spawnId: p.spawnId, spawnLevel: p.spawnLevel, lastDeath: p.lastDeath,
         reloadUntil: p.reloadUntil, respawnAt: p.respawnAt, protectedUntil: p.protectedUntil,
-        weaponId: p.weaponId, nextWeaponId: p.nextWeaponId, loadoutSelecting: p.loadoutSelecting, skinId: p.skinId, outfitId: p.outfitId, magazines: { ...p.magazines }, switchUntil: p.switchUntil, nextFireAt: p.nextFireAt,
+        weaponId: p.weaponId, nextWeaponId: p.nextWeaponId, loadoutSelecting: p.loadoutSelecting, skinId: p.skinId, outfitId: p.outfitId, characterId: p.characterId, magazines: { ...p.magazines }, switchUntil: p.switchUntil, nextFireAt: p.nextFireAt,
         spawnCount: p.spawnCount, ownedWeapons: [...p.ownedWeapons], weaponKills: { ...p.weaponKills }, masteryKills: { ...p.masteryKills }, weaponLevel: weaponMastery(p.masteryKills[p.weaponId]).level,
       })),
       events: [...this.events],

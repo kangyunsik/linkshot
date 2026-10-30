@@ -7,9 +7,11 @@
 - Source: https://quaternius.com/packs/universalbasecharacters.html
 - Download: https://quaternius.itch.io/universal-base-characters
 - License: CC0 1.0 Universal — https://creativecommons.org/publicdomain/zero/1.0/
-- Files: `models/operator-human-v2.glb`, `models/operator-hair-v2.glb`
-- Changes: self-contained GLB packaging, resized textures, runtime clothing materials, tactical equipment and procedural skeletal posing/IK. Only the free Standard assets are included; no paid Source assets are used.
+- Files: `models/operator-human-v2.glb`, `models/operator-hair-v2.glb`, `models/operator-female-v3.glb`, `models/operator-hair-female-v3.glb`, `models/operator-hair-female-short-v3.glb`
+- Original models: Superhero Male/Female FullBody; SimpleParted, Buns and BuzzedFemale hair, from the free Standard archive.
+- Changes: self-contained GLB packaging, higher-resolution resized textures, softened skin contrast and normal shading, refined hair/eye materials, runtime clothing materials, tactical equipment and procedural skeletal posing/IK. Only the free Standard assets are included; no paid Source assets are used.
 - Original license: `models/LICENSE-Quaternius.txt`
+- `operator-male.png` and `operator-female.png` are actual in-engine renders of those characters wearing the generated clothing materials below, not photographs or standalone image-model portraits. Reproduce them with `scripts/render-characters.mjs`; source/model and material licenses remain applicable.
 
 ## Operator clothing materials
 

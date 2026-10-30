@@ -50,6 +50,7 @@ export function movementSpeed(player, input) {
 
 export function movePlayer(player, input, dt, world = WORLD) {
   dt = clamp(dt, 0, 1 / 30);
+  const airborne = !player.grounded;
   player.yaw = input.yaw;
   player.pitch = input.pitch;
   const startX = player.x, startZ = player.z;
@@ -61,14 +62,20 @@ export function movePlayer(player, input, dt, world = WORLD) {
   player.crouchAmount = !forcedCrouch && (jumpRequested || sprintRequested || !player.grounded) ? 0 : clamp(previousCrouch + (player.crouching ? 1 : -1) * dt / RULES.crouchSeconds, 0, 1);
   if (player.crouchAmount < 0.00001) player.crouchAmount = 0;
   if (player.crouchAmount > 0.99999) player.crouchAmount = 1;
-  player.sprinting = sprintRequested && !player.crouching;
+  if (!airborne) player.sprinting = sprintRequested && !player.crouching;
   const height = playerPose(player).height;
   let forward = input.forward, strafe = input.strafe;
   const length = Math.hypot(forward, strafe);
   if (length > 1) { forward /= length; strafe /= length; }
   const speed = movementSpeed(player, input);
-  const vx = (Math.cos(input.yaw) * strafe - Math.sin(input.yaw) * forward) * speed;
-  const vz = (-Math.sin(input.yaw) * strafe - Math.cos(input.yaw) * forward) * speed;
+  // Capture world-space momentum on takeoff (including walking off a ledge).
+  // Looking, releasing WASD, sprinting or aiming cannot steer/brake in flight.
+  // Collision still clips displacement; only landing enables new movement.
+  if (!airborne) {
+    player.vx = (Math.cos(input.yaw) * strafe - Math.sin(input.yaw) * forward) * speed;
+    player.vz = (-Math.sin(input.yaw) * strafe - Math.cos(input.yaw) * forward) * speed;
+  }
+  const vx = Number.isFinite(player.vx) ? player.vx : 0, vz = Number.isFinite(player.vz) ? player.vz : 0;
   const radius = RULES.playerRadius;
   const colliders = collidersFor(world);
   const intersectsHeight = (b) => player.y < b.maxY - CONTACT_EPSILON && player.y + height > b.minY + CONTACT_EPSILON;

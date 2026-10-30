@@ -1,4 +1,12 @@
 // Appearance only. Physics, health, weapons and movement never read outfit properties.
+export const CHARACTERS = Object.freeze([
+  { id: 'male', name: 'KAEL', label: '남성 오퍼레이터', description: '차분한 눈매와 단정한 사이드 파트의 성인 전투원', image: 'operator-male.png', model: 'operator-human-v2.glb', hair: 'operator-hair-v2.glb', bodyMesh: 'SuperHero_Male' },
+  { id: 'female', name: 'LYRA', label: '여성 오퍼레이터', description: '또렷한 눈매와 깔끔하게 묶은 헤어의 성인 전투원', image: 'operator-female.png', model: 'operator-female-v3.glb', hair: 'operator-hair-female-v3.glb', helmetHair: 'operator-hair-female-short-v3.glb', bodyMesh: 'Superhero_Female' },
+].map(Object.freeze));
+export const DEFAULT_CHARACTER = 'male';
+export const getCharacter = (id) => CHARACTERS.find((character) => character.id === id) || CHARACTERS[0];
+export const isCharacterId = (id) => CHARACTERS.some((character) => character.id === id);
+
 export const OUTFITS = Object.freeze([
   { id: 'field', name: 'FIELD OPERATIVE', label: '기본 오퍼레이터', concept: '현장 전투원', price: 0, image: 'outfit-field.png', pattern: null, suit: '#53645d', armor: '#65746f', dark: '#243139', visor: '#ffc08a', description: '처음부터 사용할 수 있는 현장형 전투복. 익숙하고 단정한 표준 장비입니다.' },
   { id: 'runner', name: 'VOID RUNNER', label: '보이드 러너', concept: '후드 정찰병', price: 250, image: 'outfit-runner.png', pattern: 'skin-circuit.png', suit: '#34464e', armor: '#47636b', dark: '#192831', visor: '#8affdf', description: '얼굴이 드러나는 어두운 후드와 민트색 장비를 갖춘 인간 정찰병. 기동력 수치는 기본 외형과 같습니다.' },

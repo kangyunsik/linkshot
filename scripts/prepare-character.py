@@ -8,7 +8,7 @@ import json
 import struct
 import zipfile
 from pathlib import Path, PurePosixPath
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / 'artifacts/character-source/universal-base-characters.zip'
@@ -37,14 +37,25 @@ def pack(archive, name, target):
         candidates = [f'{folder}/{filename}', f'{folder}/{filename.replace("_png.png", ".png")}']
         if filename == 'T_Superhero_Male_Dark.png':
             candidates.insert(0, 'Universal Base Characters[Standard]/Base Characters/Textures/T_Superhero_Male_Ligh.png')
+        if filename == 'T_Superhero_Female_Dark_BaseColor.png':
+            candidates.insert(0, 'Universal Base Characters[Standard]/Base Characters/Textures/T_Superhero_Female_Light_BaseColor.png')
         source = next((candidate for candidate in candidates if candidate in archive.namelist()), None)
         if not source:
             raise RuntimeError(f'Missing licensed texture: {filename}')
         picture = Image.open(io.BytesIO(archive.read(source)))
-        picture.thumbnail((768, 768) if 'Superhero' in filename and 'Normal' not in filename and 'Roughness' not in filename else (512, 512))
+        skin_color = 'Superhero' in filename and 'Normal' not in filename and 'Roughness' not in filename
+        picture.thumbnail((1536, 1536) if skin_color else (768, 768))
+        if skin_color:
+            # Preserve the licensed facial features while softening painted
+            # contrast and over-sharp skin shading; never replace it with a
+            # flat skin-coloured material or blur the eyes/eyebrows meshes.
+            softened = picture.filter(ImageFilter.GaussianBlur(0.65))
+            picture = Image.blend(picture, softened, 0.24)
+            picture = ImageEnhance.Color(picture).enhance(0.88)
+            picture = ImageEnhance.Contrast(picture).enhance(0.94)
         encoded = io.BytesIO()
         if picture.mode in ('RGB', 'L') and 'Normal' not in filename:
-            picture.convert('RGB').save(encoded, 'JPEG', quality=88)
+            picture.convert('RGB').save(encoded, 'JPEG', quality=94)
             image['mimeType'] = 'image/jpeg'
         else:
             picture.save(encoded, 'PNG', optimize=True)
@@ -53,7 +64,7 @@ def pack(archive, name, target):
         image['bufferView'] = len(document['bufferViews'])
         document['bufferViews'].append({'buffer': 0, 'byteOffset': append(data), 'byteLength': len(data)})
     document['buffers'] = [{'byteLength': len(binary)}]
-    document['asset'] = {'version': '2.0', 'generator': 'LINKSHOT asset preparation', 'copyright': 'Quaternius, Universal Base Characters Standard, CC0 1.0. Textures resized; gameplay clothing is applied at runtime.'}
+    document['asset'] = {'version': '2.0', 'generator': 'LINKSHOT asset preparation', 'copyright': 'Quaternius, Universal Base Characters Standard, CC0 1.0. Textures resized and skin contrast refined; gameplay clothing and facial material polish are applied at runtime.'}
     metadata = json.dumps(document, separators=(',', ':')).encode()
     metadata += b' ' * (-len(metadata) % 4)
     binary += b'\0' * (-len(binary) % 4)
@@ -67,5 +78,8 @@ with zipfile.ZipFile(SOURCE) as archive:
     prefix = 'Universal Base Characters[Standard]'
     pack(archive, f'{prefix}/Base Characters/Godot - UE/Superhero_Male_FullBody.gltf', 'operator-human-v2.glb')
     pack(archive, f'{prefix}/Hairstyles/Origin at 0/glTF (Godot)/Hair_SimpleParted.gltf', 'operator-hair-v2.glb')
+    pack(archive, f'{prefix}/Base Characters/Godot - UE/Superhero_Female_FullBody.gltf', 'operator-female-v3.glb')
+    pack(archive, f'{prefix}/Hairstyles/Origin at 0/glTF (Godot)/Hair_Buns.gltf', 'operator-hair-female-v3.glb')
+    pack(archive, f'{prefix}/Hairstyles/Origin at 0/glTF (Godot)/Hair_BuzzedFemale.gltf', 'operator-hair-female-short-v3.glb')
     license_text = archive.read(f'{prefix}/License_Standard.txt').decode('utf-8')
     (OUTPUT / 'LICENSE-Quaternius.txt').write_text('\n'.join(line.rstrip() for line in license_text.splitlines()) + '\n')

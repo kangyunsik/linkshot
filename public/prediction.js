@@ -4,8 +4,11 @@ import { supportHeight } from '../shared/movement.js';
 export function reconcileMovement(predicted, local, world = WORLD) {
   const error = Math.hypot(local.x - predicted.x, local.z - predicted.z);
   if (error > 3 || Math.abs(local.y - predicted.y) > 2.5) {
-    for (const key of ['x', 'y', 'z', 'vy', 'grounded']) predicted[key] = local[key];
+    for (const key of ['x', 'y', 'z', 'vx', 'vy', 'vz', 'grounded']) if (key in local) predicted[key] = local[key];
     return;
+  }
+  if (!predicted.grounded && !local.grounded) {
+    for (const key of ['vx', 'vz']) if (Number.isFinite(local[key])) predicted[key] = local[key];
   }
   const next = { ...predicted, x: predicted.x + (local.x - predicted.x) * 0.36, z: predicted.z + (local.z - predicted.z) * 0.36 };
   if (predicted.grounded && local.grounded) {

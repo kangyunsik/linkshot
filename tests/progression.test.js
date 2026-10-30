@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createProfile, normalizeProfile, profileStats, roundReward, recordRound, purchaseOutfit, equipOutfit, applyProfileOperation } from '../shared/progression.js';
-import { OUTFITS, getOutfit } from '../shared/outfits.js';
+import { OUTFITS, getOutfit, CHARACTERS, getCharacter } from '../shared/outfits.js';
 import { Room } from '../shared/simulation.js';
 import { playerPose } from '../shared/world.js';
 import { movementSpeed, EMPTY_INPUT } from '../shared/movement.js';
@@ -18,6 +18,22 @@ test('new profiles start without points, retain a device ID and expose correct K
   assert.equal(stats.kills, 8); assert.equal(stats.deaths, 4); assert.equal(stats.ratio, 2); assert.ok(Math.abs(stats.killRate - 100 * 8 / 12) < 1e-9);
   assert.equal(profileStats({ kills: 0, deaths: 0 }).ratio, 0); assert.equal(profileStats({ kills: 3, deaths: 0 }).ratio, 3);
   for (const field of ['hostname', 'mac', 'ip', 'email', 'account']) assert.equal(profile[field], undefined);
+});
+
+test('both adult characters are free, persistent and preserve existing cosmetics, mastery and points', async () => {
+  const old = { ...createProfile(identity), points: 1500, kills: 300, ownedOutfits: ['field', 'runner'], equippedOutfitId: 'runner', weaponKills: { rifle: 150 }, ownedWeapons: ['rifle', 'ak47'] }; delete old.characterId;
+  let profile = normalizeProfile(old, identity); assert.equal(profile.characterId, 'male'); assert.equal(getCharacter('__proto__').id, 'male');
+  for (const character of CHARACTERS) {
+    profile = applyProfileOperation(profile, { type: 'character', characterId: character.id }).profile;
+    assert.equal(profile.characterId, character.id); assert.equal(profile.points, 1500); assert.equal(profile.equippedOutfitId, 'runner'); assert.equal(profile.weaponKills.rifle, 150); assert.ok(profile.ownedWeapons.includes('ak47'));
+    const room = new Room('GENDER', { bots: 0 }), p = room.addPlayer('a', 'ALPHA', false, { characterId: character.id, outfitId: 'runner' });
+    assert.equal(p.hp, 100); assert.equal(playerPose(p).height, 1.8); assert.equal(movementSpeed(p, { ...EMPTY_INPUT, forward: 1 }), 5.7);
+    assert.equal(room.snapshot().players[0].characterId, character.id); room.spawn(p); assert.equal(p.characterId, character.id);
+  }
+  assert.throws(() => applyProfileOperation(profile, { type: 'character', characterId: 'unknown' }), /존재/);
+  const storage = memoryStorage(); storage.setItem(PROFILE_KEY, JSON.stringify(profile));
+  const store = await new ProfileStore({ storage }).load(); await store.setCharacter('female');
+  const restored = await new ProfileStore({ storage }).load(); assert.equal(restored.profile.characterId, 'female'); assert.equal(restored.profile.points, 1500); assert.equal(restored.profile.equippedOutfitId, 'runner');
 });
 
 test('live kills/deaths persist but points are granted only once after round completion', () => {

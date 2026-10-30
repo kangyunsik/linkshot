@@ -95,7 +95,7 @@ test('real LAN input can jump from ground onto an elevated firing deck and remai
   const response = message(a.socket, 'joined'); a.send({ type: 'create', bots: 0, mode: 'lan' }); const joined = await response;
   const room = app.rooms.get(joined.room.code), platform = room.world.platforms[0], player = room.players.get(joined.id);
   Object.assign(player, { x: platform.x, y: 0, z: platform.z + 2.5 + RULES.playerRadius, vy: 0, grounded: true, jumpHeld: false, yaw: 0 });
-  a.send({ type: 'input', forward: 1, jump: true, yaw: 0 });
+  a.send({ type: 'input', forward: 0.35, jump: true, yaw: 0 });
   let airborne = false, landed = false, stopped = false;
   for (let i = 0; i < 30; i++) {
     const state = await message(a.socket, 'state'), current = state.players.find((p) => p.id === joined.id);
@@ -107,6 +107,21 @@ test('real LAN input can jump from ground onto an elevated firing deck and remai
   a.send({ type: 'input', yaw: 0 });
   const settled = (await message(a.socket, 'state')).players.find((p) => p.id === joined.id);
   assert.equal(settled.y, platform.height); assert.equal(settled.grounded, true);
+});
+
+test('LAN character identity persists through respawn and airborne packets cannot spoof steering or velocity', async (t) => {
+  const app = createGameServer({ port: 0, host: '127.0.0.1', loop: false }), info = await app.listen(); t.after(() => app.close());
+  const c = await client(`http://127.0.0.1:${info.port}`); t.after(() => c.socket.terminate());
+  const pending = message(c.socket, 'joined'); c.send({ type: 'create', bots: 0, characterId: 'female', outfitId: 'runner' }); const joined = await pending;
+  const room = app.rooms.get(joined.room.code), p = room.players.get(joined.id); room.world = { ...room.world, width: 100, depth: 100, obstacles: [] };
+  Object.assign(p, { x: 0, y: 0, z: 0, vy: 0, grounded: true });
+  const barrier = async () => { const pending = message(c.socket, 'pong'); c.send({ type: 'ping' }); await pending; };
+  c.send({ type: 'input', forward: 1, jump: true, yaw: 0 }); await barrier(); room.tick(1 / 60); const vx = p.vx, vz = p.vz;
+  c.send({ type: 'input', forward: -1, strafe: 1, sprint: true, ads: true, yaw: Math.PI / 2, vx: 500, vz: 500, characterId: 'male' }); await barrier();
+  for (let i = 0; i < 20; i++) room.tick(1 / 60);
+  assert.equal(p.vx, vx); assert.equal(p.vz, vz); assert.equal(p.x, 0); assert.equal(p.yaw, Math.PI / 2); assert.equal(p.characterId, 'female');
+  const snapshot = room.snapshot(); assert.equal(snapshot.players[0].vx, vx); assert.equal(snapshot.players[0].vz, vz); assert.equal(snapshot.players[0].characterId, 'female');
+  room.spawn(p); assert.equal(p.characterId, 'female'); assert.equal(p.outfitId, 'runner'); assert.equal(p.vx, 0); assert.equal(p.vz, 0);
 });
 
 test('eight real LAN connections can join a full bot room; a ninth is rejected', async (t) => {

@@ -1,4 +1,4 @@
-import { DEFAULT_OUTFIT, getOutfit, isOutfitId } from './outfits.js';
+import { DEFAULT_OUTFIT, getOutfit, isOutfitId, DEFAULT_CHARACTER, getCharacter, isCharacterId } from './outfits.js';
 import { WEAPONS, FREE_WEAPON_IDS, normalizeOwnedWeapons, ownsWeapon, isWeaponId, getWeapon } from './catalog.js';
 
 export const POINT_RULES = Object.freeze({ completion: 50, perKill: 20, victory: 100 });
@@ -20,12 +20,13 @@ export function weaponMastery(value = 0) {
 
 export function createProfile(id, now = Date.now(), name = 'OPERATOR') {
   if (!validId(id)) throw new Error('프로필 ID가 올바르지 않습니다.');
-  return { version: PROFILE_VERSION, id, callsign: callsign(name), kills: 0, deaths: 0, points: 0, totalEarned: 0, roundsPlayed: 0, wins: 0, ownedOutfits: [DEFAULT_OUTFIT], equippedOutfitId: DEFAULT_OUTFIT, ownedWeapons: [...FREE_WEAPON_IDS], weaponKills: {}, roundLedger: {}, createdAt: now, updatedAt: now };
+  return { version: PROFILE_VERSION, id, callsign: callsign(name), characterId: DEFAULT_CHARACTER, kills: 0, deaths: 0, points: 0, totalEarned: 0, roundsPlayed: 0, wins: 0, ownedOutfits: [DEFAULT_OUTFIT], equippedOutfitId: DEFAULT_OUTFIT, ownedWeapons: [...FREE_WEAPON_IDS], weaponKills: {}, roundLedger: {}, createdAt: now, updatedAt: now };
 }
 
 export function normalizeProfile(raw, fallbackId, now = Date.now()) {
   const value = raw && typeof raw === 'object' ? raw : {};
   const result = createProfile(validId(value.id) ? value.id : fallbackId, now, value.callsign);
+  result.characterId = getCharacter(value.characterId).id;
   for (const key of ['kills', 'deaths', 'points', 'totalEarned', 'roundsPlayed', 'wins']) result[key] = count(value[key]);
   result.ownedOutfits = [...new Set([DEFAULT_OUTFIT, ...(Array.isArray(value.ownedOutfits) ? value.ownedOutfits.filter(isOutfitId) : [])])];
   result.equippedOutfitId = result.ownedOutfits.includes(value.equippedOutfitId) ? value.equippedOutfitId : DEFAULT_OUTFIT;
@@ -109,6 +110,12 @@ export function applyProfileOperation(profile, operation, now = Date.now()) {
   if (operation.type === 'purchase') { const result = purchaseOutfit(profile, operation.outfitId, now); return { ...result, changed: result.profile !== profile, award: null }; }
   if (operation.type === 'purchaseWeapon') { const result = purchaseWeapon(profile, operation.weaponId, now); return { ...result, changed: result.profile !== profile, award: null }; }
   if (operation.type === 'equip') { const next = equipOutfit(profile, operation.outfitId, now); return { profile: next, changed: next !== profile, award: null }; }
+  if (operation.type === 'character') {
+    if (!isCharacterId(operation.characterId)) throw new Error('존재하지 않는 캐릭터입니다.');
+    if (profile.characterId === operation.characterId) return { profile, changed: false, award: null };
+    const next = normalizeProfile(profile, profile.id, now); next.characterId = operation.characterId; next.updatedAt = now;
+    return { profile: next, changed: true, award: null };
+  }
   if (operation.type === 'name') {
     const name = callsign(operation.callsign); if (name === profile.callsign) return { profile, changed: false, award: null };
     const next = normalizeProfile(profile, profile.id, now); next.callsign = name; next.updatedAt = now; return { profile: next, changed: true, award: null };

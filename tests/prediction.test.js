@@ -35,7 +35,13 @@ test('horizontal snapshot corrections cannot insert an airborne player into a so
 });
 
 test('major authoritative corrections restore all movement state, including airborne state', () => {
-  const predicted = player(), local = player({ x: 8, y: 0.8, vy: -2, grounded: false });
+  const predicted = player(), local = player({ x: 8, y: 0.8, vx: 2, vz: -4, vy: -2, grounded: false });
   reconcileMovement(predicted, local, world);
   assert.deepEqual(predicted, local);
+});
+
+test('flight reconciliation restores authoritative momentum but stale ground snapshots cannot steer a jump', () => {
+  const predicted = player({ y: 2.5, grounded: false, vy: 4, vx: 0, vz: -5 });
+  reconcileMovement(predicted, player({ vx: 3, vz: 0 }), world); assert.equal(predicted.vx, 0); assert.equal(predicted.vz, -5);
+  reconcileMovement(predicted, player({ y: 2.5, grounded: false, vy: 3, vx: 1, vz: -4 }), world); assert.equal(predicted.vx, 1); assert.equal(predicted.vz, -4);
 });

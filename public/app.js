@@ -8,7 +8,7 @@ import { SoloConnection } from './solo-connection.js';
 import { APP_MODE, PROFILE_STORAGE } from './runtime-config.js';
 import { ProfileStore, PROFILE_KEY } from './profile.js';
 import { profileStats, POINT_RULES, weaponMastery } from '/shared/progression.js';
-import { OUTFITS, getOutfit } from '/shared/outfits.js';
+import { OUTFITS, getOutfit, CHARACTERS, getCharacter } from '/shared/outfits.js';
 import { OperatorPreview } from './operator-model.js';
 import { BOT_DIFFICULTIES, getBotDifficulty } from '/shared/simulation.js';
 
@@ -162,7 +162,7 @@ function callsign() {
 function profileLoadout() {
   const profile = profileStore.profile;
   if (!ownsWeapon(profile, loadout.weaponId)) loadout.weaponId = 'rifle';
-  return { ...loadout, outfitId: profile.equippedOutfitId, ownedWeapons: profile.ownedWeapons, weaponKills: profile.weaponKills };
+  return { ...loadout, outfitId: profile.equippedOutfitId, characterId: profile.characterId, ownedWeapons: profile.ownedWeapons, weaponKills: profile.weaponKills };
 }
 
 function requestJoin(code) {
@@ -190,6 +190,7 @@ function enterGame(data) {
       canvas: $('game-canvas'), minimap: $('minimap'), settings, audio, send,
       mapId: data.room.mapId, weaponId: data.players.find((player) => player.id === data.id)?.weaponId, skinId: data.players.find((player) => player.id === data.id)?.skinId,
       outfitId: data.players.find((player) => player.id === data.id)?.outfitId,
+      characterId: data.players.find((player) => player.id === data.id)?.characterId,
       onMenu: showMenu,
       onFatal: (message, fatal = true) => { toast(message, true); if (fatal) leaveGame(); },
     });
@@ -247,17 +248,17 @@ function openDialog(id) {
   }
   if (id === 'shop-dialog') {
     renderShop();
-    try { operatorPreview = new OperatorPreview($('operator-preview')); operatorPreview.set(selectedOutfitId, loadout.skinId, loadout.weaponId); $('operator-preview-fallback').hidden = true; }
+    try { operatorPreview = new OperatorPreview($('operator-preview')); operatorPreview.set(selectedOutfitId, loadout.skinId, loadout.weaponId, profileStore.profile.characterId); $('operator-preview-fallback').hidden = true; }
     catch { $('operator-preview-fallback').hidden = false; }
   }
 }
 
 function renderProfile() {
-  const profile = profileStore.profile, stats = profileStats(profile), outfit = getOutfit(profile.equippedOutfitId);
+  const profile = profileStore.profile, stats = profileStats(profile), character = getCharacter(profile.characterId);
   const format = (number) => number.toLocaleString('ko-KR');
   $('profile-callsign').textContent = profile.callsign; $('operator-callsign').textContent = profile.callsign;
   $('profile-device').textContent = `기기 #${profile.id.slice(0, 8).toUpperCase()}`;
-  $('profile-portrait').src = `/assets/${outfit.image}`; $('profile-portrait').alt = outfit.label;
+  $('profile-portrait').src = `/assets/${character.image}?v=${NETWORK_PROTOCOL}`; $('profile-portrait').alt = character.label;
   $('profile-kills').textContent = format(stats.kills); $('profile-deaths').textContent = format(stats.deaths);
   $('profile-ratio').textContent = stats.ratio.toFixed(2); $('profile-killrate').textContent = `킬 비율 ${stats.killRate.toFixed(0)}%`;
   $('profile-points').textContent = format(profile.points); $('top-points').textContent = format(profile.points); $('shop-points').textContent = format(profile.points);
@@ -288,6 +289,11 @@ function renderRoundReward() {
 
 function renderShop() {
   const outfit = getOutfit(selectedOutfitId), profile = profileStore.profile;
+  for (const button of $('character-choices').children) {
+    const selected = button.dataset.character === profile.characterId; button.classList.toggle('selected', selected); button.setAttribute('aria-pressed', String(selected)); button.disabled = shopBusy;
+  }
+  $('character-status').textContent = `${getCharacter(profile.characterId).name} · ${getCharacter(profile.characterId).label} · ${shopBusy ? '저장 중...' : '다음 출격부터 적용 · 기존 외형 모두 사용 가능'}`;
+  operatorPreview?.set(selectedOutfitId, loadout.skinId, loadout.weaponId, profile.characterId);
   document.querySelector('.shop-balance small').textContent = `완주 ${POINT_RULES.completion} · 킬당 ${POINT_RULES.perKill} · 승리 ${POINT_RULES.victory}`;
   const owned = profile.ownedOutfits.includes(outfit.id), equipped = profile.equippedOutfitId === outfit.id;
   $('shop-concept').textContent = outfit.concept; $('shop-outfit-name').textContent = outfit.name; $('shop-description').textContent = outfit.description;
@@ -348,6 +354,18 @@ function renderWeaponOwnership() {
 }
 
 function makeCollections() {
+  for (const character of CHARACTERS) {
+    const button = document.createElement('button'); button.className = 'character-choice'; button.dataset.character = character.id; button.setAttribute('aria-label', `${character.label} 선택`);
+    const image = document.createElement('img'); image.src = `/assets/${character.image}?v=${NETWORK_PROTOCOL}`; image.alt = '';
+    const copy = document.createElement('span'), name = document.createElement('b'), label = document.createElement('small'); name.textContent = character.name; label.textContent = `${character.label} · 무료`; copy.append(name, label); button.append(image, copy); $('character-choices').append(button);
+    button.addEventListener('click', async () => {
+      if (shopBusy || profileStore.profile.characterId === character.id) return;
+      shopBusy = true; renderShop();
+      try { await profileStore.setCharacter(character.id); }
+      catch (error) { toast(error.message, true); }
+      finally { shopBusy = false; renderShop(); }
+    });
+  }
   for (const world of MAPS) {
     const button = document.createElement('button'); button.className = 'map-choice'; button.dataset.map = world.id; button.setAttribute('aria-label', `${world.label} 전장 선택`);
     const art = document.createElement('div'); art.className = 'map-choice-art'; art.style.backgroundImage = `url('/assets/${world.image}')`;
@@ -378,7 +396,7 @@ function makeCollections() {
     const image = document.createElement('img'); image.src = `/assets/${outfit.image}`; image.alt = outfit.concept; image.loading = 'lazy';
     const name = document.createElement('b'); name.textContent = outfit.label; const price = document.createElement('small'); price.textContent = `${outfit.price} LP`;
     card.append(image, name, price); $('outfit-choices').append(card);
-    card.addEventListener('click', () => { selectedOutfitId = outfit.id; renderShop(); operatorPreview?.set(outfit.id, loadout.skinId, loadout.weaponId); });
+    card.addEventListener('click', () => { selectedOutfitId = outfit.id; renderShop(); });
   }
 }
 

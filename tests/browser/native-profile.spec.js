@@ -33,11 +33,13 @@ test('portable host keeps identity and purchases after browser storage is cleare
     await expect(page.locator('#profile-points')).toHaveText('600');
     await page.getByRole('button', { name: '캐릭터 외형 상점', exact: true }).click(); await page.getByRole('button', { name: '보이드 러너 외형 미리보기', exact: true }).click();
     await page.getByRole('button', { name: '250 LP로 구매', exact: true }).click(); await page.getByRole('button', { name: '구매 후 장착', exact: true }).click(); await expect(page.locator('#purchase-dialog')).toBeHidden(); await expect(page.locator('#shop-points')).toHaveText('350');
+    await page.getByRole('button', { name: '여성 오퍼레이터 선택', exact: true }).click(); await expect(page.locator('#character-status')).toContainText('다음 출격부터 적용');
     await page.getByRole('button', { name: '외형 상점 닫기', exact: true }).click();
     await page.evaluate(() => localStorage.clear()); await page.reload(); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
     await expect(page.locator('#profile-points')).toHaveText('350');
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1')).id)).toBe(initial.id);
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1')).equippedOutfitId)).toBe('runner');
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1')).characterId)).toBe('female');
     const saved = JSON.parse(await readFile(path.join(dataDir, 'profile.json'), 'utf8')); expect(saved.points).toBe(350); expect(saved.equippedOutfitId).toBe('runner');
     await page.evaluate(async () => {
       const response = await fetch('/api/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'round', roundId: 'native-browser-round-0001', kills: 30, weaponKills: { rifle: 30 }, completed: true }) });

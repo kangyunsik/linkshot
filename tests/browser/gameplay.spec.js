@@ -184,6 +184,21 @@ test('an empty magazine reloads automatically after a tap, updating the HUD and 
   } finally { await dispose(page); }
 });
 
+test('jumping preserves takeoff momentum while mouse look, strafe, sprint and ADS inputs change', async ({ page }) => {
+  await fixture(page);
+  try {
+    await page.evaluate(() => { const { room, game } = window.__rules; room.world = { ...room.world, width: 100, depth: 100, obstacles: [] }; game.world = room.world; });
+    await page.keyboard.down('KeyW'); await page.keyboard.press('Space'); await expect.poll(() => page.evaluate(() => window.__rules.player.grounded)).toBe(false);
+    const takeoff = await page.evaluate(() => { const p = window.__rules.player; return { x: p.x, vx: p.vx, vz: p.vz, yaw: p.yaw }; });
+    await page.keyboard.up('KeyW'); await page.keyboard.down('KeyD'); await page.keyboard.down('ShiftLeft'); await page.mouse.down({ button: 'right' });
+    await page.evaluate(() => { const event = new MouseEvent('mousemove', { bubbles: true }); Object.defineProperty(event, 'movementX', { value: 200 }); document.dispatchEvent(event); });
+    await expect.poll(() => page.evaluate(() => window.__rules.player.yaw)).not.toBe(takeoff.yaw);
+    const flight = await page.evaluate(() => { const { player: p, game } = window.__rules; return { x: p.x, vx: p.vx, vz: p.vz, grounded: p.grounded, predictedVx: game.predicted.vx, predictedVz: game.predicted.vz }; });
+    expect(flight.grounded).toBe(false); expect(flight.x).toBeCloseTo(takeoff.x, 8); expect(flight.vx).toBe(takeoff.vx); expect(flight.vz).toBe(takeoff.vz); expect(flight.predictedVx).toBe(takeoff.vx); expect(flight.predictedVz).toBe(takeoff.vz);
+    await page.keyboard.up('KeyD'); await page.keyboard.up('ShiftLeft'); await page.mouse.up({ button: 'right' });
+  } finally { await dispose(page); }
+});
+
 test('view recoil returns to the pre-shot aim after both a tap and sustained fire', async ({ page }) => {
   await fixture(page);
   try {

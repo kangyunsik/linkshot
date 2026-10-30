@@ -110,6 +110,7 @@ type localProfile struct {
 	Version int `json:"version"`
 	ID string `json:"id"`
 	Callsign string `json:"callsign"`
+	CharacterID string `json:"characterId"`
 	Kills int64 `json:"kills"`
 	Deaths int64 `json:"deaths"`
 	Points int64 `json:"points"`
@@ -134,6 +135,7 @@ type economyConfig struct {
 type profileOperation struct {
 	Type string `json:"type"`
 	Callsign string `json:"callsign"`
+	CharacterID string `json:"characterId"`
 	RoundID string `json:"roundId"`
 	Kills int64 `json:"kills"`
 	Deaths int64 `json:"deaths"`
@@ -167,6 +169,7 @@ func (s *profileStore) weaponCounts(raw map[string]int64) map[string]int64 {
 	result := map[string]int64{}; for _, item := range s.economy.Weapons { if value := profileCount(raw[item.ID]); value > 0 { result[item.ID] = value } }; return result
 }
 func (s *profileStore) migrateWeapons() {
+	if s.profile.CharacterID != "male" && s.profile.CharacterID != "female" { s.profile.CharacterID = "male" }
 	owned := s.profile.OwnedWeapons; s.profile.OwnedWeapons = []string{}
 	for _, item := range s.economy.Weapons { found := item.Price == 0; for _, id := range owned { if id == item.ID { found = true } }; if found { s.profile.OwnedWeapons = append(s.profile.OwnedWeapons, item.ID) } }
 	s.profile.WeaponKills = s.weaponCounts(s.profile.WeaponKills)
@@ -233,6 +236,9 @@ func (s *profileStore) serve(w http.ResponseWriter, r *http.Request) {
 	switch operation.Type {
 	case "name":
 		name := cleanCallsign(operation.Callsign); changed = name != next.Callsign; next.Callsign = name
+	case "character":
+		if operation.CharacterID != "male" && operation.CharacterID != "female" { responseError("존재하지 않는 캐릭터입니다."); return }
+		changed = next.CharacterID != operation.CharacterID; next.CharacterID = operation.CharacterID
 	case "round":
 		if !validLocalID(operation.RoundID) { responseError("라운드 ID가 올바르지 않습니다."); return }
 		prior := next.RoundLedger[operation.RoundID]; kills := max(prior.Kills, profileCount(operation.Kills)); deaths := max(prior.Deaths, profileCount(operation.Deaths))

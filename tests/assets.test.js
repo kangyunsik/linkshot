@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { WEAPONS } from '../shared/catalog.js';
+import { CHARACTERS } from '../shared/outfits.js';
 
 test('recorded firearm samples have verified CC0 provenance, valid PCM and safe peaks', async () => {
   const directory = new URL('../public/assets/sounds/', import.meta.url);
@@ -26,11 +27,15 @@ test('recorded firearm samples have verified CC0 provenance, valid PCM and safe 
 });
 
 test('compact human models are valid self-contained glTF with documented free licensing', async () => {
-  for (const file of ['operator-human-v2.glb', 'operator-hair-v2.glb']) {
+  for (const file of CHARACTERS.flatMap((character) => [character.model, character.hair, character.helmetHair].filter(Boolean))) {
     const bytes = await readFile(new URL(`../public/assets/models/${file}`, import.meta.url));
     assert.equal(bytes.readUInt32LE(0), 0x46546c67); assert.equal(bytes.readUInt32LE(8), bytes.length);
     const length = bytes.readUInt32LE(12), document = JSON.parse(bytes.toString('utf8', 20, 20 + length));
     assert.match(document.asset.copyright, /Quaternius.*CC0/); assert.equal(document.buffers[0].uri, undefined);
     assert.ok(document.images.every((image) => image.bufferView !== undefined && image.uri === undefined));
+  }
+  for (const character of CHARACTERS) {
+    const portrait = await readFile(new URL(`../public/assets/${character.image}`, import.meta.url));
+    assert.equal(portrait.readUInt32BE(0), 0x89504e47); assert.equal(portrait.readUInt32BE(16), 512); assert.equal(portrait.readUInt32BE(20), 640);
   }
 });
