@@ -1,6 +1,32 @@
 import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 
+test('rifle and sniper support arms stay compact without changing pistol or trigger-hand poses', async ({ page }) => {
+  await page.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: '' })); await page.goto('/');
+  const checks = await page.evaluate(async () => {
+    const [THREE, { WeaponModels, disposeModel }, { WEAPONS }] = await Promise.all([import('/vendor/three.module.js'), import('/weapon-model.js'), import('/shared/catalog.js')]);
+    const models = new WeaponModels(), checks = [];
+    for (const characterId of ['male', 'female']) for (const weapon of WEAPONS) {
+      const model = models.create(weapon.id, 'standard', true, 'field', characterId), left = model.getObjectByName('left-hand'), right = model.getObjectByName('right-hand');
+      const sleeve = model.getObjectByName('left-sleeve').geometry, path = sleeve.userData.sleevePath;
+      const distance = (a, b) => new THREE.Vector3(...a).distanceTo(new THREE.Vector3(...b));
+      checks.push({ id: weapon.id, type: weapon.type, compact: left.userData.compactSupport, length: sleeve.userData.sleeveLength, upper: distance(path[0], path[1]), forearm: distance(path[1], left.position.toArray()), shoulder: path[0], elbow: path[1], rightPath: model.getObjectByName('right-sleeve').geometry.userData.sleevePath.slice(0, 2), leftPose: left.userData.pose, rightPose: right.userData.pose, foreend: left.userData.foreend });
+      disposeModel(model);
+    }
+    models.dispose(); return checks;
+  });
+  for (const check of checks) {
+    expect(check.rightPose).toBe('trigger'); expect(check.rightPath).toEqual([[.31, -.46, .62], [.20, -.30, .40]]);
+    if (check.type === 'ASSAULT' || check.type === 'SNIPER') {
+      expect(check.compact).toBe(true); expect(check.upper).toBeLessThan(.28); expect(check.forearm).toBeLessThan(.28); expect(check.length).toBeLessThan(.6);
+      expect(check.foreend).toBeGreaterThanOrEqual(-.4); expect(check.foreend).toBeLessThanOrEqual(-.28);
+    } else {
+      expect(check.compact).toBe(false);
+      if (check.type === 'SIDEARM') { expect(check.leftPose).toBe('wrap'); expect(check.shoulder).toEqual([-.40, -.45, .65]); expect(check.elbow).toEqual([-.23, -.31, .43]); }
+    }
+  }
+});
+
 test('anatomical first-person hands keep correct depth, remain visible near walls and follow the shotgun pump', async ({ page }) => {
   const errors = []; page.on('pageerror', (error) => errors.push(error.message));
   await page.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: '' })); await page.goto('/');

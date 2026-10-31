@@ -83,7 +83,8 @@ function sleeveGeometry(points, wristWidth, side, wristRotation) {
       if (ring < rings && section < segments) { const a = ring * (segments + 1) + section, b = a + segments + 1; indices.push(a, a + 1, b, b, a + 1, b + 1); }
     }
   }
-  const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3)); geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2)); geometry.setIndex(indices); geometry.computeVertexNormals(); return geometry;
+  const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3)); geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2)); geometry.setIndex(indices); geometry.computeVertexNormals();
+  geometry.userData.sleevePath = points.map((point) => [...point]); geometry.userData.sleeveLength = curve.getLength(); return geometry;
 }
 
 export function createViewmodelHands(models, { group, shape, weaponId, outfit, skin, character }) {
@@ -93,8 +94,9 @@ export function createViewmodelHands(models, { group, shape, weaponId, outfit, s
   const gloveColor = new THREE.Color(outfit.id === 'field' ? skin.dark : outfit.dark).lerp(new THREE.Color('#9ba69f'), .22);
   const glove = new THREE.MeshStandardMaterial({ name: 'view-tactical-glove', color: gloveColor, map: gloveMap, bumpMap: gloveMap, bumpScale: .0007, roughness: .86, metalness: 0, fog: false });
   const trim = new THREE.MeshStandardMaterial({ name: 'view-cuff', color: outfit.id === 'field' ? skin.dark : outfit.dark, roughness: .95, metalness: 0, fog: false });
-  const supportZ = { rifle: -.36, smg: -.25, shotgun: -.43, sniper: -.47, lmg: -.52, dmr: -.42 }[shape];
-  const foreend = weaponId === 'm82' ? -.54 : weaponId === 'p90' ? -.23 : supportZ;
+  const compactSupport = shape === 'rifle' || shape === 'sniper';
+  const supportZ = { rifle: -.28, smg: -.25, shotgun: -.43, sniper: -.34, lmg: -.52, dmr: -.42 }[shape];
+  const foreend = weaponId === 'm82' ? -.40 : weaponId === 'p90' ? -.23 : supportZ;
   let supportArm;
   for (const side of ['r', 'l']) {
     const right = side === 'r', pistol = shape === 'pistol', profile = right ? 'trigger' : pistol ? 'wrap' : 'cradle';
@@ -116,12 +118,14 @@ export function createViewmodelHands(models, { group, shape, weaponId, outfit, s
     const geometry = models.sharedOperatorGeometry(`view-hand/${prepared.key}`, prepared.geometry);
     const mesh = new THREE.Mesh(geometry, [glove, skinMaterial(models, prepared.sourceMaterial, character.id)]); mesh.name = 'palm'; hand.add(mesh);
     const cuff = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 20, 1, true), trim); cuff.name = `${name}-cuff`; cuff.position.y = -.008; cuff.scale.set(.029, .025, .041); hand.add(cuff);
-    const shoulder = right ? [.31, -.46, .62] : pistol ? [-.40, -.45, .65] : [-.43, -.43, .24];
-    const elbow = right ? [.20, -.30, .40] : pistol ? [-.23, -.31, .43] : [-.26, -.26, -.08];
+    // Tuck the support elbow under long rifles instead of stretching one long
+    // sleeve from the camera to the muzzle. Keep pistol/trigger hands intact.
+    const shoulder = right ? [.31, -.46, .62] : pistol ? [-.40, -.45, .65] : compactSupport ? [-.245, -.52, wrist[2] + .14] : [-.43, -.43, .24];
+    const elbow = right ? [.20, -.30, .40] : pistol ? [-.23, -.31, .43] : compactSupport ? [-.225, -.295, wrist[2] + .035] : [-.26, -.26, -.08];
     const end = v([0, -.017, 0]).applyQuaternion(hand.quaternion).add(hand.position);
     const approach = end.clone().addScaledVector(new THREE.Vector3(0, 1, 0).applyQuaternion(hand.quaternion), -.075);
     const sleeve = new THREE.Mesh(sleeveGeometry([shoulder, elbow, approach.toArray(), end.toArray()], character.id === 'female' ? .029 : .031, right ? 1 : -1, hand.quaternion), fabric); sleeve.name = right ? 'right-sleeve' : 'left-sleeve'; assembly.add(sleeve);
-    hand.userData.wrist = [...wrist]; hand.userData.foreend = foreend ?? null;
+    hand.userData.wrist = [...wrist]; hand.userData.foreend = foreend ?? null; hand.userData.compactSupport = !right && compactSupport;
   }
   root.userData.anatomy = 'quaternius-view-hands-v1'; root.userData.covered = covered; root.userData.characterId = character.id;
   group.userData.supportArm = supportArm; group.userData.handRig = root; return root;
