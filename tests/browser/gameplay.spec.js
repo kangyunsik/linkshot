@@ -16,7 +16,7 @@ async function fixture(page, mapId = 'foundry') {
     const game = new FPSGame({ canvas: document.getElementById('game-canvas'), minimap: document.getElementById('minimap'), settings: { sensitivity: 1, fov: 82, volume: 0, quality: 'low' }, audio: { unlock: async () => {}, shot(_volume, _pan, id) { sounds.push(id); }, hit() {}, hurt() {}, kill() {}, step() {}, reload() {} }, mapId,
       send: (data) => { if (data.type === 'input') room.setInput(player.id, data); if (data.type === 'loadout') room.selectLoadout(player.id, data); },
       onMenu: (show) => { document.getElementById('pause-overlay').hidden = !show; }, onFatal: (message) => { throw new Error(message); } });
-    game.applySnapshot(room.snapshot(), player.id); document.getElementById('pause-overlay').hidden = false;
+    game.applySnapshot(room.snapshot(), player.id); await game.prepareGraphics(); document.getElementById('pause-overlay').hidden = false;
     let ticks = 0; const timer = setInterval(() => { room.tick(1 / 60); if (++ticks % 3 === 0) game.applySnapshot(room.snapshot()); }, 1000 / 60);
     const start = () => game.lock(); document.getElementById('resume-button').addEventListener('click', start);
     window.__rules = { room, game, player, timer, start, sounds };
@@ -86,6 +86,23 @@ test('boot sounds are spatial, stance-aware and bounded; kill cues are distinct 
   expect(result.run).toBeGreaterThan(result.walk); expect(result.walk).toBeGreaterThan(result.crouch); expect(result.pan).toBeCloseTo(-0.8, 6); expect(result.filtered).toBe(true); expect(result.steps).toBeLessThanOrEqual(16);
   expect(result.killDistinct).toBe(true); expect(result.killRate).toBe(1); expect(result.mutedStep && result.mutedKill && result.zeroVolume).toBe(true);
   expect(result.sniperSeconds[0]).toBeCloseTo(1.65, 2); expect(result.sniperSeconds[1]).toBeCloseTo(1.95, 2); expect(result.sniperSeconds[2]).toBeCloseTo(2.2, 2);
+});
+
+test('all weapon-specific recorded reloads match the server timer, seek correctly and stop on cancellation', async ({ page }) => {
+  await page.goto('/'); await expect(page.getByText('LAN SERVER ONLINE')).toBeVisible();
+  const result = await page.evaluate(async () => {
+    const [{ GameAudio }, { WEAPONS }] = await Promise.all([import('/audio.js'), import('/shared/catalog.js')]);
+    const audio = new GameAudio({ volume: 100 }); await audio.unlock(); await audio.reloadReady; audio.master.gain.cancelScheduledValues(audio.context.currentTime); audio.master.gain.value = 0;
+    const profiles = WEAPONS.map((weapon) => { const voice = audio.reload(weapon.id, weapon.reloadSeconds); return { id: voice.weaponId, duration: voice.source.buffer.duration, expected: weapon.reloadSeconds, rate: voice.source.playbackRate.value, offset: voice.offset }; });
+    const seek = audio.reload('pistol', .5).offset; audio.stopReload(); const stopped = audio.reloadVoice === null;
+    let allowed = true; const rifle = audio.reloadSamples.get('rifle'); audio.reloadSamples.delete('rifle'); audio.reloadReady = Promise.resolve().then(() => { allowed = false; audio.reloadSamples.set('rifle', rifle); });
+    audio.reload('rifle', 1, () => allowed); await audio.reloadReady; await Promise.resolve(); const staleCancelled = audio.reloadVoice === null;
+    const rejected = audio.reload('rifle', 1, () => false) === null; audio.muted = true; const muted = audio.reload('rifle') === null;
+    const count = audio.reloadSamples.size; await audio.context.close(); return { profiles, seek, stopped, staleCancelled, rejected, muted, count };
+  });
+  expect(result.count).toBe(20); expect(result.profiles).toHaveLength(20);
+  for (const profile of result.profiles) { expect(profile.duration).toBeCloseTo(profile.expected, 4); expect(profile.rate).toBe(1); expect(profile.offset).toBe(0); }
+  expect(result.seek).toBeCloseTo(.65, 4); expect(result.stopped && result.staleCancelled && result.rejected && result.muted).toBe(true);
 });
 
 test('local and nearby remote movement both produce footsteps, but dead sources do not', async ({ page }) => {
@@ -226,13 +243,69 @@ test('an empty magazine reloads automatically after a tap, updating the HUD and 
   try {
     await page.evaluate(() => {
       const f = window.__rules; f.player.ammo = 1; f.player.magazines.rifle = 1; f.game.applySnapshot(f.room.snapshot());
-      f.reloads = 0; f.game.audio.reload = () => { f.reloads++; };
+      f.reloads = 0; f.game.audio.reload = (id) => { f.reloads++; f.reloadWeapon = id; };
     });
     await page.mouse.down(); await page.mouse.up(); await expect(page.locator('#reload-indicator')).toBeVisible();
     expect(await page.evaluate(() => window.__rules.game.fireHeld)).toBe(false);
     await expect(page.locator('#hud-ammo')).toHaveText('30'); await expect(page.locator('#reload-indicator')).toBeHidden();
     expect(await page.evaluate(() => window.__rules.reloads)).toBe(1);
+    expect(await page.evaluate(() => window.__rules.reloadWeapon)).toBe('rifle');
+    expect(await page.evaluate(() => { const { player } = window.__rules; return player.reloadUntil === 0 && player.lastShot > 0; })).toBe(true);
     expect(await page.evaluate(() => window.__rules.sounds.filter((id) => id === 'rifle').length)).toBe(1);
+  } finally { await dispose(page); }
+});
+
+test('a real hit applies a synchronized one-second movement slow without changing aim sensitivity', async ({ page }) => {
+  await fixture(page);
+  try {
+    await page.evaluate(() => {
+      const { room, player, game } = window.__rules, attacker = room.players.get('other'); room.world = { ...room.world, width: 100, depth: 100, obstacles: [] }; game.world = room.world;
+      Object.assign(player, { x: 24, y: 0, z: 10, yaw: 0, pitch: 0, hp: 100, protectedUntil: 0 });
+      Object.assign(attacker, { x: 24, y: 0, z: 14, yaw: 0, pitch: Math.atan2(1.05 - 1.62, 4), protectedUntil: 0, ammo: 30 });
+      game.predicted = null; game.applySnapshot(room.snapshot()); room.shoot(attacker, Date.now(), true); game.applySnapshot(room.snapshot());
+    });
+    await page.keyboard.down('KeyW'); await expect.poll(() => page.evaluate(() => window.__rules.player.moveSpeed)).toBeCloseTo(3.99, 4);
+    expect(await page.evaluate(() => window.__rules.game.predicted.hitSlowUntil === window.__rules.player.hitSlowUntil)).toBe(true);
+    expect(await page.evaluate(() => window.__rules.game.settings.sensitivity)).toBe(1);
+    await expect.poll(() => page.evaluate(() => window.__rules.player.moveSpeed), { timeout: 3000 }).toBeCloseTo(5.7, 4); await page.keyboard.up('KeyW');
+  } finally { await dispose(page); }
+});
+
+test('the redesigned SVG hitmarker is hollow, centered and distinguishes normal, head and protected hits', async ({ page }) => {
+  await fixture(page);
+  try {
+    await page.setViewportSize({ width: 1279, height: 799 });
+    const states = [];
+    for (const type of ['body', 'head', 'protected']) {
+      states.push(await page.evaluate((type) => {
+        const { game } = window.__rules, protectedHit = type === 'protected';
+        game.handleEvent({ type: 'shot', shotId: `marker-${type}`, id: 'viewer', weaponId: 'rifle', origin: { x: 24, y: 1.62, z: 10 }, hit: protectedHit ? null : 'other', headshot: type === 'head', rays: [{ end: { x: 22, y: 1.1, z: 6 }, hit: protectedHit ? null : 'other', protectedTarget: protectedHit ? 'other' : null }] });
+        const marker = document.getElementById('hitmarker'), r = marker.getBoundingClientRect();
+        return { text: marker.textContent.trim(), lines: marker.querySelector('.hit-lines').getAttribute('d').match(/M/g).length, center: Math.hypot(r.x + r.width / 2 - innerWidth / 2, r.y + r.height / 2 - innerHeight / 2), color: getComputedStyle(marker).color, crown: getComputedStyle(marker.querySelector('.head-accent')).display !== 'none', shield: getComputedStyle(marker.querySelector('.protected-accent')).display !== 'none', label: marker.getAttribute('aria-label') };
+      }, type));
+    }
+    for (const state of states) { expect(state.text).toBe(''); expect(state.lines).toBe(4); expect(state.center).toBeLessThan(.01); }
+    expect(new Set(states.map((state) => state.color)).size).toBe(3); expect(states[1].crown).toBe(true); expect(states[2].shield).toBe(true); expect(states[2].label).toContain('스폰 보호');
+    await expect(page.locator('#hitmarker')).not.toHaveClass(/visible/);
+  } finally { await dispose(page); }
+});
+
+test('corpse fading reuses prepared shader programs and shared character buffers are released only by their owner', async ({ page }) => {
+  await fixture(page);
+  try {
+    const result = await page.evaluate(() => {
+      const { game, timer } = window.__rules; clearInterval(timer); cancelAnimationFrame(game.frameId);
+      const avatar = game.remote.get('other'), body = avatar.group.getObjectByName('SuperHero_Male'), geometry = body.geometry; let disposals = 0;
+      geometry.addEventListener('dispose', () => { disposals++; }); game.combat.death(avatar.target);
+      const corpse = game.combat.corpses[0], shared = corpse.operator.group.getObjectByName('SuperHero_Male').geometry === geometry;
+      const materials = new Set(); corpse.pivot.traverse((object) => { if (object.isMesh) for (const material of Array.isArray(object.material) ? object.material : [object.material]) materials.add(material); });
+      const transparentAtBirth = [...materials].every((material) => material.transparent);
+      game.combat.update(corpse.born + 1000, .016); game.renderer.render(game.scene, game.camera); const programs = game.renderer.info.programs.length;
+      game.combat.update(corpse.born + 9000, .016); game.renderer.render(game.scene, game.camera); const afterFade = game.renderer.info.programs.length;
+      const fading = [...materials].some((material) => material.opacity < .8); game.combat.clear(); const afterClear = disposals;
+      game.dispose(); return { ready: game.graphicsReady, shared, transparentAtBirth, programs, afterFade, fading, afterClear, finalDisposals: disposals };
+    });
+    expect(result.ready && result.shared && result.transparentAtBirth && result.fading).toBe(true); expect(result.afterFade).toBe(result.programs); expect(result.afterClear).toBe(0); expect(result.finalDisposals).toBe(1);
   } finally { await dispose(page); }
 });
 

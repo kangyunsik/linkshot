@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { Room, traceShot } from '../shared/simulation.js';
 import { EMPTY_INPUT } from '../shared/movement.js';
 import { WEAPONS, getWeapon } from '../shared/catalog.js';
-import { normalizeRoundOptions, aimDirection } from '../shared/world.js';
+import { normalizeRoundOptions, aimDirection, RULES } from '../shared/world.js';
 
 function setup(weaponId = 'sniper', isBot = false) {
   let now = 1000; const room = new Room('HITRG', { bots: 0, clock: () => now, random: () => 0 });
   const shooter = room.addPlayer('a', 'ALPHA', isBot, { weaponId, ownedWeapons: [weaponId] }), target = room.addPlayer('b', 'BRAVO');
   room.world = { ...room.world, width: 240, depth: 240, obstacles: [] };
   Object.assign(shooter, { x: 0, y: 0, z: 10, yaw: 0, pitch: 0, protectedUntil: 0 });
-  Object.assign(target, { x: 0, y: 0, z: -40, protectedUntil: 0 });
+  Object.assign(target, { x: 0, y: 0, z: -40, yaw: 0, pitch: 0, protectedUntil: 0 });
   for (const p of [shooter, target]) { p.history = []; room.recordPlayerHistory(p, 800); room.recordPlayerHistory(p, 1000); }
   room.events.length = 0;
   return { room, shooter, target, now: (value) => { now = value; } };
@@ -70,7 +70,7 @@ test('seven bots receive seven distinct guns and use the same body damage as pla
       Object.assign(target, { z: 9, hp: 10000 }); shooter.pitch = Math.atan2(1.0 - 1.62, 1);
       room.shoot(shooter, 1000, true); damages.push(room.events.find((event) => event.type === 'damage')?.damage || 0);
     }
-    assert.equal(damages[0], weapon.damage * weapon.pellets, weapon.id); assert.equal(damages[1], damages[0], weapon.id);
+    assert.equal(damages[0], Math.round(weapon.damage * weapon.pellets * RULES.torsoDamageMultiplier), weapon.id); assert.equal(damages[1], damages[0], weapon.id);
   }
   assert.equal(getWeapon('sniper').damage, 100);
 });

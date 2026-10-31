@@ -7,14 +7,19 @@ import { NETWORK_PROTOCOL } from '/shared/world.js';
 export function disposeModel(group) {
   const geometries = new Set(), materials = new Set();
   group.traverse((child) => {
-    if (child.geometry) geometries.add(child.geometry);
+    if (child.geometry && !child.geometry.userData.operatorShared) geometries.add(child.geometry);
     if (child.material) for (const material of Array.isArray(child.material) ? child.material : [child.material]) materials.add(material);
   });
   geometries.forEach((geometry) => geometry.dispose()); materials.forEach((material) => material.dispose());
 }
 
 export class WeaponModels {
-  constructor() { this.textures = new Map(); }
+  constructor() { this.textures = new Map(); this.operatorGeometries = new Map(); }
+
+  sharedOperatorGeometry(key, source) {
+    if (!this.operatorGeometries.has(key)) { const geometry = source.clone(); geometry.userData.operatorShared = true; this.operatorGeometries.set(key, geometry); }
+    return this.operatorGeometries.get(key);
+  }
 
   skinTexture(skin) {
     return this.assetTexture(skin.pattern);
@@ -209,7 +214,7 @@ export class WeaponModels {
     return group;
   }
 
-  dispose() { this.textures.forEach((texture) => texture.dispose()); this.textures.clear(); }
+  dispose() { this.operatorGeometries.forEach((geometry) => geometry.dispose()); this.operatorGeometries.clear(); this.textures.forEach((texture) => texture.dispose()); this.textures.clear(); }
 }
 
 export class ArmoryPreview {

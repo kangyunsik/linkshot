@@ -75,6 +75,7 @@ function setBusy(value) {
   $('create-button').disabled = value || !connected;
   $('join-form').querySelector('button').disabled = value || !connected;
   clearTimeout(requestTimeout);
+  if (value) { $('loading-overlay').querySelector('h2').textContent = '전장에 연결하는 중'; $('loading-overlay').querySelector('.eyebrow').textContent = 'ESTABLISHING CONNECTION'; }
   if (value) requestTimeout = setTimeout(() => {
     if (!busy) return;
     send({ type: 'leave' }); setBusy(false); toast('연결 시간이 초과되었습니다. 서버 연결을 확인한 뒤 다시 시도해 주세요.', true);
@@ -181,7 +182,7 @@ function showMenu(visible) {
   $('resume-button').querySelector('span').textContent = hasDeployed ? '교전 계속하기' : '교전 시작';
 }
 
-function enterGame(data) {
+async function enterGame(data) {
   if (data.room?.protocolVersion !== NETWORK_PROTOCOL) { send({ type: 'leave' }); setBusy(false); toast('게임 서버가 이전 버전입니다. 진행 중인 방을 종료한 뒤 서버를 재시작하고 브라우저를 새로고침해 주세요.', true); return; }
   if (game) game.dispose();
   $('lobby').hidden = true; $('game-shell').hidden = false; hasDeployed = false;
@@ -195,6 +196,8 @@ function enterGame(data) {
       onFatal: (message, fatal = true) => { toast(message, true); if (fatal) leaveGame(); },
     });
     game.applySnapshot(data, data.id);
+    $('loading-overlay').querySelector('h2').textContent = '그래픽을 준비하는 중'; $('loading-overlay').querySelector('.eyebrow').textContent = 'PREPARING GRAPHICS';
+    const created = game; await created.prepareGraphics(); if (game !== created || created.disposed) return;
     $('pause-room-code').textContent = data.room.code;
     $('copy-invite').hidden = data.room.mode === 'practice';
     if (data.room.phase !== 'ended') showMenu(true);
@@ -330,7 +333,7 @@ function updateSelections() {
   $('armory-weapon-type').textContent = `${weapon.type} / ${weapon.label}`; $('armory-weapon-name').textContent = weapon.name;
   $('armory-weapon-description').textContent = weapon.description; $('armory-skin-name').textContent = skin.name;
   $('weapon-stats').replaceChildren();
-  for (const [label, value] of [['피해량', weapon.pellets > 1 ? `${weapon.damage} × ${weapon.pellets} PELLETS` : `${weapon.damage} / HEAD ${weapon.headDamage}`], ['탄창 / 연사', `${weapon.magazine} / ${Math.round(60 / weapon.fireSeconds)} RPM`], ['재장전', `${weapon.reloadSeconds.toFixed(2)} SEC`], ['이동 / 달리기', `${(RULES.walkSpeed * weapon.walkMultiplier).toFixed(1)} / ${(RULES.sprintSpeed * weapon.sprintMultiplier).toFixed(1)} M/S`], ['최대 사거리', `${weapon.range} M`]]) {
+  for (const [label, value] of [['기본 피해', weapon.pellets > 1 ? `${weapon.damage} × ${weapon.pellets} PELLETS` : `${weapon.damage} / HEAD ${weapon.headDamage}`], ['부위 배율', '몸통 ×1.2 · 손끝 ×0.5 · 머리 별도'], ['탄창 / 연사', `${weapon.magazine} / ${Math.round(60 / weapon.fireSeconds)} RPM`], ['재장전', `${weapon.reloadSeconds.toFixed(2)} SEC`], ['이동 / 달리기', `${(RULES.walkSpeed * weapon.walkMultiplier).toFixed(1)} / ${(RULES.sprintSpeed * weapon.sprintMultiplier).toFixed(1)} M/S`], ['최대 사거리', `${weapon.range} M`]]) {
     const row = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.textContent = value; row.append(dt, dd); $('weapon-stats').append(row);
   }
   preview?.set(weapon.id, skin.id); store('sector07-loadout', JSON.stringify(loadout));

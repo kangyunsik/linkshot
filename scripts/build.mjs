@@ -20,6 +20,9 @@ for (const file of CHARACTERS.flatMap((character) => [character.model, character
 const sounds = JSON.parse(await readFile(path.join(root, 'public/assets/sounds/manifest.json'), 'utf8'));
 if (sounds.license !== 'CC0-1.0' || sounds.files.length !== WEAPONS.length) throw new Error('Missing licensed firearm recordings');
 for (const { file } of sounds.files) { if (!/^[a-z][a-z0-9]*-1\.wav$/.test(file)) throw new Error('Invalid sound path'); const bytes = await readFile(path.join(root, 'public/assets/sounds', file)); if (bytes.toString('ascii', 0, 4) !== 'RIFF') throw new Error(`Invalid firearm sample: ${file}`); }
+const reloads = JSON.parse(await readFile(path.join(root, 'public/assets/sounds/reload-manifest.json'), 'utf8'));
+if (reloads.license !== 'CC0-1.0' || reloads.files.length !== WEAPONS.length) throw new Error('Missing recorded reload sounds');
+for (const weapon of WEAPONS) { const item = reloads.files.find((item) => item.weaponId === weapon.id); if (item?.file !== `reload-${weapon.id}.wav` || item.seconds !== weapon.reloadSeconds) throw new Error(`Invalid reload profile: ${weapon.id}`); const bytes = await readFile(path.join(root, 'public/assets/sounds', item.file)); if (bytes.toString('ascii', 0, 4) !== 'RIFF') throw new Error(`Invalid reload recording: ${item.file}`); }
 await mkdir(output, { recursive: true });
 await cp(path.join(root, 'public'), output, { recursive: true, filter: (source) => {
   const relative = path.relative(root, source).split(path.sep).join('/');

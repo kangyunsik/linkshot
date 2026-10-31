@@ -8,6 +8,7 @@
   <title>LINKSHOT · 링크샷 — Local combat. Real connection.</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/hitmarker.css">
   <script type="importmap">{"imports":{"three":"/vendor/three.module.js"}}</script>
 </head>
 <body>
@@ -115,7 +116,7 @@
       </div>
       <div id="killfeed" class="killfeed" aria-live="polite"></div>
       <div id="scope-overlay" class="scope-overlay" hidden><div class="scope-lens"><i></i><b></b><span>SR–1 &nbsp; / &nbsp; PRECISION OPTICS</span></div></div>
-      <div id="crosshair" class="crosshair"><i></i><i></i><i></i><i></i><b></b></div><span id="ads-reticle" class="ads-reticle" hidden></span><div id="hitmarker" class="hitmarker">╳</div>
+      <div id="crosshair" class="crosshair"><i></i><i></i><i></i><i></i><b></b></div><span id="ads-reticle" class="ads-reticle" hidden></span><div id="hitmarker" class="hitmarker" role="img" aria-label="명중 표시"><svg viewBox="0 0 32 32" aria-hidden="true"><path class="hit-lines" d="M5 5 10 10M22 10 27 5M5 27 10 22M22 22 27 27"/><path class="head-accent" d="m13 3 3-2 3 2"/><path class="protected-accent" d="M13 34h6v4l-3 3-3-3z"/></svg></div>
       <div class="hud-bottom-left"><span id="hud-stance" class="hud-stance" hidden>CROUCHED · LOW PROFILE</span><div class="hud-health"><svg><use href="#i-plus"/></svg><strong id="hud-health">100</strong><span>HP</span></div><div class="health-track"><i id="health-fill"></i></div><div class="hud-small"><span id="hud-kd">0 K &nbsp; / &nbsp; 0 D</span><span id="hud-fps">60 FPS</span></div></div>
       <div class="hud-bottom-center"><span id="kill-confirmation"></span><span id="protection-hint" hidden>SPAWN PROTECTION</span><span class="game-control-hint"><kbd>TAB</kbd> 점수판 <i>·</i> <kbd>ESC</kbd> 메뉴</span></div>
       <div id="weapon-slots" class="weapon-slots" aria-label="무기 목록 · 생존 중 교체 불가"></div>

@@ -1,4 +1,4 @@
-import { WEAPONS } from '/shared/catalog.js';
+import { WEAPONS, getWeapon } from '/shared/catalog.js';
 import { NETWORK_PROTOCOL } from '/shared/world.js';
 import { footstepSignal, killSignal } from './sound-design.js';
 
@@ -11,11 +11,16 @@ export class GameAudio {
     this.muted = false;
     this.samples = new Map(); this.voices = new Set();
     this.stepVoices = new Set(); this.killSamples = new Map(); this.killVoice = null;
+    this.reloadSamples = new Map(); this.reloadVoice = null;
     this.bytes = Promise.allSettled(WEAPONS.flatMap((weapon) => [1].map(async (variant) => {
       const response = await fetch(`/assets/sounds/${weapon.id}-${variant}.wav?v=${NETWORK_PROTOCOL}-${SOUND_REVISION}`, { signal: AbortSignal.timeout(12000) });
       if (!response.ok) throw new Error('Sound sample unavailable');
       return { id: weapon.id, variant, bytes: await response.arrayBuffer() };
     })));
+    this.reloadBytes = Promise.allSettled(WEAPONS.map(async (weapon) => {
+      const response = await fetch(`/assets/sounds/reload-${weapon.id}.wav?v=${NETWORK_PROTOCOL}-1`, { priority: 'low', signal: AbortSignal.timeout(15000) });
+      if (!response.ok) throw new Error('Reload recording unavailable'); return { id: weapon.id, bytes: await response.arrayBuffer() };
+    }));
   }
 
   async unlock() {
@@ -44,6 +49,9 @@ export class GameAudio {
         const buffer = await this.context.decodeAudioData(value.bytes);
         if (!this.samples.has(value.id)) this.samples.set(value.id, []);
         this.samples.get(value.id)[value.variant - 1] = buffer;
+      })));
+      this.reloadReady ||= this.ready.then(() => this.reloadBytes).then((results) => Promise.allSettled(results.filter((result) => result.status === 'fulfilled').map(async ({ value }) => {
+        this.reloadSamples.set(value.id, await this.context.decodeAudioData(value.bytes));
       })));
     } catch { /* Browsers without Web Audio can still play. */ }
   }
@@ -108,14 +116,31 @@ export class GameAudio {
     const c = this.context, source = c.createBufferSource(), gain = c.createGain(), filter = c.createBiquadFilter(), panner = c.createStereoPanner();
     source.buffer = this.stepSamples[foot === 1 ? 1 : 0]; source.playbackRate.value = 1;
     gain.gain.value = Math.max(0, Math.min(1, volume)) * (crouched ? 0.23 : sprint ? 0.9 : 0.65);
-    filter.type = 'lowpass'; filter.frequency.value = occluded ? crouched ? 650 : 850 : Math.max(950, (crouched ? 1800 : 3000) * Math.exp(-distance / 30));
-    panner.pan.value = Math.max(-1, Math.min(1, pan)); source.connect(filter).connect(gain).connect(panner); panner.connect(this.master); panner.connect(this.room);
+    filter.type = 'lowpass'; filter.frequency.value = occluded ? crouched ? 650 : 850 : Math.max(1100, (crouched ? 3500 : 5200) * Math.exp(-distance / 30));
+    panner.pan.value = Math.max(-1, Math.min(1, pan)); source.connect(filter).connect(gain).connect(panner); panner.connect(this.master);
     const voice = { source, gain, filter, panner };
     if (this.stepVoices.size >= 16) { const oldest = this.stepVoices.values().next().value; oldest.source.stop(); this.stepVoices.delete(oldest); }
     this.stepVoices.add(voice); source.onended = () => { this.stepVoices.delete(voice); source.disconnect(); filter.disconnect(); gain.disconnect(); panner.disconnect(); };
     source.start(); return voice;
   }
-  reload() { this.tone(1100, 0.07, 0.08, 'triangle', 240); this.burst(0.1, 0.07, 1900); }
+  stopReload() {
+    const voice = this.reloadVoice; this.reloadVoice = null;
+    if (voice && this.context?.state !== 'closed') { voice.gain.gain.setTargetAtTime(0, this.context.currentTime, 0.008); voice.source.stop(this.context.currentTime + 0.025); }
+  }
+  reload(weaponId = 'rifle', remainingSeconds = getWeapon(weaponId).reloadSeconds, allowed = null) {
+    if (!this.context || this.context.state !== 'running' || this.muted || this.settings.volume <= 0 || remainingSeconds <= 0 || allowed && !allowed()) return null;
+    const weapon = getWeapon(weaponId), buffer = this.reloadSamples.get(weapon.id); this.stopReload();
+    if (!buffer) {
+      const queued = performance.now();
+      this.reloadReady?.then(() => { const elapsed = (performance.now() - queued) / 1000; if (this.reloadSamples.has(weapon.id) && elapsed < remainingSeconds - 0.02 && (!allowed || allowed())) this.reload(weapon.id, remainingSeconds - elapsed, allowed); });
+      return null;
+    }
+    const c = this.context, source = c.createBufferSource(), gain = c.createGain(); source.buffer = buffer; source.playbackRate.value = 1; gain.gain.value = 0.62;
+    const offset = Math.max(0, Math.min(buffer.duration - 0.005, weapon.reloadSeconds - remainingSeconds)); source.connect(gain).connect(this.master);
+    const voice = { source, gain, weaponId: weapon.id, offset }; this.reloadVoice = voice;
+    source.onended = () => { if (this.reloadVoice === voice) this.reloadVoice = null; source.disconnect(); gain.disconnect(); };
+    source.start(0, offset); return voice;
+  }
   hit(head = false) { this.tone(head ? 1800 : 1150, 0.07, 0.12, 'sine', head ? 2500 : 1450); }
   hurt() { this.burst(0.16, 0.1, 320); }
   kill(chain = 1, headshot = false) {

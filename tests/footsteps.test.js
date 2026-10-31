@@ -49,12 +49,14 @@ test('nearby footsteps are panned with the camera, attenuated by distance/height
   assert.equal(footstepMix(listener, player({ x: 15, crouching: true })).volume, 0); assert.equal(footstepMix({}, player()).volume, 0);
 });
 
-test('procedural boot samples are deterministic, alternate feet and have safe audible energy and smooth edges', () => {
+test('dry clacking heel/toe samples alternate feet, have two short contacts and no dragging noise tail', () => {
   const left = footstepSignal(), right = footstepSignal(44100, 1); assert.equal(hash(left), hash(footstepSignal())); assert.notEqual(hash(left), hash(right));
   for (const signal of [left, right]) {
-    assert.equal(signal.length, 9261); assert.equal(signal[0], 0); assert.equal(signal.at(-1), 0);
+    assert.equal(signal.length, 5292); assert.equal(signal[0], 0); assert.equal(signal.at(-1), 0);
     const peak = Math.max(...signal.map(Math.abs)), rms = Math.sqrt(signal.reduce((sum, value) => sum + value * value, 0) / signal.length);
     assert.ok(peak > 0.85 && peak < 0.9); assert.ok(rms > 0.08 && rms < 0.25);
+    const energy = (from, to) => { const slice = signal.slice(Math.floor(from * 44100), Math.floor(to * 44100)); return Math.sqrt(slice.reduce((sum, value) => sum + value * value, 0) / slice.length); };
+    assert.ok(energy(0, .025) > .1 && energy(.032, .06) > .08); assert.ok(energy(.09, .12) < energy(0, .025) * .025);
   }
 });
 

@@ -1,6 +1,6 @@
-import { RULES, WORLD, getMap, aimDirection, rayBox, raySphere, wallDistance, hasLineOfSight, bounds, playerPose, normalizeRoundOptions, NETWORK_PROTOCOL } from './world.js';
+import { RULES, WORLD, getMap, aimDirection, rayBox, raySphere, rayCapsule, wallDistance, hasLineOfSight, bounds, playerPose, normalizeRoundOptions, NETWORK_PROTOCOL } from './world.js';
 import { EMPTY_INPUT, sanitizeInput, movePlayer, clamp, angleDelta } from './movement.js';
-import { WEAPONS, SKINS, getWeapon, getSkin, freshMagazines, damageAtDistance, shotAngles, isWeaponId, normalizeOwnedWeapons, ownsWeapon } from './catalog.js';
+import { WEAPONS, SKINS, getWeapon, getSkin, freshMagazines, damageAtDistance, shotAngles, isWeaponId, normalizeOwnedWeapons, ownsWeapon, weaponModel } from './catalog.js';
 import { getOutfit, getCharacter, CHARACTERS } from './outfits.js';
 import { roundReward, normalizeWeaponKills, weaponMastery } from './progression.js';
 
@@ -29,23 +29,79 @@ function freshBotBrain() {
   return { targetId: null, visibleSince: null, reactAt: 0, aimPoint: null, nextAimSampleAt: 0, yawError: 0, pitchError: 0, nextAimErrorAt: 0, burstLeft: 0, nextBurstAt: 0 };
 }
 
+const bodyVolumeCache = new WeakMap();
+const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
+export const limbDamageMultiplier = (progress) => RULES.torsoDamageMultiplier + (RULES.handDamageMultiplier - RULES.torsoDamageMultiplier) * clamp(progress, 0, 1);
+
+// Common combat geometry for both character models/outfits. The arm targets
+// match the weapon grips and crouch offsets used by the visible two-bone rig.
+export function playerBodyVolumes(player) {
+  const pose = playerPose(player), crouch = (RULES.playerHeight - pose.height) / (RULES.playerHeight - RULES.crouchHeight);
+  const pitch = player.pitch || 0, shape = weaponModel(getWeapon(player.weaponId)), cached = bodyVolumeCache.get(player);
+  if (cached?.height === pose.height && cached.pitch === pitch && cached.shape === shape) return cached.volumes;
+  const volumes = [
+    { part: 'torso', box: { minX: -0.24, maxX: 0.24, minY: 0.64 - crouch * 0.3, maxY: pose.bodyTop, minZ: -0.2, maxZ: 0.2 }, multiplier: RULES.torsoDamageMultiplier },
+    { part: 'legs', box: { minX: -RULES.playerRadius, maxX: RULES.playerRadius, minY: 0, maxY: 0.79 - crouch * 0.3, minZ: -RULES.playerRadius, maxZ: RULES.playerRadius }, multiplier: 1 },
+  ];
+  for (const side of [-1, 1]) {
+    const shoulder = { x: side * 0.225, y: pose.bodyTop - 0.1, z: 0 };
+    const grip = side === 1 ? { x: 0.055, y: -0.13, z: 0.13 } : shape === 'pistol' ? { x: -0.04, y: -0.13, z: 0.1 } : { x: -0.06, y: -0.05, z: -0.12 };
+    const hand = { x: 0.1 + grip.x, y: 1.19 - crouch * 0.52 + grip.y * Math.cos(pitch) - grip.z * Math.sin(pitch), z: -0.16 + grip.y * Math.sin(pitch) + grip.z * Math.cos(pitch) };
+    const delta = sub(hand, shoulder), length = Math.hypot(delta.x, delta.y, delta.z), distance = clamp(length, 0.001, 0.529);
+    const direction = { x: delta.x / length, y: delta.y / length, z: delta.z / length }, pole = sub({ x: side * 0.4, y: 0.98 - crouch * 0.5, z: 0.08 }, shoulder);
+    const along = (0.27 ** 2 - 0.26 ** 2 + distance ** 2) / (2 * distance), projection = dot(pole, direction);
+    const bend = { x: pole.x - direction.x * projection, y: pole.y - direction.y * projection, z: pole.z - direction.z * projection }, bendLength = Math.hypot(bend.x, bend.y, bend.z) || 1;
+    const height = Math.sqrt(Math.max(0, 0.27 ** 2 - along ** 2));
+    const elbow = { x: shoulder.x + direction.x * along + bend.x / bendLength * height, y: shoulder.y + direction.y * along + bend.y / bendLength * height, z: shoulder.z + direction.z * along + bend.z / bendLength * height };
+    const wrist = { x: shoulder.x + direction.x * distance, y: shoulder.y + direction.y * distance, z: shoulder.z + direction.z * distance };
+    const part = side === 1 ? 'rightArm' : 'leftArm', total = 0.27 + 0.26 + 0.055;
+    volumes.push({ part, a: shoulder, b: elbow, radius: 0.095, from: 0, to: 0.27 / total });
+    volumes.push({ part, a: elbow, b: wrist, radius: 0.075, from: 0.27 / total, to: 0.53 / total });
+    volumes.push({ part: side === 1 ? 'rightHand' : 'leftHand', a: wrist, b: { x: wrist.x, y: wrist.y, z: wrist.z - 0.055 }, radius: 0.055, from: 0.53 / total, to: 1 });
+  }
+  bodyVolumeCache.set(player, { height: pose.height, pitch, shape, volumes }); return volumes;
+}
+
+export function tracePlayerBody(origin, direction, target, maxDistance = Infinity) {
+  const cosine = Math.cos(target.yaw || 0), sine = Math.sin(target.yaw || 0), relative = sub(origin, target);
+  const rotate = (v) => ({ x: v.x * cosine - v.z * sine, y: v.y, z: v.x * sine + v.z * cosine });
+  const from = rotate(relative), ray = rotate(direction); let nearest = null;
+  for (const volume of playerBodyVolumes(target)) {
+    const distance = volume.box ? rayBox(from, ray, volume.box, maxDistance) : rayCapsule(from, ray, volume.a, volume.b, volume.radius, maxDistance);
+    if (distance === null || distance >= (nearest?.distance ?? maxDistance)) continue;
+    let progress = null, multiplier = volume.multiplier;
+    if (!volume.box) {
+      const axis = sub(volume.b, volume.a), point = { x: from.x + ray.x * distance, y: from.y + ray.y * distance, z: from.z + ray.z * distance };
+      const fraction = clamp(dot(sub(point, volume.a), axis) / dot(axis, axis), 0, 1);
+      progress = volume.from + (volume.to - volume.from) * fraction; multiplier = limbDamageMultiplier(progress);
+    }
+    nearest = { distance, bodyPart: volume.part, damageMultiplier: multiplier, limbProgress: progress };
+  }
+  if (nearest) return nearest;
+  // Preserve the established shoulder/boot coverage for grazing contacts;
+  // empty edge space must never receive the torso's 1.2x bonus.
+  const pose = playerPose(target), distance = rayBox(origin, direction, { minX: target.x - RULES.playerRadius, maxX: target.x + RULES.playerRadius, minY: target.y, maxY: target.y + pose.bodyTop, minZ: target.z - RULES.playerRadius, maxZ: target.z + RULES.playerRadius }, maxDistance);
+  return distance === null ? null : { distance, bodyPart: 'grazing', damageMultiplier: RULES.handDamageMultiplier, limbProgress: 1 };
+}
+
 export function traceShot(shooter, players, now = nowMs(), world = WORLD, direction = aimDirection(shooter.yaw, shooter.pitch), range = getWeapon(shooter.weaponId).range) {
   const origin = { x: shooter.x, y: shooter.y + playerPose(shooter).eyeHeight, z: shooter.z };
   let distance = wallDistance(origin, direction, range, world);
-  let victim = null, headshot = false, protectedTarget = null;
+  let victim = null, headshot = false, protectedTarget = null, bodyPart = null, damageMultiplier = 1, limbProgress = null;
   for (const target of players) {
     if (target.id === shooter.id || target.hp <= 0) continue;
     const pose = playerPose(target);
-    const body = rayBox(origin, direction, {
-      minX: target.x - RULES.playerRadius, maxX: target.x + RULES.playerRadius, minZ: target.z - RULES.playerRadius, maxZ: target.z + RULES.playerRadius,
-      minY: target.y, maxY: target.y + pose.bodyTop,
-    }, distance);
+    const body = tracePlayerBody(origin, direction, target, distance);
     const head = raySphere(origin, direction, { x: target.x, y: target.y + pose.headHeight, z: target.z }, pose.headRadius);
-    const hitHead = head !== null && head < distance && (body === null || head <= body);
-    const hit = hitHead ? head : body;
-    if (hit !== null && hit < distance) { distance = hit; protectedTarget = target.protectedUntil > now ? target.id : null; victim = protectedTarget ? null : target; headshot = !protectedTarget && hitHead; }
+    const hitHead = head !== null && head < distance && (body === null || head <= body.distance);
+    const hit = hitHead ? head : body?.distance ?? null;
+    if (hit !== null && hit < distance) {
+      distance = hit; protectedTarget = target.protectedUntil > now ? target.id : null; victim = protectedTarget ? null : target; headshot = !protectedTarget && hitHead;
+      bodyPart = hitHead ? 'head' : body.bodyPart; damageMultiplier = protectedTarget ? 0 : hitHead ? 1 : body.damageMultiplier; limbProgress = hitHead ? null : body.limbProgress;
+    }
   }
-  return { victim, headshot, protectedTarget, origin, distance, end: { x: origin.x + direction.x * distance, y: origin.y + direction.y * distance, z: origin.z + direction.z * distance } };
+  return { victim, headshot, protectedTarget, bodyPart, damageMultiplier, limbProgress, origin, distance, end: { x: origin.x + direction.x * distance, y: origin.y + direction.y * distance, z: origin.z + direction.z * distance } };
 }
 
 const navigation = new WeakMap();
@@ -170,7 +226,7 @@ export class Room {
     const uses = Math.min(...pool.map((s) => s.uses)); pool = pool.filter((s) => s.uses === uses);
     const choice = pool[Math.min(pool.length - 1, Math.floor(this.random() * pool.length))], spawn = choice.point;
     this.spawnUses.set(choice.key, choice.uses + 1);
-    Object.assign(player, { x: spawn.x, y: spawn.y || 0, z: spawn.z, yaw: spawn.yaw, spawnId: spawn.spawnId || null, spawnLevel: spawn.roof ? 'ROOF' : `${spawn.level || 1}F`, pitch: 0, vx: 0, vy: 0, vz: 0, hp: 100, ammo: getWeapon(player.weaponId).magazine, magazines: freshMagazines(), reloadUntil: 0, switchUntil: 0, nextFireAt: 0, fireLatched: false, respawnAt: 0, protectedUntil: this.clock() + RULES.protectionSeconds * 1000, grounded: true, jumpHeld: false, crouching: false, crouchAmount: 0, sprinting: false, moveSpeed: 0, shotHeat: 0, loadoutSelecting: false, diedAt: 0, lastDeath: null, botPath: [], nextPathAt: 0, stairRouteKey: null });
+    Object.assign(player, { x: spawn.x, y: spawn.y || 0, z: spawn.z, yaw: spawn.yaw, spawnId: spawn.spawnId || null, spawnLevel: spawn.roof ? 'ROOF' : `${spawn.level || 1}F`, pitch: 0, vx: 0, vy: 0, vz: 0, hp: 100, hitSlowUntil: 0, ammo: getWeapon(player.weaponId).magazine, magazines: freshMagazines(), reloadUntil: 0, switchUntil: 0, nextFireAt: 0, fireLatched: false, respawnAt: 0, protectedUntil: this.clock() + RULES.protectionSeconds * 1000, grounded: true, jumpHeld: false, crouching: false, crouchAmount: 0, sprinting: false, moveSpeed: 0, shotHeat: 0, loadoutSelecting: false, diedAt: 0, lastDeath: null, botPath: [], nextPathAt: 0, stairRouteKey: null });
     player.botBrain = player.isBot ? freshBotBrain() : null;
     player.input = { ...EMPTY_INPUT, yaw: player.yaw, weaponId: player.weaponId };
     player.pendingShot = null; player.viewTime = null; player.burstLeft = 0; player.triggerSeq = null; player.triggerShotIndex = 0;
@@ -180,7 +236,7 @@ export class Room {
   }
 
   recordPlayerHistory(player, time) {
-    player.history.push({ time, x: player.x, y: player.y, z: player.z, crouching: player.crouching, crouchAmount: player.crouchAmount });
+    player.history.push({ time, x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch, weaponId: player.weaponId, crouching: player.crouching, crouchAmount: player.crouchAmount });
     while (player.history.length > 1 && (player.history[0].time < time - 250 || player.history.length > 32)) player.history.shift();
   }
 
@@ -191,7 +247,8 @@ export class Room {
       let before = history[0], after = before;
       for (const sample of history) { if (sample.time <= time) before = sample; else { after = sample; break; } }
       const mix = after.time > before.time ? clamp((time - before.time) / (after.time - before.time), 0, 1) : 0;
-      return { id: player.id, hp: player.hp, protectedUntil: player.protectedUntil, x: before.x + (after.x - before.x) * mix, y: before.y + (after.y - before.y) * mix, z: before.z + (after.z - before.z) * mix, crouching: mix < 0.5 ? before.crouching : after.crouching, crouchAmount: (before.crouchAmount ?? (before.crouching ? 1 : 0)) + ((after.crouchAmount ?? (after.crouching ? 1 : 0)) - (before.crouchAmount ?? (before.crouching ? 1 : 0))) * mix };
+      const yaw = before.yaw ?? player.yaw, pitch = before.pitch ?? player.pitch;
+      return { id: player.id, hp: player.hp, protectedUntil: player.protectedUntil, x: before.x + (after.x - before.x) * mix, y: before.y + (after.y - before.y) * mix, z: before.z + (after.z - before.z) * mix, yaw: yaw + angleDelta(after.yaw ?? yaw, yaw) * mix, pitch: pitch + ((after.pitch ?? pitch) - pitch) * mix, weaponId: before.weaponId || player.weaponId, crouching: mix < 0.5 ? before.crouching : after.crouching, crouchAmount: (before.crouchAmount ?? (before.crouching ? 1 : 0)) + ((after.crouchAmount ?? (after.crouching ? 1 : 0)) - (before.crouchAmount ?? (before.crouching ? 1 : 0))) * mix };
     });
   }
 
@@ -225,6 +282,12 @@ export class Room {
     const death = player.diedAt || Math.max(0, player.respawnAt - RULES.respawnSeconds * 1000);
     player.respawnAt = player.loadoutSelecting ? death + RULES.loadoutSelectSeconds * 1000 : Math.max(death + RULES.respawnSeconds * 1000, now + 350);
     return true;
+  }
+
+  startReload(player, now = this.clock()) {
+    if (!player || this.players.get(player.id) !== player || player.hp <= 0 || this.phase !== 'active' || player.reloadUntil || now < player.switchUntil || player.ammo >= getWeapon(player.weaponId).magazine) return false;
+    player.burstLeft = 0; player.pendingShot = null; player.reloadUntil = now + getWeapon(player.weaponId).reloadSeconds * 1000;
+    this.events.push({ type: 'reload', id: player.id, weaponId: player.weaponId, reloadUntil: player.reloadUntil }); return true;
   }
 
   restart(id) {
@@ -339,15 +402,11 @@ export class Room {
     for (const player of this.players.values()) {
       if (player.hp <= 0) { if (now >= player.respawnAt) this.spawn(player); else continue; }
       const input = player.isBot ? this.botInput(player, now, dt) : now - player.lastInput > 500 ? { ...EMPTY_INPUT, yaw: player.yaw, pitch: player.pitch, weaponId: player.weaponId } : player.input;
-      movePlayer(player, input, dt, this.world);
+      movePlayer(player, input, dt, this.world, now);
       player.shotHeat = Math.max(0, (player.shotHeat || 0) - dt * 1.35);
       const weapon = getWeapon(player.weaponId);
       if (player.reloadUntil && now >= player.reloadUntil) { player.ammo = weapon.magazine; player.reloadUntil = 0; }
-      if ((input.reload || (player.ammo === 0 && now >= player.nextFireAt)) && player.ammo < weapon.magazine && !player.reloadUntil && now >= player.switchUntil) {
-        player.burstLeft = 0; player.pendingShot = null;
-        player.reloadUntil = now + weapon.reloadSeconds * 1000;
-        this.events.push({ type: 'reload', id: player.id, weaponId: player.weaponId });
-      }
+      if (input.reload || player.ammo === 0) this.startReload(player, now);
       if (player.pendingShot && now - player.pendingShot.at > 150) player.pendingShot = null;
       const shot = player.pendingShot;
       const triggerReady = (input.fire || shot) && (weapon.automatic || !player.fireLatched || shot);
@@ -383,11 +442,11 @@ export class Room {
     for (const angle of shotAngles(firingWeapon, ads, this.random, firingState)) {
       const direction = aimDirection((shot?.yaw ?? player.yaw) + angle.yaw, (shot?.pitch ?? player.pitch) + angle.pitch);
       const trace = traceShot(player, targets, now, this.world, direction, weapon.range);
-      const { headshot, end, distance, protectedTarget } = trace, victim = trace.victim ? this.players.get(trace.victim.id) : null;
-      rays.push({ end, hit: victim?.id || null, headshot, protectedTarget });
+      const { headshot, end, distance, protectedTarget, bodyPart, damageMultiplier, limbProgress } = trace, victim = trace.victim ? this.players.get(trace.victim.id) : null;
+      rays.push({ end, hit: victim?.id || null, headshot, protectedTarget, bodyPart, damageMultiplier, limbProgress });
       if (!victim || victim.hp <= 0) continue;
       const hit = hits.get(victim.id) || { victim, damage: 0, headshot: false };
-      hit.damage += damageAtDistance(weapon, distance, headshot);
+      hit.damage += damageAtDistance(weapon, distance, headshot) * damageMultiplier;
       hit.headshot ||= headshot; hits.set(victim.id, hit);
     }
     player.shotHeat = Math.min(1, (player.shotHeat || 0) + (weapon.type === 'ASSAULT' ? 0.25 : 0.17));
@@ -395,9 +454,11 @@ export class Room {
     for (const { victim, damage: rawDamage, headshot } of hits.values()) {
       const damage = Math.round(rawDamage);
       victim.hp = Math.max(0, victim.hp - damage);
-      this.events.push({ type: 'damage', id: victim.id, attacker: player.id, damage, headshot, origin });
+      if (damage > 0) victim.hitSlowUntil = victim.hp > 0 ? now + RULES.hitSlowSeconds * 1000 : 0;
+      this.events.push({ type: 'damage', id: victim.id, attacker: player.id, damage, headshot, origin, hitSlowUntil: victim.hitSlowUntil });
       if (victim.hp <= 0) {
         victim.deaths++; victim.diedAt = now; victim.loadoutSelecting = false; victim.pendingShot = null; victim.burstLeft = 0; victim.respawnAt = now + RULES.respawnSeconds * 1000;
+        victim.hitSlowUntil = 0;
         victim.killChain = 0; victim.lastKillAt = null;
         player.weaponKills[weapon.id] = (player.weaponKills[weapon.id] || 0) + 1;
         player.masteryKills[weapon.id] = Math.min(1_000_000_000, (player.masteryKills[weapon.id] || 0) + 1);
@@ -409,6 +470,7 @@ export class Room {
         if (player.kills >= this.fragLimit) this.finish();
       }
     }
+    if (player.ammo === 0) this.startReload(player, now);
     return true;
   }
 
@@ -434,7 +496,7 @@ export class Room {
       players: [...this.players.values()].map((p) => ({
         id: p.id, name: p.name, isBot: p.isBot, x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yaw: p.yaw, pitch: p.pitch,
         vx: p.vx, vy: p.vy, vz: p.vz, grounded: p.grounded, crouching: p.crouching, crouchAmount: p.crouchAmount, sprinting: p.sprinting, moveSpeed: p.moveSpeed, shotHeat: p.shotHeat, hp: p.hp, ammo: p.ammo, kills: p.kills, deaths: p.deaths, spawnId: p.spawnId, spawnLevel: p.spawnLevel, lastDeath: p.lastDeath,
-        reloadUntil: p.reloadUntil, respawnAt: p.respawnAt, protectedUntil: p.protectedUntil,
+        reloadUntil: p.reloadUntil, respawnAt: p.respawnAt, protectedUntil: p.protectedUntil, hitSlowUntil: p.hitSlowUntil,
         weaponId: p.weaponId, nextWeaponId: p.nextWeaponId, loadoutSelecting: p.loadoutSelecting, skinId: p.skinId, outfitId: p.outfitId, characterId: p.characterId, magazines: { ...p.magazines }, switchUntil: p.switchUntil, nextFireAt: p.nextFireAt,
         spawnCount: p.spawnCount, ownedWeapons: [...p.ownedWeapons], weaponKills: { ...p.weaponKills }, masteryKills: { ...p.masteryKills }, weaponLevel: weaponMastery(p.masteryKills[p.weaponId]).level,
       })),

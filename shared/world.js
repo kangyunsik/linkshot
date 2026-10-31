@@ -1,6 +1,6 @@
 import { expandBuildings } from './buildings.js';
 import { addSpawnZones } from './spawns.js';
-export const NETWORK_PROTOCOL = 7;
+export const NETWORK_PROTOCOL = 9;
 
 export const RULES = Object.freeze({
   tickRate: 60, snapshotRate: 20, maxPlayers: 8, roundSeconds: 300,
@@ -13,6 +13,8 @@ export const RULES = Object.freeze({
   switchSeconds: 0.32,
   loadoutSelectSeconds: 15,
   crouchSeconds: 0.1,
+  torsoDamageMultiplier: 1.2, handDamageMultiplier: 0.5,
+  hitSlowSeconds: 1, hitSlowMultiplier: 0.7,
 });
 
 export function normalizeRoundOptions(options = {}) {
@@ -219,6 +221,24 @@ export function raySphere(origin, direction, center, radius) {
   if (discriminant < 0) return null;
   const distance = -b - Math.sqrt(discriminant);
   return distance >= 0 ? distance : null;
+}
+
+// Finite capsule, including parallel rays and origins already inside a limb.
+export function rayCapsule(origin, direction, a, b, radius, maxDistance = Infinity) {
+  const ba = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z }, oa = { x: origin.x - a.x, y: origin.y - a.y, z: origin.z - a.z };
+  const dot = (u, v) => u.x * v.x + u.y * v.y + u.z * v.z;
+  const length = dot(ba, ba), projection = length > 1e-12 ? Math.max(0, Math.min(1, dot(oa, ba) / length)) : 0;
+  if ((oa.x - ba.x * projection) ** 2 + (oa.y - ba.y * projection) ** 2 + (oa.z - ba.z * projection) ** 2 <= radius * radius) return 0;
+  let nearest = Infinity;
+  const bard = dot(ba, direction), baoa = dot(ba, oa), rdoa = dot(direction, oa);
+  const aa = length - bard * bard, bb = length * rdoa - baoa * bard, cc = length * dot(oa, oa) - baoa * baoa - radius * radius * length;
+  const discriminant = bb * bb - aa * cc;
+  if (aa > 1e-12 && discriminant >= 0) {
+    const distance = (-bb - Math.sqrt(discriminant)) / aa, along = baoa + distance * bard;
+    if (distance >= 0 && along >= 0 && along <= length) nearest = distance;
+  }
+  for (const cap of [a, b]) { const distance = raySphere(origin, direction, cap, radius); if (distance !== null) nearest = Math.min(nearest, distance); }
+  return Number.isFinite(nearest) && nearest <= maxDistance ? nearest : null;
 }
 
 export function aimDirection(yaw, pitch) {

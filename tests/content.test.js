@@ -51,14 +51,14 @@ test('sniper deals 100 base body damage and retains 150 headshot damage', () => 
 
 for (const weapon of WEAPONS) {
   test(`${weapon.name}: distinct server damage, one cartridge per shot, correct magazine and reload time`, () => {
-    let now = 1000; const room = new Room('WEAPN', { bots: 0, clock: () => now });
+    let now = 1000; const room = new Room('WEAPN', { bots: 0, clock: () => now, random: () => 0 });
     const shooter = room.addPlayer('a', 'ALPHA', false, { weaponId: weapon.id, ownedWeapons: [weapon.id], skinId: 'arctic' }), target = room.addPlayer('b', 'BRAVO');
     Object.assign(shooter, { x: 24, y: 0, z: 8, yaw: 0, pitch: Math.atan2(-0.5, 4), protectedUntil: 0 });
-    Object.assign(target, { x: 24, y: 0, z: 4, protectedUntil: 0 });
+    Object.assign(target, { x: 24, y: 0, z: 4, yaw: 0, pitch: 0, protectedUntil: 0 });
     assert.equal(shooter.ammo, weapon.magazine); assert.equal(shooter.skinId, 'arctic');
     room.shoot(shooter, now, true);
     assert.equal(shooter.ammo, weapon.magazine - 1);
-    assert.equal(target.hp, Math.max(0, 100 - weapon.damage * weapon.pellets));
+    assert.equal(target.hp, Math.max(0, 100 - Math.round(weapon.damage * weapon.pellets * RULES.torsoDamageMultiplier)));
     assert.equal(room.events.filter((event) => event.type === 'shot').at(-1).rays.length, weapon.pellets);
     assert.equal(room.events.filter((event) => event.type === 'damage').length, 1);
     if (weapon.id === 'shotgun') { assert.equal(shooter.kills, 1); assert.equal(target.deaths, 1); }

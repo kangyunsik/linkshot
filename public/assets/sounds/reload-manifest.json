@@ -1,0 +1,633 @@
+{
+  "license": "CC0-1.0",
+  "sources": [
+    {
+      "creator": "zer0_sol",
+      "license": "CC0-1.0",
+      "source": "https://opengameart.org/content/handgun-reload-sound-effect",
+      "download": "https://opengameart.org/sites/default/files/reload.wav"
+    },
+    {
+      "creator": "zer0_sol",
+      "license": "CC0-1.0",
+      "source": "https://opengameart.org/content/shotgun-reload-sound-effects",
+      "download": "https://opengameart.org/sites/default/files/shotgunsounds.zip"
+    }
+  ],
+  "processing": "Recorded magazine/slide/shell/pump foley, local ComfyUI headroom and 3-band EQ, individually edited weapon timelines, fixed resampling, spectral shaping, fades and safe peak normalization. No electronic placeholder or runtime pitch randomization.",
+  "engineProcessed": true,
+  "files": [
+    {
+      "file": "reload-rifle.wav",
+      "weaponId": "rifle",
+      "seconds": 1.75,
+      "fixedPitch": 1.0,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "insert",
+          "at": 0.83
+        },
+        {
+          "part": "back",
+          "at": 1.35
+        },
+        {
+          "part": "lock",
+          "at": 1.59
+        }
+      ],
+      "sha256": "733cef0ae3209f57bbc88c8d4655c662113ea29d7349462209ad7ccbf87d3322"
+    },
+    {
+      "file": "reload-pistol.wav",
+      "weaponId": "pistol",
+      "seconds": 1.15,
+      "fixedPitch": 1.08,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "insert",
+          "at": 0.49
+        },
+        {
+          "part": "pull",
+          "at": 0.84
+        },
+        {
+          "part": "lock",
+          "at": 0.99
+        }
+      ],
+      "sha256": "752cf412795f14aca23c797de2c4a83f64eea67d2aae07ac864aadaae618c47f"
+    },
+    {
+      "file": "reload-shotgun.wav",
+      "weaponId": "shotgun",
+      "seconds": 2.4,
+      "fixedPitch": 1.04,
+      "stages": [
+        {
+          "part": "back",
+          "at": 0.02
+        },
+        {
+          "part": "handle",
+          "at": 0.17
+        },
+        {
+          "part": "seat",
+          "at": 0.36
+        },
+        {
+          "part": "seat2",
+          "at": 0.5742857142857143
+        },
+        {
+          "part": "seat",
+          "at": 0.7885714285714285
+        },
+        {
+          "part": "seat2",
+          "at": 1.002857142857143
+        },
+        {
+          "part": "seat",
+          "at": 1.217142857142857
+        },
+        {
+          "part": "seat2",
+          "at": 1.4314285714285715
+        },
+        {
+          "part": "seat",
+          "at": 1.645714285714286
+        },
+        {
+          "part": "seat2",
+          "at": 1.8599999999999999
+        },
+        {
+          "part": "forward",
+          "at": 2.11
+        }
+      ],
+      "sha256": "61dce35c87cca364d749f5804de144dfd357b6963e28e6578cc80e1d57fd2674"
+    },
+    {
+      "file": "reload-sniper.wav",
+      "weaponId": "sniper",
+      "seconds": 2.65,
+      "fixedPitch": 0.9,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "insert",
+          "at": 1.32
+        },
+        {
+          "part": "back",
+          "at": 2.02
+        },
+        {
+          "part": "forward",
+          "at": 2.34
+        }
+      ],
+      "sha256": "2c84f06b93d09d43519b48108c2483d6e3ec3ff15710291892ea988caed05539"
+    },
+    {
+      "file": "reload-smg.wav",
+      "weaponId": "smg",
+      "seconds": 1.45,
+      "fixedPitch": 1.15,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "insert",
+          "at": 0.7
+        },
+        {
+          "part": "pull",
+          "at": 1.1
+        },
+        {
+          "part": "lock",
+          "at": 1.3
+        }
+      ],
+      "sha256": "acf1877fcd367b364b362f4f364a22e818803827c07f763f211db92de400e831"
+    },
+    {
+      "file": "reload-lmg.wav",
+      "weaponId": "lmg",
+      "seconds": 3.35,
+      "fixedPitch": 0.88,
+      "stages": [
+        {
+          "part": "feed",
+          "at": 0.02
+        },
+        {
+          "part": "release",
+          "at": 0.48
+        },
+        {
+          "part": "insert",
+          "at": 1.52
+        },
+        {
+          "part": "seat",
+          "at": 2.02
+        },
+        {
+          "part": "seat2",
+          "at": 2.18
+        },
+        {
+          "part": "seat",
+          "at": 2.34
+        },
+        {
+          "part": "forward",
+          "at": 2.65
+        },
+        {
+          "part": "pull",
+          "at": 3.02
+        },
+        {
+          "part": "lock",
+          "at": 3.2
+        }
+      ],
+      "sha256": "cde71886cc432d85edc11bbfa32ea1335c8dd0f1fc3261f2d348d316ab85040a"
+    },
+    {
+      "file": "reload-dmr.wav",
+      "weaponId": "dmr",
+      "seconds": 2.05,
+      "fixedPitch": 0.97,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "insert",
+          "at": 1.06
+        },
+        {
+          "part": "pull",
+          "at": 1.61
+        },
+        {
+          "part": "lock",
+          "at": 1.87
+        }
+      ],
+      "sha256": "60f87616b511233bc2314b488006fb052a75db347d3b634ade08df5b5c1eec6d"
+    },
+    {
+      "file": "reload-ak47.wav",
+      "weaponId": "ak47",
+      "seconds": 2.25,
+      "fixedPitch": 0.91,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "insert",
+          "at": 1.04
+        },
+        {
+          "part": "release",
+          "at": 1.31
+        },
+        {
+          "part": "back",
+          "at": 1.76
+        },
+        {
+          "part": "lock",
+          "at": 2.08
+        }
+      ],
+      "sha256": "50aa90e58c6b62474d4fdac3508d1a8c61eb4467cefa9027b8da11e1d4480198"
+    },
+    {
+      "file": "reload-m4a1.wav",
+      "weaponId": "m4a1",
+      "seconds": 1.9,
+      "fixedPitch": 1.04,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "insert",
+          "at": 0.9
+        },
+        {
+          "part": "release",
+          "at": 1.22
+        },
+        {
+          "part": "pull",
+          "at": 1.56
+        },
+        {
+          "part": "lock",
+          "at": 1.73
+        }
+      ],
+      "sha256": "b50c261d29ac9aa94c2a9eccb97d17f857ed371a48b5d693d64679eb000e8b08"
+    },
+    {
+      "file": "reload-famas.wav",
+      "weaponId": "famas",
+      "seconds": 2.3,
+      "fixedPitch": 1.13,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "insert",
+          "at": 1.1
+        },
+        {
+          "part": "feed",
+          "at": 1.72
+        },
+        {
+          "part": "lock",
+          "at": 2.15
+        }
+      ],
+      "sha256": "8bd27ef9d348f0ae6dc7c194b6a4f95422e58575099b03d193278138cbb5c65a"
+    },
+    {
+      "file": "reload-mp5.wav",
+      "weaponId": "mp5",
+      "seconds": 1.6,
+      "fixedPitch": 1.18,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "insert",
+          "at": 0.75
+        },
+        {
+          "part": "pull",
+          "at": 1.06
+        },
+        {
+          "part": "forward",
+          "at": 1.37
+        }
+      ],
+      "sha256": "d0abd174099ba1b5c670e7c4f39bfb3b14387736062048c2e9e3f1677a434f76"
+    },
+    {
+      "file": "reload-p90.wav",
+      "weaponId": "p90",
+      "seconds": 2.4,
+      "fixedPitch": 1.12,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "feed",
+          "at": 0.92
+        },
+        {
+          "part": "insert",
+          "at": 1.42
+        },
+        {
+          "part": "pull",
+          "at": 2.0
+        },
+        {
+          "part": "lock",
+          "at": 2.23
+        }
+      ],
+      "sha256": "507e7d94590ec93e9f1afa5bad18640fd3c108c31550516f35d321a067e4bb4f"
+    },
+    {
+      "file": "reload-ump45.wav",
+      "weaponId": "ump45",
+      "seconds": 2.1,
+      "fixedPitch": 0.96,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "insert",
+          "at": 0.96
+        },
+        {
+          "part": "back",
+          "at": 1.52
+        },
+        {
+          "part": "lock",
+          "at": 1.91
+        }
+      ],
+      "sha256": "ea3e3c99dbaab93a8329754836a670cd9e6649421b06a3521c481d1f719af8d3"
+    },
+    {
+      "file": "reload-awp.wav",
+      "weaponId": "awp",
+      "seconds": 3,
+      "fixedPitch": 0.83,
+      "stages": [
+        {
+          "part": "back",
+          "at": 0.02
+        },
+        {
+          "part": "release",
+          "at": 0.38
+        },
+        {
+          "part": "insert",
+          "at": 1.55
+        },
+        {
+          "part": "back",
+          "at": 2.3
+        },
+        {
+          "part": "forward",
+          "at": 2.65
+        }
+      ],
+      "sha256": "5a589dbebeb7815a1cc902628b918daf7e503780bedacaabfc37f476c088bfcd"
+    },
+    {
+      "file": "reload-m82.wav",
+      "weaponId": "m82",
+      "seconds": 3.4,
+      "fixedPitch": 0.8,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "insert",
+          "at": 1.72
+        },
+        {
+          "part": "feed",
+          "at": 2.62
+        },
+        {
+          "part": "lock",
+          "at": 3.2
+        }
+      ],
+      "sha256": "2819214c03ec5d123a7301a0a937a046eca30df909be92f07915bb5c3aa4e459"
+    },
+    {
+      "file": "reload-spas12.wav",
+      "weaponId": "spas12",
+      "seconds": 3,
+      "fixedPitch": 0.92,
+      "stages": [
+        {
+          "part": "back",
+          "at": 0.02
+        },
+        {
+          "part": "handle",
+          "at": 0.17
+        },
+        {
+          "part": "seat",
+          "at": 0.36
+        },
+        {
+          "part": "seat2",
+          "at": 0.6599999999999999
+        },
+        {
+          "part": "seat",
+          "at": 0.96
+        },
+        {
+          "part": "seat2",
+          "at": 1.2600000000000002
+        },
+        {
+          "part": "seat",
+          "at": 1.56
+        },
+        {
+          "part": "seat2",
+          "at": 1.8599999999999999
+        },
+        {
+          "part": "seat",
+          "at": 2.16
+        },
+        {
+          "part": "seat2",
+          "at": 2.46
+        },
+        {
+          "part": "forward",
+          "at": 2.71
+        }
+      ],
+      "sha256": "c1429666e760366cb2090568523fb3ecdf6f49d5801d004bdf3acf0513bc1480"
+    },
+    {
+      "file": "reload-deagle.wav",
+      "weaponId": "deagle",
+      "seconds": 1.9,
+      "fixedPitch": 0.85,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "insert",
+          "at": 0.96
+        },
+        {
+          "part": "pull",
+          "at": 1.48
+        },
+        {
+          "part": "lock",
+          "at": 1.72
+        }
+      ],
+      "sha256": "7ac12bfb384d64926f9f6b558df14c6fca6913d180d1d2aea39b2b1e9cc0c771"
+    },
+    {
+      "file": "reload-m249.wav",
+      "weaponId": "m249",
+      "seconds": 4.2,
+      "fixedPitch": 0.82,
+      "stages": [
+        {
+          "part": "feed",
+          "at": 0.02
+        },
+        {
+          "part": "release",
+          "at": 0.6
+        },
+        {
+          "part": "insert",
+          "at": 1.85
+        },
+        {
+          "part": "seat",
+          "at": 2.3
+        },
+        {
+          "part": "seat2",
+          "at": 2.48
+        },
+        {
+          "part": "seat",
+          "at": 2.68
+        },
+        {
+          "part": "forward",
+          "at": 3.14
+        },
+        {
+          "part": "back",
+          "at": 3.69
+        },
+        {
+          "part": "lock",
+          "at": 4.02
+        }
+      ],
+      "sha256": "5409bd97db7053a548d35ad8f50dacf860bc5b76692842be9e6b426477c1bb61"
+    },
+    {
+      "file": "reload-m14.wav",
+      "weaponId": "m14",
+      "seconds": 2.45,
+      "fixedPitch": 0.93,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "insert",
+          "at": 1.18
+        },
+        {
+          "part": "back",
+          "at": 1.86
+        },
+        {
+          "part": "lock",
+          "at": 2.28
+        }
+      ],
+      "sha256": "3128489e3a593fd408405281a05496f0fd069796301248872352f340829c5cff"
+    },
+    {
+      "file": "reload-glock18c.wav",
+      "weaponId": "glock18c",
+      "seconds": 1.65,
+      "fixedPitch": 1.22,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "insert",
+          "at": 0.82
+        },
+        {
+          "part": "pull",
+          "at": 1.26
+        },
+        {
+          "part": "lock",
+          "at": 1.47
+        }
+      ],
+      "sha256": "b7bd7288ea2f64d509f971f7d6312592c6fd8e433bdc82d1267ad07e5767a988"
+    }
+  ]
+}

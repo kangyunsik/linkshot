@@ -71,24 +71,21 @@ test('death-only selection queues the next spawn, has a bounded timer and keeps 
   assert.equal(p.outfitId, 'runner'); assert.equal(p.skinId, 'arctic');
 });
 
-test('the sniper last shot cannot start an automatic reload sound during its firing cycle', () => {
+test('the sniper last shot starts exactly one immediate reload without another trigger press', () => {
   let now = 1000; const room = new Room('BOLT4', { bots: 0, clock: () => now }), p = room.addPlayer('a', 'ALPHA', false, { weaponId: 'sniper' });
   p.ammo = 1; room.setInput('a', input({ weaponId: 'sniper', fire: true })); room.tick(1 / 60);
-  assert.equal(p.ammo, 0); assert.equal(p.reloadUntil, 0);
-  now += 100; room.setInput('a', input({ weaponId: 'sniper', fire: true })); room.tick(1 / 60); assert.equal(p.reloadUntil, 0);
-  assert.equal(room.events.filter((event) => event.type === 'reload').length, 0);
-  now = p.nextFireAt + 1; room.setInput('a', input({ weaponId: 'sniper', reload: true })); room.tick(1 / 60); assert.ok(p.reloadUntil > now);
+  assert.equal(p.ammo, 0); assert.equal(p.reloadUntil, now + getWeapon('sniper').reloadSeconds * 1000);
+  const until = p.reloadUntil; now += 100; room.setInput('a', input({ weaponId: 'sniper' })); room.tick(1 / 60); assert.equal(p.reloadUntil, until);
+  assert.equal(room.events.filter((event) => event.type === 'reload').length, 1);
 });
 
 test('every empty weapon automatically reloads after its final shot even after releasing the trigger', () => {
   for (const weapon of WEAPONS) {
     let now = 1000; const room = new Room('AUTOR', { bots: 0, clock: () => now }), p = room.addPlayer('a', 'ALPHA', false, { weaponId: weapon.id, ownedWeapons: [weapon.id] });
     p.ammo = 1; room.setInput(p.id, input({ weaponId: weapon.id, fire: true })); room.tick(1 / 60);
-    assert.equal(p.ammo, 0, weapon.id); assert.equal(p.reloadUntil, 0);
+    assert.equal(p.ammo, 0, weapon.id); assert.equal(p.reloadUntil, now + weapon.reloadSeconds * 1000, `${weapon.id}: same-tick auto reload`);
     room.setInput(p.id, input({ weaponId: weapon.id }));
-    now = p.nextFireAt - 1; room.tick(1 / 60); assert.equal(p.reloadUntil, 0, `${weapon.id}: wait for the final firing cycle`);
-    now = p.nextFireAt; room.tick(1 / 60);
-    assert.equal(p.reloadUntil, now + weapon.reloadSeconds * 1000, `${weapon.id}: reload without fire or R`);
+    const started = p.reloadUntil; now = p.nextFireAt - 1; room.tick(1 / 60); assert.equal(p.reloadUntil, started, `${weapon.id}: no delayed or duplicate reload`);
     const until = p.reloadUntil; now = until - 1; room.tick(1 / 60); assert.equal(p.ammo, 0); assert.equal(p.reloadUntil, until);
     now = until; room.tick(1 / 60); assert.equal(p.ammo, weapon.magazine); assert.equal(p.reloadUntil, 0);
     assert.equal(room.events.filter((event) => event.type === 'reload').length, 1, `${weapon.id}: no duplicate reload event`);

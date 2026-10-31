@@ -26,12 +26,13 @@ function localMaterial(material, models) {
   return copy;
 }
 
-function clothe(mesh, fabric, boots, coveredHands, characterId) {
-  const geometry = mesh.geometry, skin = mesh.material;
+function clothe(mesh, fabric, boots, coveredHands, characterId, models) {
+  const skin = mesh.material;
   const key = `${characterId}-${coveredHands ? 'covered' : 'exposed'}`;
   // Reuse the prepared garment topology across avatars/corpses. Rebuilding its
   // adjacency and cloth allowance during every death caused avoidable hitches.
-  if (dressedGeometry.has(key)) { geometry.dispose(); mesh.geometry = dressedGeometry.get(key).clone(); mesh.material = [skin, fabric, boots]; return; }
+  if (dressedGeometry.has(key)) { mesh.geometry = models.sharedOperatorGeometry(`clothes-${key}`, dressedGeometry.get(key)); mesh.material = [skin, fabric, boots]; return; }
+  const geometry = mesh.geometry.clone();
   const joints = geometry.getAttribute('skinIndex'), weights = geometry.getAttribute('skinWeight');
   const positions = geometry.getAttribute('position'), normals = geometry.getAttribute('normal'), uv = geometry.getAttribute('uv');
   const category = [];
@@ -63,7 +64,7 @@ function clothe(mesh, fabric, boots, coveredHands, characterId) {
   geometry.setIndex(indices.flat()); geometry.clearGroups(); let offset = 0;
   for (let i = 0; i < 3; i++) { geometry.addGroup(offset, indices[i].length, i); offset += indices[i].length; }
   mesh.material = [skin, fabric, boots]; uv.needsUpdate = true; positions.needsUpdate = true; geometry.computeVertexNormals();
-  dressedGeometry.set(key, geometry.clone());
+  dressedGeometry.set(key, geometry); mesh.geometry = models.sharedOperatorGeometry(`clothes-${key}`, geometry);
 }
 
 function turnWorld(bone, rotation) {
@@ -92,8 +93,8 @@ export function createOperator(player, models) {
   const outfit = getOutfit(player.outfitId), finish = getSkin(player.skinId), palette = outfit.id === 'field' ? { suit: finish.suit, armor: finish.color, dark: finish.dark, visor: finish.visor } : outfit;
   const hairAsset = helmetHair && ['runner', 'hazmat', 'orbital'].includes(outfit.id) ? helmetHair : standardHair;
   const group = new THREE.Group(), visual = clone(bodyAsset.scene); group.add(visual);
-  visual.traverse((mesh) => { if (mesh.isMesh) { mesh.geometry = mesh.geometry.clone(); mesh.material = localMaterial(mesh.material, models); if (mesh.name === 'Eyebrows') { mesh.material.color.set('#b9a69a'); mesh.material.normalScale.setScalar(0.25); } mesh.castShadow = mesh.receiveShadow = true; } });
-  const hair = hairAsset.scene.clone(true); hair.name = 'styled-hair'; hair.traverse((mesh) => { if (mesh.isMesh) { mesh.geometry = mesh.geometry.clone(); mesh.material = localMaterial(mesh.material, models); mesh.material.color.set(female ? '#4a3531' : '#574337'); mesh.material.normalScale.setScalar(0.55); mesh.material.roughness = 0.68; mesh.castShadow = true; } }); visual.add(hair);
+  visual.traverse((mesh) => { if (mesh.isMesh) { if (mesh.name !== character.bodyMesh) mesh.geometry = models.sharedOperatorGeometry(`body-${mesh.geometry.uuid}`, mesh.geometry); mesh.material = localMaterial(mesh.material, models); if (mesh.name === 'Eyebrows') { mesh.material.color.set('#b9a69a'); mesh.material.normalScale.setScalar(0.25); } mesh.castShadow = mesh.receiveShadow = true; } });
+  const hair = hairAsset.scene.clone(true); hair.name = 'styled-hair'; hair.traverse((mesh) => { if (mesh.isMesh) { mesh.geometry = models.sharedOperatorGeometry(`hair-${mesh.geometry.uuid}`, mesh.geometry); mesh.material = localMaterial(mesh.material, models); mesh.material.color.set(female ? '#4a3531' : '#574337'); mesh.material.normalScale.setScalar(0.55); mesh.material.roughness = 0.68; mesh.castShadow = true; } }); visual.add(hair);
   const box = new THREE.Box3().setFromObject(visual), scale = 1.8 / (box.max.y - box.min.y);
   visual.scale.set(scale * (female ? 0.98 : 0.94), scale, scale * 0.97); visual.position.y = -box.min.y * scale; visual.rotation.y = Math.PI; group.updateMatrixWorld(true);
   const bones = {}; visual.traverse((bone) => { if (bone.isBone) bones[bone.name] = bone; });
@@ -102,7 +103,7 @@ export function createOperator(player, models) {
   const jacketMap = models.assetTexture('operator-jacket.png'); jacketMap.repeat.set(1, 1); jacketMap.wrapS = jacketMap.wrapT = THREE.ClampToEdgeWrapping;
   const armor = new THREE.MeshStandardMaterial({ color: new THREE.Color(palette.armor).multiplyScalar(1.45), map: jacketMap, bumpMap: models.assetTexture('operator-armor.png'), bumpScale: 0.0015, roughness: 0.92 });
   const accent = new THREE.MeshStandardMaterial({ color: palette.visor, emissive: palette.visor, emissiveIntensity: 0.2 });
-  visual.traverse((mesh) => { if (mesh.isSkinnedMesh && mesh.name === character.bodyMesh) clothe(mesh, fabric, dark, outfit.id === 'hazmat' || outfit.id === 'orbital', character.id); });
+  visual.traverse((mesh) => { if (mesh.isSkinnedMesh && mesh.name === character.bodyMesh) clothe(mesh, fabric, dark, outfit.id === 'hazmat' || outfit.id === 'orbital', character.id, models); });
   const parts = new HumanParts(), vest = new THREE.Group(); group.add(vest);
   const front = parts.panel(vest, [female ? 0.31 : 0.34, 0.37, 0.065], [0, 1.25, -0.16], armor, 'ballistic-vest');
   const panelPositions = front.geometry.getAttribute('position'), panelUV = front.geometry.getAttribute('uv');

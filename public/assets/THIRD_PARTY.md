@@ -35,7 +35,17 @@
 
 ## Procedural boot and kill-confirmation effects
 
-- Original synthesis in `public/sound-design.js`: heel/sole/scrape boot sounds, impact/chime kill and multikill confirmations, and a headshot accent.
+- Original synthesis in `public/sound-design.js`: short dry hard-sole heel/toe clacks, impact/chime kill and multikill confirmations, and a headshot accent.
 - These effects are created from deterministic noise and oscillators, not external recordings, downloaded voice packs or a speech API. There are no additional third-party audio assets for these effects.
+
+## Recorded reload foley
+
+- Author/recordist: zer0_sol
+- Sources: https://opengameart.org/content/handgun-reload-sound-effect and https://opengameart.org/content/shotgun-reload-sound-effects
+- Downloads: https://opengameart.org/sites/default/files/reload.wav and https://opengameart.org/sites/default/files/shotgunsounds.zip
+- License for both source packs: CC0 1.0 Universal — https://creativecommons.org/publicdomain/zero/1.0/
+- Prepared files: `sounds/reload-*.wav`; credits, editing stages, durations and hashes are in `sounds/reload-manifest.json`.
+- Changes: actual magazine/slide/shell/pump foley processed with local ComfyUI input headroom and 3-band EQ, mono resampling, twenty separate weapon-specific edits/timelines, fixed spectral/pitch shaping, fades and peak normalization. These are artistic reload profiles, not claimed recordings of each named real-world weapon. No synthesized beep substitutes or random runtime pitch changes are used.
+- Reproduce with `scripts/prepare-reloads.py --engine` in the local engine Python environment. Originals, workflows and intermediate FLACs remain in ignored `artifacts/reload-source/`; runtime and static builds require no engine or external audio service.
 
 Three.js and its glTF/skeleton utilities are by the Three.js authors, under the MIT license. The full notice is included as `LICENSE-three.txt`: https://github.com/mrdoob/three.js/blob/dev/LICENSE.

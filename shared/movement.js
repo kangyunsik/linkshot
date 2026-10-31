@@ -40,7 +40,7 @@ export function canStand(player, world = WORLD) {
   });
 }
 
-export function movementSpeed(player, input) {
+function baseMovementSpeed(player, input) {
   const weapon = getWeapon(player.weaponId || input.weaponId);
   const sprinting = input.sprint && input.forward > 0 && !input.ads && !player.crouching;
   const amount = player.crouchAmount ?? (player.crouching ? 1 : 0), standing = sprinting ? RULES.sprintSpeed : RULES.walkSpeed;
@@ -48,7 +48,10 @@ export function movementSpeed(player, input) {
   return base * (sprinting ? weapon.sprintMultiplier : weapon.walkMultiplier) * (input.ads ? weapon.adsMoveMultiplier : 1);
 }
 
-export function movePlayer(player, input, dt, world = WORLD) {
+export const hitSlowMultiplier = (player, now = Date.now()) => player.hitSlowUntil > now ? RULES.hitSlowMultiplier : 1;
+export const movementSpeed = (player, input, now = Date.now()) => baseMovementSpeed(player, input) * hitSlowMultiplier(player, now);
+
+export function movePlayer(player, input, dt, world = WORLD, now = Date.now()) {
   dt = clamp(dt, 0, 1 / 30);
   const airborne = !player.grounded;
   player.yaw = input.yaw;
@@ -67,7 +70,7 @@ export function movePlayer(player, input, dt, world = WORLD) {
   let forward = input.forward, strafe = input.strafe;
   const length = Math.hypot(forward, strafe);
   if (length > 1) { forward /= length; strafe /= length; }
-  const speed = movementSpeed(player, input);
+  const speed = baseMovementSpeed(player, input), slow = hitSlowMultiplier(player, now);
   // Capture world-space momentum on takeoff (including walking off a ledge).
   // Looking, releasing WASD, sprinting or aiming cannot steer/brake in flight.
   // Collision still clips displacement; only landing enables new movement.
@@ -75,7 +78,7 @@ export function movePlayer(player, input, dt, world = WORLD) {
     player.vx = (Math.cos(input.yaw) * strafe - Math.sin(input.yaw) * forward) * speed;
     player.vz = (-Math.sin(input.yaw) * strafe - Math.cos(input.yaw) * forward) * speed;
   }
-  const vx = Number.isFinite(player.vx) ? player.vx : 0, vz = Number.isFinite(player.vz) ? player.vz : 0;
+  const vx = (Number.isFinite(player.vx) ? player.vx : 0) * slow, vz = (Number.isFinite(player.vz) ? player.vz : 0) * slow;
   const radius = RULES.playerRadius;
   const colliders = collidersFor(world);
   const intersectsHeight = (b) => player.y < b.maxY - CONTACT_EPSILON && player.y + height > b.minY + CONTACT_EPSILON;

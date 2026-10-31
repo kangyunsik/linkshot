@@ -84,6 +84,7 @@ export class FPSGame {
     this.materials = {};
     this.makeWorld(); this.makeWeapon(); this.applySettings(); this.resize(); this.bindInput();
     this.combat = new CombatEffects(this.scene, this.models, this.world);
+    this.graphicsReady = false; this.graphicsPromise = null;
     this.previousFrame = performance.now(); this.fpsTime = this.previousFrame; this.fpsFrames = 0;
     this.animate = this.animate.bind(this); this.frameId = requestAnimationFrame(this.animate);
   }
@@ -92,6 +93,27 @@ export class FPSGame {
   set pitch(value) { this.aimRecoil.reset(value); }
   get locked() { return document.pointerLockElement === this.canvas; }
   get serverNow() { return Date.now() + this.serverOffset; }
+
+  prepareGraphics() {
+    if (this.graphicsPromise) return this.graphicsPromise;
+    const warmup = this.combat.prepareWarmup(this.players), visibility = [];
+    for (const model of this.weaponModels.values()) { visibility.push([model, model.visible], [model.userData.flash, model.userData.flash.visible]); model.visible = true; model.userData.flash.visible = true; }
+    for (const avatar of this.remote.values()) { const flash = avatar.weapon.userData.flash; visibility.push([flash, flash.visible]); flash.visible = true; }
+    this.scene.add(warmup);
+    this.graphicsPromise = (async () => {
+      try {
+        await this.renderer.compileAsync(this.scene, this.camera);
+        // Upload buffers/initialize programs while the deployment overlay is
+        // still up, including platforms without parallel shader compilation.
+        if (!this.disposed) this.renderer.render(this.scene, this.camera);
+      } finally {
+        this.scene.remove(warmup); for (const [object, visible] of visibility) object.visible = visible;
+        for (const [id, model] of this.weaponModels) model.visible = id === this.activeWeaponId;
+      }
+      if (!this.disposed) { this.renderer.render(this.scene, this.camera); this.graphicsReady = true; }
+    })();
+    return this.graphicsPromise;
+  }
 
   material(name, color, options = {}) {
     return this.materials[name] ||= new THREE.MeshStandardMaterial({ color, roughness: 0.78, metalness: 0.3, ...options });
@@ -249,6 +271,7 @@ export class FPSGame {
 
   activateWeapon(id) {
     if (this.activeWeaponId === id) return;
+    this.audio.stopReload?.();
     this.activeWeaponId = getWeapon(id).id;
     for (const [weaponId, model] of this.weaponModels) model.visible = weaponId === this.activeWeaponId;
     this.activeModel = this.weaponModels.get(this.activeWeaponId); this.muzzleFlash = this.activeModel.userData.flash;
@@ -400,7 +423,7 @@ export class FPSGame {
     this.serverOffset = data.serverTime - Date.now();
     const local = data.players.find((p) => p.id === id);
     if (!local) return;
-    const respawned = !this.local || (this.local.hp <= 0 && local.hp > 0) || data.events.some((e) => e.type === 'restart');
+    const respawned = !this.local || this.local.spawnCount !== local.spawnCount || (this.local.hp <= 0 && local.hp > 0) || data.events.some((e) => e.type === 'restart');
     if (this.local?.hp > 0 && local.hp <= 0) {
       this.deathAt = performance.now(); this.clearInput(); this.recoil = 0; this.muzzleUntil = 0;
       this.aimRecoil.reset(this.aimRecoil.aimPitch); this.muzzleFlash.visible = false; this.muzzleLight.intensity = 0;
@@ -465,7 +488,7 @@ export class FPSGame {
     $('hud-frag-limit').textContent = `FIRST TO ${this.room.fragLimit}`;
     this.hud['hud-timer'].style.color = this.room.timeLeft < 30 ? '#ff876a' : '';
     this.hud['hud-kd'].textContent = `${local.kills} K  /  ${local.deaths} D`;
-    const reloading = local.reloadUntil > this.serverNow;
+    const reloading = local.hp > 0 && this.room.phase === 'active' && local.reloadUntil > this.serverNow;
     if (reloading || local.hp <= 0) this.localBurstLeft = 0;
     this.hud['reload-indicator'].hidden = !reloading || local.hp <= 0;
     this.hud['reload-hint'].textContent = reloading ? 'RELOADING...' : local.switchUntil > this.serverNow ? 'EQUIPPING...' : lowAmmo ? '[ R ] 재장전' : `${weapon.caliber} · ${weapon.type}`;
@@ -478,7 +501,11 @@ export class FPSGame {
       slot.classList.toggle('selected', slot.dataset.weapon === local.weaponId);
       slot.querySelector('small').textContent = local.magazines[slot.dataset.weapon];
     }
-    if (reloading && !this.hadReload) this.audio.reload(); this.hadReload = reloading;
+    if (reloading && !this.hadReload) {
+      const until = local.reloadUntil, life = local.spawnCount;
+      this.audio.reload(weapon.id, Math.max(0, until - this.serverNow) / 1000, () => !this.disposed && this.local?.hp > 0 && this.local.spawnCount === life && this.local.reloadUntil === until && this.serverNow < until && this.room?.phase === 'active');
+    }
+    if (!reloading && this.hadReload) this.audio.stopReload?.(); this.hadReload = reloading;
     this.hud['respawn-overlay'].hidden = local.hp > 0 || this.room.phase === 'ended';
     $('respawn-next-weapon').textContent = `${getWeapon(local.nextWeaponId || local.weaponId).name} · 다음 부활 장비`;
     const death = local.lastDeath;
@@ -517,11 +544,9 @@ export class FPSGame {
         }
         const world = new THREE.Vector3(); this.activeModel.userData.muzzle.getWorldPosition(world); origin = world;
         if (event.hit) {
-          this.audio.hit(event.headshot); this.hud.hitmarker.classList.add('visible'); this.hud.hitmarker.classList.toggle('headshot', event.headshot);
-          this.hud.hitmarker.classList.remove('protected');
-          this.hitmarkerUntil = performance.now() + 110;
+          this.audio.hit(event.headshot); this.flashHitmarker(event.headshot);
         } else if (event.rays?.some((ray) => ray.protectedTarget)) {
-          this.hud.hitmarker.classList.add('visible', 'protected'); this.hud.hitmarker.classList.remove('headshot'); this.hitmarkerUntil = performance.now() + 130;
+          this.flashHitmarker(false, true);
         }
       } else if (this.predicted) {
         const dx = event.origin.x - this.predicted.x, dz = event.origin.z - this.predicted.z, distance = Math.hypot(dx, dz);
@@ -559,6 +584,14 @@ export class FPSGame {
       }
     }
     if (event.type === 'restart') { this.combat.clear(); $('killfeed').replaceChildren(); this.hud['kill-confirmation'].textContent = ''; this.clearKillFeedback(); }
+  }
+
+  flashHitmarker(headshot = false, protectedTarget = false) {
+    const marker = this.hud.hitmarker, duration = headshot ? 210 : protectedTarget ? 170 : 145;
+    this.hitmarkerAnimation?.cancel(); marker.classList.add('visible'); marker.classList.toggle('headshot', headshot && !protectedTarget); marker.classList.toggle('protected', protectedTarget);
+    marker.setAttribute('aria-label', protectedTarget ? '스폰 보호 중인 상대' : headshot ? '헤드샷 명중' : '몸통·팔다리 명중');
+    const frames = matchMedia('(prefers-reduced-motion: reduce)').matches ? [{ opacity: 1 }, { opacity: 0 }] : [{ opacity: 0.85, transform: 'translate(-50%, -50%) scale(1.18)' }, { opacity: 1, transform: 'translate(-50%, -50%) scale(1)', offset: 0.2 }, { opacity: 0, transform: 'translate(-50%, -50%) scale(0.96)' }];
+    this.hitmarkerAnimation = marker.animate(frames, { duration, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'forwards' }); this.hitmarkerUntil = performance.now() + duration;
   }
 
   showKillFeedback(event) {
@@ -644,7 +677,7 @@ export class FPSGame {
     const input = this.input();
     if (now - this.lastSend >= 1000 / 30 && this.local) { this.send(input); this.lastSend = now; }
     if (this.predicted && this.local) {
-      if (this.local.hp > 0 && this.room.phase === 'active') movePlayer(this.predicted, input, dt, this.world);
+      if (this.local.hp > 0 && this.room.phase === 'active') movePlayer(this.predicted, input, dt, this.world, this.serverNow);
       const sprinting = this.predicted.sprinting;
       const step = this.localSteps.update(this.predicted, now, { active: this.local.hp > 0 && this.room.phase === 'active' && this.locked });
       if (step) this.audio.step(step.sprint, step.crouched, { foot: step.foot, volume: 1, pan: step.foot ? 0.06 : -0.06, distance: 0, remote: false, playerId: this.selfId });
@@ -739,7 +772,7 @@ export class FPSGame {
       drawTacticalMap(this.minimap, { world: this.world, players: visible, self: { ...this.predicted, id: this.selfId, hp: this.local.hp, yaw: this.yaw } });
       this.lastMap = now;
     }
-    if (now > this.hitmarkerUntil) this.hud.hitmarker.classList.remove('visible');
+    if (now > this.hitmarkerUntil) { this.hud.hitmarker.classList.remove('visible'); this.hitmarkerAnimation?.cancel(); this.hitmarkerAnimation = null; }
     if (now > this.damageUntil) this.hud['damage-vignette'].classList.remove('visible');
     if (now > this.killUntil) this.hud['kill-confirmation'].textContent = '';
     if (now > this.announcementUntil) $('kill-announcement').hidden = true;
@@ -752,7 +785,7 @@ export class FPSGame {
     this.dust.rotation.y = Math.sin(now / 50000) * 0.03;
     this.fpsFrames++;
     if (now - this.fpsTime > 1000) { this.hud['hud-fps'].textContent = `${Math.round(this.fpsFrames * 1000 / (now - this.fpsTime))} FPS`; this.fpsFrames = 0; this.fpsTime = now; }
-    if (this.locked || !this.lastRender || now - this.lastRender > 1000 / 10) {
+    if (this.graphicsReady && (this.locked || !this.lastRender || now - this.lastRender > 1000 / 10)) {
       this.renderer.render(this.scene, this.camera); this.lastRender = now;
     }
   }
@@ -760,7 +793,7 @@ export class FPSGame {
   disposeObject(object, all = true) {
     const geometries = new Set(), materials = new Set(), textures = new Set();
     object.traverse((child) => {
-      if (child.geometry && (all || child.geometry !== this.boxGeometry)) geometries.add(child.geometry);
+      if (child.geometry && !child.geometry.userData.operatorShared && (all || child.geometry !== this.boxGeometry)) geometries.add(child.geometry);
       const items = child.material ? (Array.isArray(child.material) ? child.material : [child.material]) : [];
       for (const material of items) {
         if (!all && Object.values(this.materials).includes(material)) continue;
@@ -774,9 +807,11 @@ export class FPSGame {
   dispose() {
     if (this.disposed) return;
     this.disposed = true; this.abort.abort(); cancelAnimationFrame(this.frameId);
+    this.hitmarkerAnimation?.cancel();
+    this.audio.stopReload?.();
     if (this.locked) document.exitPointerLock();
-    this.combat.dispose(); this.disposeObject(this.scene); this.sun.shadow.dispose(); this.renderer.dispose();
-    this.models.dispose(); $('scope-overlay').hidden = true; $('ads-reticle').hidden = true;
+    this.combat.dispose(); this.disposeObject(this.scene); this.sun.shadow.dispose(); this.models.dispose(); this.renderer.dispose();
+    $('scope-overlay').hidden = true; $('ads-reticle').hidden = true;
     this.clearDamageDirections();
     this.clearKillFeedback();
     this.remote.clear(); this.effects.length = 0;

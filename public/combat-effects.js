@@ -6,6 +6,25 @@ import { bounds } from '/shared/world.js';
 export class CombatEffects {
   constructor(scene, models, world) { this.scene = scene; this.models = models; this.world = world; this.bursts = []; this.stains = []; this.corpses = []; }
 
+  prepareWarmup(players) {
+    if (this.warmup) return this.warmup;
+    const group = new THREE.Group(), seen = new Set(); group.position.set(10000, 0, 10000);
+    for (const player of players) {
+      const key = `${player.characterId}/${player.outfitId}/${player.skinId}`; if (seen.has(key)) continue; seen.add(key);
+      const operator = createOperator(player, this.models); operator.weapon.visible = false; this.corpseMaterials(operator.group); group.add(operator.group);
+    }
+    group.add(new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3)), new THREE.PointsMaterial({ color: '#a62532', size: .045, transparent: true, opacity: .85, depthWrite: false })));
+    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 1, 0)]), new THREE.LineBasicMaterial({ color: '#ffdf9c', transparent: true, opacity: .8, depthWrite: false })));
+    group.add(new THREE.Mesh(new THREE.SphereGeometry(.045, 4, 4), new THREE.MeshBasicMaterial({ color: '#ffc17d', transparent: true, opacity: .8 })));
+    group.traverse((object) => { object.frustumCulled = false; }); this.warmup = group; return group;
+  }
+
+  corpseMaterials(group) {
+    // Keep the transparent program from the start. Switching material mode at
+    // 8.5s triggered a long driver shader compile in the middle of combat.
+    group.traverse((object) => { if (object.isMesh) for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.transparent = true; });
+  }
+
   floor(x, z, ceiling) {
     let floor = 0;
     for (const box of this.world.obstacles) { const b = bounds(box); if (x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ && b.maxY <= ceiling + 0.05) floor = Math.max(floor, b.maxY); }
@@ -36,6 +55,7 @@ export class CombatEffects {
 
   death(player) {
     const operator = createOperator(player, this.models), pivot = new THREE.Group(); pivot.name = 'corpse'; pivot.rotation.order = 'YXZ'; pivot.rotation.y = player.yaw;
+    this.corpseMaterials(operator.group);
     pivot.position.set(player.x, player.y, player.z); operator.weapon.visible = false; pivot.add(operator.group); this.scene.add(pivot);
     const sign = Math.random() < 0.65 ? 1 : -1, x = player.x + Math.sin(player.yaw) * sign * 0.75, z = player.z + Math.cos(player.yaw) * sign * 0.75;
     const floor = this.floor(x, z, player.y);
@@ -65,11 +85,11 @@ export class CombatEffects {
         poseOperator(corpse.operator, Math.sin(t * Math.PI) * 0.55);
         if (t === 1) corpse.settled = true;
       }
-      if (age > 8500) corpse.pivot.traverse((object) => { if (object.isMesh) for (const material of Array.isArray(object.material) ? object.material : [object.material]) { material.transparent = true; material.opacity = Math.min(material.opacity, (10000 - age) / 1500); } });
+      if (age > 8500) corpse.pivot.traverse((object) => { if (object.isMesh) for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.opacity = Math.min(material.opacity, (10000 - age) / 1500); });
     }
   }
 
   remove(object) { this.scene.remove(object); disposeModel(object); }
   clear() { for (const burst of this.bursts) this.remove(burst.object); for (const stain of this.stains) this.remove(stain.object); for (const corpse of this.corpses) this.remove(corpse.pivot); this.bursts.length = this.stains.length = this.corpses.length = 0; }
-  dispose() { this.clear(); }
+  dispose() { this.clear(); if (this.warmup) { disposeModel(this.warmup); this.warmup = null; } }
 }

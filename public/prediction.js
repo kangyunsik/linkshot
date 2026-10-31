@@ -2,6 +2,7 @@ import { RULES, WORLD, bounds, playerPose } from '../shared/world.js';
 import { supportHeight } from '../shared/movement.js';
 
 export function reconcileMovement(predicted, local, world = WORLD) {
+  if (Number.isFinite(local.hitSlowUntil)) predicted.hitSlowUntil = local.hitSlowUntil;
   const error = Math.hypot(local.x - predicted.x, local.z - predicted.z);
   if (error > 3 || Math.abs(local.y - predicted.y) > 2.5) {
     for (const key of ['x', 'y', 'z', 'vx', 'vy', 'vz', 'grounded']) if (key in local) predicted[key] = local[key];

@@ -48,3 +48,18 @@ test('compact human models are valid self-contained glTF with documented free li
     assert.equal(portrait.readUInt32BE(0), 0x89504e47); assert.equal(portrait.readUInt32BE(16), 512); assert.equal(portrait.readUInt32BE(20), 640);
   }
 });
+
+test('all twenty reloads use distinct licensed recorded foley, safe peaks and weapon-matched durations', async () => {
+  const directory = new URL('../public/assets/sounds/', import.meta.url), manifest = JSON.parse(await readFile(new URL('reload-manifest.json', directory), 'utf8'));
+  assert.equal(manifest.license, 'CC0-1.0'); assert.equal(manifest.engineProcessed, true); assert.equal(manifest.files.length, WEAPONS.length);
+  assert.ok(manifest.sources.every((source) => source.creator === 'zer0_sol' && source.license === 'CC0-1.0')); assert.equal(new Set(manifest.files.map((file) => file.sha256)).size, WEAPONS.length);
+  for (const weapon of WEAPONS) {
+    const item = manifest.files.find((item) => item.weaponId === weapon.id), bytes = await readFile(new URL(item.file, directory));
+    assert.equal(item.file, `reload-${weapon.id}.wav`); assert.equal(item.seconds, weapon.reloadSeconds); assert.ok(item.stages.length >= 4 && item.stages[0].at <= .03);
+    assert.equal(bytes.toString('ascii', 0, 4), 'RIFF'); assert.equal(bytes.readUInt16LE(20), 1); assert.equal(bytes.readUInt16LE(22), 1); assert.equal(bytes.readUInt32LE(24), 44100);
+    assert.ok(Math.abs((bytes.length - 44) / 88200 - weapon.reloadSeconds) < 1 / 44100); assert.equal(createHash('sha256').update(bytes).digest('hex'), item.sha256);
+    let peak = 0, energy = 0, first = 0, ending = 0;
+    for (let i = 44; i < bytes.length; i += 2) { const value = bytes.readInt16LE(i) / 32768; peak = Math.max(peak, Math.abs(value)); energy += value * value; const t = (i - 44) / 88200; if (t < .12) first += value * value; if (t > weapon.reloadSeconds * .7) ending += value * value; }
+    assert.ok(peak > .75 && peak < .9 && energy > 5, weapon.id); assert.ok(first > .1 && ending > .1, `${weapon.id}: audible release and final action, not a single beep`);
+  }
+});

@@ -8,6 +8,8 @@ test-results/
 playwright-report/
 .DS_Store
 *.log
+__pycache__/
+*.py[cod]
 
 # Local configuration and credentials must never be committed.
 .env

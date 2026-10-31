@@ -17,7 +17,7 @@ async function componentGame(page) {
     const audio = { unlock: async () => {}, shot() {}, hit() {}, hurt() {}, kill() {}, step() {}, reload() {} };
     document.getElementById('lobby').hidden = true; document.getElementById('game-shell').hidden = false;
     const game = new FPSGame({ canvas: document.getElementById('game-canvas'), minimap: document.getElementById('minimap'), settings: { sensitivity: 1, fov: 82, volume: 0, quality: 'low' }, audio, mapId: 'foundry', send() {}, onMenu: (show) => { document.getElementById('pause-overlay').hidden = !show; }, onFatal: (message) => { throw new Error(message); } });
-    game.applySnapshot(room.snapshot(), player.id);
+    game.applySnapshot(room.snapshot(), player.id); await game.prepareGraphics();
     document.getElementById('pause-overlay').hidden = false;
     const start = () => game.lock(); document.getElementById('resume-button').addEventListener('click', start);
     window.__tacticalTest = { game, room, player, attacker, start };
