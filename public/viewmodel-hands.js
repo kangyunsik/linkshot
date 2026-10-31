@@ -67,15 +67,18 @@ function skinMaterial(models, source, character) {
   return skin;
 }
 
-function sleeveGeometry(points, wristWidth, side, wristRotation) {
-  const curve = new THREE.CatmullRomCurve3(points.map(v)), positions = [], uvs = [], indices = [], rings = 15, segments = 16;
+function sleeveGeometry(points, wristWidth, side, wristRotation, straightSupport = false) {
+  const curve = straightSupport ? new THREE.LineCurve3(v(points[0]), v(points.at(-1))) : new THREE.CatmullRomCurve3(points.map(v));
+  const positions = [], uvs = [], indices = [], radii = [], rings = 15, segments = 16;
   const wristX = new THREE.Vector3(1, 0, 0).applyQuaternion(wristRotation);
   for (let ring = 0; ring <= rings; ring++) {
     const t = ring / rings, center = curve.getPoint(t), direction = curve.getTangent(t).normalize();
-    const horizontal = new THREE.Vector3(0, 1, 0).cross(direction).normalize();
-    horizontal.lerp(wristX, THREE.MathUtils.smoothstep(t, .65, 1)); horizontal.addScaledVector(direction, -horizontal.dot(direction)).normalize();
+    const horizontal = straightSupport ? wristX.clone() : new THREE.Vector3(0, 1, 0).cross(direction).normalize();
+    if (!straightSupport) horizontal.lerp(wristX, THREE.MathUtils.smoothstep(t, .65, 1));
+    horizontal.addScaledVector(direction, -horizontal.dot(direction)).normalize();
     const vertical = direction.clone().cross(horizontal).normalize();
-    const radius = THREE.MathUtils.lerp(.063, wristWidth, t) * (1 + Math.sin(t * 29 + side) * .055 * Math.sin(t * Math.PI));
+    const radius = straightSupport ? wristWidth + (.084 - wristWidth) * (1 - t) ** .55 : THREE.MathUtils.lerp(.063, wristWidth, t) * (1 + Math.sin(t * 29 + side) * .055 * Math.sin(t * Math.PI));
+    radii.push(radius);
     for (let section = 0; section <= segments; section++) {
       const angle = section / segments * Math.PI * 2, depth = THREE.MathUtils.lerp(.86, 1.35, t ** 3);
       const point = center.clone().addScaledVector(horizontal, Math.cos(angle) * radius).addScaledVector(vertical, Math.sin(angle) * radius * depth);
@@ -84,7 +87,8 @@ function sleeveGeometry(points, wristWidth, side, wristRotation) {
     }
   }
   const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3)); geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2)); geometry.setIndex(indices); geometry.computeVertexNormals();
-  geometry.userData.sleevePath = points.map((point) => [...point]); geometry.userData.sleeveLength = curve.getLength(); return geometry;
+  geometry.userData.sleevePath = points.map((point) => [...point]); geometry.userData.sleeveLength = curve.getLength();
+  geometry.userData.sleeveRadii = radii; geometry.userData.straightSupport = straightSupport; return geometry;
 }
 
 export function createViewmodelHands(models, { group, shape, weaponId, outfit, skin, character }) {
@@ -108,23 +112,31 @@ export function createViewmodelHands(models, { group, shape, weaponId, outfit, s
       wrist = [right ? .057 : -.055, right ? -.135 : -.16, .13 + prepared.palmLength + (right ? 0 : .008)];
       hand.quaternion.setFromEuler(new THREE.Euler(-1.64, 0, right ? .04 : -.05));
     } else {
-      const normal = new THREE.Vector3(.55, .75, .36).normalize(), along = new THREE.Vector3(.5, .4, -.77);
-      along.addScaledVector(normal, -along.dot(normal)).normalize(); const across = normal.clone().cross(along);
+      const normal = compactSupport ? new THREE.Vector3(.85, -.1, .51).normalize() : new THREE.Vector3(.55, .75, .36).normalize();
+      const along = compactSupport ? new THREE.Vector3(.30, .75, -.58) : new THREE.Vector3(.5, .4, -.77);
+      if (compactSupport) { along.normalize(); normal.addScaledVector(along, -normal.dot(along)).normalize(); }
+      else along.addScaledVector(normal, -along.dot(normal)).normalize();
+      const across = normal.clone().cross(along);
       hand.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(normal, along, across));
-      const center = new THREE.Vector3(-.055, shape === 'lmg' ? -.1 : shape === 'smg' ? -.067 : -.085, foreend + .025);
+      const center = new THREE.Vector3(compactSupport ? -.065 : -.055, compactSupport ? -.045 : shape === 'lmg' ? -.1 : shape === 'smg' ? -.067 : -.085, foreend + .025);
       wrist = center.addScaledVector(along, -prepared.palmLength * .64).toArray();
     }
     hand.position.set(...wrist); assembly.add(hand);
     const geometry = models.sharedOperatorGeometry(`view-hand/${prepared.key}`, prepared.geometry);
     const mesh = new THREE.Mesh(geometry, [glove, skinMaterial(models, prepared.sourceMaterial, character.id)]); mesh.name = 'palm'; hand.add(mesh);
     const cuff = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 20, 1, true), trim); cuff.name = `${name}-cuff`; cuff.position.y = -.008; cuff.scale.set(.029, .025, .041); hand.add(cuff);
-    // Tuck the support elbow under long rifles instead of stretching one long
-    // sleeve from the camera to the muzzle. Keep pistol/trigger hands intact.
-    const shoulder = right ? [.31, -.46, .62] : pistol ? [-.40, -.45, .65] : compactSupport ? [-.245, -.52, wrist[2] + .14] : [-.43, -.43, .24];
-    const elbow = right ? [.20, -.30, .40] : pistol ? [-.23, -.31, .43] : compactSupport ? [-.225, -.295, wrist[2] + .035] : [-.26, -.26, -.08];
+    let shoulder = right ? [.31, -.46, .62] : pistol ? [-.40, -.45, .65] : [-.43, -.43, .24];
+    let elbow = right ? [.20, -.30, .40] : pistol ? [-.23, -.31, .43] : [-.26, -.26, -.08];
     const end = v([0, -.017, 0]).applyQuaternion(hand.quaternion).add(hand.position);
-    const approach = end.clone().addScaledVector(new THREE.Vector3(0, 1, 0).applyQuaternion(hand.quaternion), -.075);
-    const sleeve = new THREE.Mesh(sleeveGeometry([shoulder, elbow, approach.toArray(), end.toArray()], character.id === 'female' ? .029 : .031, right ? 1 : -1, hand.quaternion), fabric); sleeve.name = right ? 'right-sleeve' : 'left-sleeve'; assembly.add(sleeve);
+    const forearm = new THREE.Vector3(0, 1, 0).applyQuaternion(hand.quaternion), straightSupport = !right && compactSupport;
+    const approach = end.clone().addScaledVector(forearm, -.075);
+    if (straightSupport) {
+      // Only the forearm belongs in view. Keep its axis aligned with the wrist
+      // and put the sleeve root below even the widest supported FOV; never
+      // force a visible elbow/S-bend just to shorten the model's bounds.
+      shoulder = end.clone().addScaledVector(forearm, -.70).toArray(); elbow = end.clone().addScaledVector(forearm, -.35).toArray();
+    }
+    const sleeve = new THREE.Mesh(sleeveGeometry([shoulder, elbow, approach.toArray(), end.toArray()], character.id === 'female' ? .029 : .031, right ? 1 : -1, hand.quaternion, straightSupport), fabric); sleeve.name = right ? 'right-sleeve' : 'left-sleeve'; assembly.add(sleeve);
     hand.userData.wrist = [...wrist]; hand.userData.foreend = foreend ?? null; hand.userData.compactSupport = !right && compactSupport;
   }
   root.userData.anatomy = 'quaternius-view-hands-v1'; root.userData.covered = covered; root.userData.characterId = character.id;

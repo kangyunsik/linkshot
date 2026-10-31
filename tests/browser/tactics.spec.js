@@ -54,7 +54,7 @@ test('rifle ADS reticle stays centered and visual recoil cannot change authorita
     expect(recoilError).toBeLessThan(1e-9);
     await page.keyboard.down('KeyC');
     await expect.poll(() => page.evaluate(() => window.__tacticalTest.game.predicted.crouching)).toBe(true);
-    expect(await page.evaluate(() => { const { game } = window.__tacticalTest; return game.camera.position.y - game.predicted.y; })).toBeCloseTo(0.92, 5);
+    await expect.poll(() => page.evaluate(() => { const { game } = window.__tacticalTest; return game.camera.position.y - game.predicted.y; })).toBeCloseTo(0.92, 5);
     await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/rifle-ads-crouched.png' });
     await page.keyboard.up('KeyC'); await page.mouse.up({ button: 'right' });
     expect(errors).toEqual([]);

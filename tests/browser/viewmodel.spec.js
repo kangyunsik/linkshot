@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 
-test('rifle and sniper support arms stay compact without changing pistol or trigger-hand poses', async ({ page }) => {
+test('rifle and sniper support forearms stay straight and substantial without changing pistol or trigger-hand poses', async ({ page }) => {
   await page.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: '' })); await page.goto('/');
   const checks = await page.evaluate(async () => {
     const [THREE, { WeaponModels, disposeModel }, { WEAPONS }] = await Promise.all([import('/vendor/three.module.js'), import('/weapon-model.js'), import('/shared/catalog.js')]);
@@ -10,7 +10,14 @@ test('rifle and sniper support arms stay compact without changing pistol or trig
       const model = models.create(weapon.id, 'standard', true, 'field', characterId), left = model.getObjectByName('left-hand'), right = model.getObjectByName('right-hand');
       const sleeve = model.getObjectByName('left-sleeve').geometry, path = sleeve.userData.sleevePath;
       const distance = (a, b) => new THREE.Vector3(...a).distanceTo(new THREE.Vector3(...b));
-      checks.push({ id: weapon.id, type: weapon.type, compact: left.userData.compactSupport, length: sleeve.userData.sleeveLength, upper: distance(path[0], path[1]), forearm: distance(path[1], left.position.toArray()), shoulder: path[0], elbow: path[1], rightPath: model.getObjectByName('right-sleeve').geometry.userData.sleevePath.slice(0, 2), leftPose: left.userData.pose, rightPose: right.userData.pose, foreend: left.userData.foreend });
+      const p = sleeve.getAttribute('position'), centers = [];
+      for (let ring = 0; ring <= 15; ring++) { const center = new THREE.Vector3(); for (let i = 0; i < 16; i++) center.add(new THREE.Vector3().fromBufferAttribute(p, ring * 17 + i)); centers.push(center.multiplyScalar(1 / 16)); }
+      const line = new THREE.Line3(centers[0], centers.at(-1)), closest = new THREE.Vector3();
+      const deviation = Math.max(...centers.map((center) => center.distanceTo(line.closestPointToPoint(center, true, closest))));
+      const diameter = distance(new THREE.Vector3().fromBufferAttribute(p, 8 * 17).toArray(), new THREE.Vector3().fromBufferAttribute(p, 8 * 17 + 8).toArray());
+      const rootOutside = [82, 110].every((fov) => { const camera = new THREE.PerspectiveCamera(fov, 1.44, .04, 10); camera.updateMatrixWorld(true); return Array.from({ length: 16 }, (_, i) => new THREE.Vector3().fromBufferAttribute(p, i).add(new THREE.Vector3(.18, -.20, -.54)).project(camera)).every((point) => point.y < -1 || Math.abs(point.x) > 1 || point.z < -1); });
+      const alignment = centers.at(-1).clone().sub(centers.at(-2)).normalize().dot(new THREE.Vector3(0, 1, 0).applyQuaternion(left.quaternion));
+      checks.push({ id: weapon.id, type: weapon.type, compact: left.userData.compactSupport, straight: sleeve.userData.straightSupport, length: sleeve.userData.sleeveLength, deviation, diameter, rootOutside, alignment, shoulder: path[0], elbow: path[1], rightPath: model.getObjectByName('right-sleeve').geometry.userData.sleevePath.slice(0, 2), leftPose: left.userData.pose, rightPose: right.userData.pose, foreend: left.userData.foreend });
       disposeModel(model);
     }
     models.dispose(); return checks;
@@ -18,7 +25,8 @@ test('rifle and sniper support arms stay compact without changing pistol or trig
   for (const check of checks) {
     expect(check.rightPose).toBe('trigger'); expect(check.rightPath).toEqual([[.31, -.46, .62], [.20, -.30, .40]]);
     if (check.type === 'ASSAULT' || check.type === 'SNIPER') {
-      expect(check.compact).toBe(true); expect(check.upper).toBeLessThan(.28); expect(check.forearm).toBeLessThan(.28); expect(check.length).toBeLessThan(.6);
+      expect(check.compact && check.straight && check.rootOutside).toBe(true); expect(check.deviation).toBeLessThan(1e-6); expect(check.alignment).toBeGreaterThan(.999);
+      expect(check.diameter).toBeGreaterThan(.12); expect(check.diameter).toBeLessThan(.16); expect(check.length).toBeLessThan(.75);
       expect(check.foreend).toBeGreaterThanOrEqual(-.4); expect(check.foreend).toBeLessThanOrEqual(-.28);
     } else {
       expect(check.compact).toBe(false);
