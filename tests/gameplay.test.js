@@ -36,6 +36,39 @@ test('ADS does not erase running or airborne shot spread; rifle spray blooms and
   assert.equal(p.shotHeat, 0);
 });
 
+test('snipers have wide hip fire and stronger movement penalties while stationary scope precision is unchanged', () => {
+  for (const [id, precision] of [['sniper', .0004], ['awp', .00025], ['m82', .001]]) {
+    const weapon = getWeapon(id), steady = shotSpread(weapon, true, { grounded: true, moveSpeed: 0 });
+    const hip = shotSpread(weapon, false, { grounded: true }), walking = shotSpread(weapon, true, { grounded: true, moveSpeed: 2 });
+    const running = shotSpread(weapon, true, { grounded: true, sprinting: true }), air = shotSpread(weapon, true, { grounded: false });
+    assert.equal(steady, precision, id); assert.ok(hip >= .08 && hip > steady * 70, id);
+    assert.ok(walking >= .045 && walking > steady * 40 && running > walking && air > running, id);
+    assert.ok(shotSpread(weapon, false, { grounded: true, moveSpeed: 2 }) > hip + .06, id);
+  }
+  for (const weapon of WEAPONS.filter((weapon) => weapon.type !== 'SNIPER')) for (const ads of [false, true]) {
+    const base = ads ? weapon.adsSpread : weapon.spread;
+    assert.equal(shotSpread(weapon, ads, { grounded: true, moveSpeed: 2 }), base + (ads ? .014 : .024), weapon.id);
+    assert.equal(shotSpread(weapon, ads, { grounded: false }), base + .105, weapon.id);
+  }
+});
+
+test('authoritative sniper bullets miss far more often from the hip and while moving than from a stationary scope', () => {
+  for (const id of ['sniper', 'awp', 'm82']) {
+    const hitRate = (ads, state) => {
+      let seed = 71; const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
+      const room = new Room('SCOPE', { bots: 0, clock: () => 1000, random }), shooter = room.addPlayer('shooter', 'SHOOTER', false, { weaponId: id, ownedWeapons: [id] }), target = room.addPlayer('target', 'TARGET');
+      room.world = { ...room.world, width: 250, depth: 250, obstacles: [] };
+      Object.assign(shooter, { x: 0, y: 0, z: 40, yaw: 0, pitch: Math.atan2(1.05 - 1.62, 40), ...state }); Object.assign(target, { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, hp: 1000000, protectedUntil: 0 });
+      let hits = 0;
+      for (let shot = 0; shot < 400; shot++) { shooter.ammo = getWeapon(id).magazine; shooter.shotHeat = 0; room.events.length = 0; room.shoot(shooter, 1000 + shot * 2000, ads); hits += Number(room.events.find((event) => event.type === 'shot').hit === target.id); }
+      return hits / 400;
+    };
+    const stationary = hitRate(true, { grounded: true, moveSpeed: 0, sprinting: false }), hip = hitRate(false, { grounded: true, moveSpeed: 0, sprinting: false });
+    const walking = hitRate(true, { grounded: true, moveSpeed: 2, sprinting: false }), running = hitRate(true, { grounded: true, moveSpeed: 6, sprinting: true });
+    assert.equal(stationary, 1, id); assert.ok(hip < .2 && walking < .4 && running < walking, `${id}: ${JSON.stringify({ stationary, hip, walking, running })}`);
+  }
+});
+
 test('actual authoritative bullets miss more often while running or airborne', () => {
   const rate = (state) => {
     let seed = 19; const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);

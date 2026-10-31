@@ -78,12 +78,13 @@ test('boot sounds are spatial, stance-aware and bounded; kill cues are distinct 
     const walk = audio.step(false, false, { pan: -0.8 }), run = audio.step(true), crouch = audio.step(false, true), wall = audio.step(false, false, { volume: 0.3, occluded: true });
     const single = audio.kill(1), triple = audio.kill(3, true);
     for (let i = 0; i < 40; i++) audio.step(false, false, { foot: i % 2 });
-    const result = { walk: walk.gain.gain.value, run: run.gain.gain.value, crouch: crouch.gain.gain.value, pan: walk.panner.pan.value, filtered: wall.filter.frequency.value < walk.filter.frequency.value, steps: audio.stepVoices.size, killDistinct: single.source.buffer !== triple.source.buffer, killRate: triple.source.playbackRate.value, sniperSeconds: ['sniper', 'awp', 'm82'].map((id) => audio.samples.get(id)[0].duration) };
+    const result = { walk: walk.gain.gain.value, run: run.gain.gain.value, crouch: crouch.gain.gain.value, pan: walk.panner.pan.value, filtered: wall.filter.frequency.value < walk.filter.frequency.value, walkCutoff: walk.filter.frequency.value, crouchCutoff: crouch.filter.frequency.value, stepRate: walk.source.playbackRate.value, steps: audio.stepVoices.size, killDistinct: single.source.buffer !== triple.source.buffer, killRate: triple.source.playbackRate.value, sniperSeconds: ['sniper', 'awp', 'm82'].map((id) => audio.samples.get(id)[0].duration) };
     audio.muted = true; result.mutedStep = audio.step() === null; result.mutedKill = audio.kill(2) === null;
     audio.muted = false; audio.settings.volume = 0; result.zeroVolume = audio.step() === null && audio.kill() === null;
     await audio.context.close(); return result;
   });
   expect(result.run).toBeGreaterThan(result.walk); expect(result.walk).toBeGreaterThan(result.crouch); expect(result.pan).toBeCloseTo(-0.8, 6); expect(result.filtered).toBe(true); expect(result.steps).toBeLessThanOrEqual(16);
+  expect(result.walkCutoff).toBe(2600); expect(result.crouchCutoff).toBe(1900); expect(result.stepRate).toBe(1);
   expect(result.killDistinct).toBe(true); expect(result.killRate).toBe(1); expect(result.mutedStep && result.mutedKill && result.zeroVolume).toBe(true);
   expect(result.sniperSeconds[0]).toBeCloseTo(1.65, 2); expect(result.sniperSeconds[1]).toBeCloseTo(1.95, 2); expect(result.sniperSeconds[2]).toBeCloseTo(2.2, 2);
 });
@@ -271,7 +272,8 @@ test('a real hit applies a synchronized one-second movement slow without changin
   } finally { await dispose(page); }
 });
 
-test('the redesigned SVG hitmarker is hollow, centered and distinguishes normal, head and protected hits', async ({ page }) => {
+for (const reducedMotion of ['no-preference', 'reduce']) test(`the redesigned SVG hitmarker is hollow, centered and distinguishes normal, head and protected hits (${reducedMotion})`, async ({ page }) => {
+  await page.emulateMedia({ reducedMotion });
   await fixture(page);
   try {
     await page.setViewportSize({ width: 1279, height: 799 });
@@ -280,11 +282,13 @@ test('the redesigned SVG hitmarker is hollow, centered and distinguishes normal,
       states.push(await page.evaluate((type) => {
         const { game } = window.__rules, protectedHit = type === 'protected';
         game.handleEvent({ type: 'shot', shotId: `marker-${type}`, id: 'viewer', weaponId: 'rifle', origin: { x: 24, y: 1.62, z: 10 }, hit: protectedHit ? null : 'other', headshot: type === 'head', rays: [{ end: { x: 22, y: 1.1, z: 6 }, hit: protectedHit ? null : 'other', protectedTarget: protectedHit ? 'other' : null }] });
+        const animation = game.hitmarkerAnimation, duration = animation.effect.getTiming().duration; animation.pause(); animation.currentTime = duration * .55;
         const marker = document.getElementById('hitmarker'), r = marker.getBoundingClientRect();
-        return { text: marker.textContent.trim(), lines: marker.querySelector('.hit-lines').getAttribute('d').match(/M/g).length, center: Math.hypot(r.x + r.width / 2 - innerWidth / 2, r.y + r.height / 2 - innerHeight / 2), color: getComputedStyle(marker).color, crown: getComputedStyle(marker.querySelector('.head-accent')).display !== 'none', shield: getComputedStyle(marker.querySelector('.protected-accent')).display !== 'none', label: marker.getAttribute('aria-label') };
+        return { text: marker.textContent.trim(), lines: marker.querySelector('.hit-lines').getAttribute('d').match(/M/g).length, center: Math.hypot(r.x + r.width / 2 - innerWidth / 2, r.y + r.height / 2 - innerHeight / 2), color: getComputedStyle(marker).color, crown: getComputedStyle(marker.querySelector('.head-accent')).display !== 'none', shield: getComputedStyle(marker.querySelector('.protected-accent')).display !== 'none', label: marker.getAttribute('aria-label'), width: parseFloat(getComputedStyle(marker).width), foreground: parseFloat(getComputedStyle(marker.querySelector('.hit-lines')).strokeWidth), outline: parseFloat(getComputedStyle(marker.querySelector('.hit-outline')).strokeWidth), holdOpacity: parseFloat(getComputedStyle(marker).opacity), duration };
       }, type));
     }
-    for (const state of states) { expect(state.text).toBe(''); expect(state.lines).toBe(4); expect(state.center).toBeLessThan(.01); }
+    for (const state of states) { expect(state.text).toBe(''); expect(state.lines).toBe(4); expect(state.center).toBeLessThan(.01); expect(state.width).toBeGreaterThanOrEqual(38); expect(state.foreground).toBeGreaterThanOrEqual(2.4); expect(state.outline).toBeGreaterThan(state.foreground); expect(state.holdOpacity).toBe(1); }
+    expect(states[0].duration).toBeGreaterThanOrEqual(240); expect(states[1].duration).toBeGreaterThanOrEqual(320);
     expect(new Set(states.map((state) => state.color)).size).toBe(3); expect(states[1].crown).toBe(true); expect(states[2].shield).toBe(true); expect(states[2].label).toContain('스폰 보호');
     await expect(page.locator('#hitmarker')).not.toHaveClass(/visible/);
   } finally { await dispose(page); }

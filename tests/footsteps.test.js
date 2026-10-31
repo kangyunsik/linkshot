@@ -51,12 +51,29 @@ test('nearby footsteps are panned with the camera, attenuated by distance/height
 
 test('dry clacking heel/toe samples alternate feet, have two short contacts and no dragging noise tail', () => {
   const left = footstepSignal(), right = footstepSignal(44100, 1); assert.equal(hash(left), hash(footstepSignal())); assert.notEqual(hash(left), hash(right));
-  for (const signal of [left, right]) {
-    assert.equal(signal.length, 5292); assert.equal(signal[0], 0); assert.equal(signal.at(-1), 0);
+  for (const sampleRate of [22050, 44100, 48000]) for (const foot of [0, 1]) {
+    const signal = footstepSignal(sampleRate, foot);
+    assert.equal(signal.length, Math.round(sampleRate * .12)); assert.equal(signal[0], 0); assert.equal(signal.at(-1), 0);
     const peak = Math.max(...signal.map(Math.abs)), rms = Math.sqrt(signal.reduce((sum, value) => sum + value * value, 0) / signal.length);
     assert.ok(peak > 0.85 && peak < 0.9); assert.ok(rms > 0.08 && rms < 0.25);
-    const energy = (from, to) => { const slice = signal.slice(Math.floor(from * 44100), Math.floor(to * 44100)); return Math.sqrt(slice.reduce((sum, value) => sum + value * value, 0) / slice.length); };
+    const energy = (from, to) => { const slice = signal.slice(Math.floor(from * sampleRate), Math.floor(to * sampleRate)); return Math.sqrt(slice.reduce((sum, value) => sum + value * value, 0) / slice.length); };
     assert.ok(energy(0, .025) > .1 && energy(.032, .06) > .08); assert.ok(energy(.09, .12) < energy(0, .025) * .025);
+  }
+});
+
+test('footsteps emphasize a lower contact pitch rather than bright wood-block harmonics', () => {
+  for (const foot of [0, 1]) {
+    const signal = footstepSignal(44100, foot); let low = 0, lowEnergy = 0, total = 0;
+    const alpha = 1 - Math.exp(-2 * Math.PI * 500 / 44100);
+    for (const value of signal) { total += value * value; low += (value - low) * alpha; lowEnergy += low * low; }
+    assert.ok(lowEnergy / total > .7, 'most step energy is in the lower body of the impact');
+    let dominant = 0, largest = 0;
+    for (let frequency = 150; frequency <= 1500; frequency += 25) {
+      let real = 0, imaginary = 0;
+      for (let i = 0; i < 1058; i++) { const angle = 2 * Math.PI * frequency * i / 44100; real += signal[i] * Math.cos(angle); imaginary += signal[i] * Math.sin(angle); }
+      const power = real * real + imaginary * imaginary; if (power > largest) { largest = power; dominant = frequency; }
+    }
+    assert.ok(dominant >= 200 && dominant <= 350, `heel pitch ${dominant}Hz`);
   }
 });
 

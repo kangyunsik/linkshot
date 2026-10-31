@@ -587,11 +587,12 @@ export class FPSGame {
   }
 
   flashHitmarker(headshot = false, protectedTarget = false) {
-    const marker = this.hud.hitmarker, duration = headshot ? 210 : protectedTarget ? 170 : 145;
+    const marker = this.hud.hitmarker, duration = headshot ? 320 : protectedTarget ? 220 : 240;
     this.hitmarkerAnimation?.cancel(); marker.classList.add('visible'); marker.classList.toggle('headshot', headshot && !protectedTarget); marker.classList.toggle('protected', protectedTarget);
     marker.setAttribute('aria-label', protectedTarget ? '스폰 보호 중인 상대' : headshot ? '헤드샷 명중' : '몸통·팔다리 명중');
-    const frames = matchMedia('(prefers-reduced-motion: reduce)').matches ? [{ opacity: 1 }, { opacity: 0 }] : [{ opacity: 0.85, transform: 'translate(-50%, -50%) scale(1.18)' }, { opacity: 1, transform: 'translate(-50%, -50%) scale(1)', offset: 0.2 }, { opacity: 0, transform: 'translate(-50%, -50%) scale(0.96)' }];
-    this.hitmarkerAnimation = marker.animate(frames, { duration, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'forwards' }); this.hitmarkerUntil = performance.now() + duration;
+    const rest = 'translate(-50%, -50%) scale(1)';
+    const frames = matchMedia('(prefers-reduced-motion: reduce)').matches ? [{ opacity: 1, offset: 0 }, { opacity: 1, offset: .72 }, { opacity: 0, offset: 1 }] : [{ opacity: 1, transform: 'translate(-50%, -50%) scale(1.14)', offset: 0, easing: 'cubic-bezier(.16,1,.3,1)' }, { opacity: 1, transform: rest, offset: .14 }, { opacity: 1, transform: rest, offset: .72 }, { opacity: 0, transform: 'translate(-50%, -50%) scale(.98)', offset: 1 }];
+    this.hitmarkerAnimation = marker.animate(frames, { duration, easing: 'linear', fill: 'forwards' }); this.hitmarkerUntil = performance.now() + duration;
   }
 
   showKillFeedback(event) {

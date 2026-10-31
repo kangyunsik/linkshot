@@ -116,7 +116,7 @@ export class GameAudio {
     const c = this.context, source = c.createBufferSource(), gain = c.createGain(), filter = c.createBiquadFilter(), panner = c.createStereoPanner();
     source.buffer = this.stepSamples[foot === 1 ? 1 : 0]; source.playbackRate.value = 1;
     gain.gain.value = Math.max(0, Math.min(1, volume)) * (crouched ? 0.23 : sprint ? 0.9 : 0.65);
-    filter.type = 'lowpass'; filter.frequency.value = occluded ? crouched ? 650 : 850 : Math.max(1100, (crouched ? 3500 : 5200) * Math.exp(-distance / 30));
+    filter.type = 'lowpass'; filter.frequency.value = occluded ? crouched ? 650 : 850 : Math.max(900, (crouched ? 1900 : 2600) * Math.exp(-distance / 30));
     panner.pan.value = Math.max(-1, Math.min(1, pan)); source.connect(filter).connect(gain).connect(panner); panner.connect(this.master);
     const voice = { source, gain, filter, panner };
     if (this.stepVoices.size >= 16) { const oldest = this.stepVoices.values().next().value; oldest.source.stop(); this.stepVoices.delete(oldest); }
