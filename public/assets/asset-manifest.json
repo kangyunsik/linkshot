@@ -55,6 +55,20 @@
       "height": 768
     },
     {
+      "file": "overgrowth-hero.png",
+      "prompt": "masterpiece, best quality, very aesthetic, scenery, no humans, abandoned monumental botanical conservatory, enormous weathered glass barrel vault and oxidized green steel arches, giant tropical tree and twisted roots growing through terracotta planters, lush green ferns, elevated narrow maintenance footbridge with stairs, pale warm sunlight through broken glass, moss covered tiled floor, derelict botanical laboratory wings, readable open walking paths, cinematic wide angle establishing shot, highly detailed game environment concept art, anime background art",
+      "seed": 7092510,
+      "width": 1152,
+      "height": 768
+    },
+    {
+      "file": "nightmarket-hero.png",
+      "prompt": "masterpiece, best quality, very aesthetic, scenery, no humans, closed Korean night street market at blue hour, narrow Seoul market street lined with small Korean food stalls, striped red and teal canvas awnings, warm amber hanging lanterns, colorful rectangular neon shop signs, two storey brick restaurants with open upper windows, stainless steel food counters and wooden produce crates, wet dark paving with soft colored reflections, overhead electrical cables, wide central market lane and side alleys, clear bright readable foreground, cinematic wide angle establishing shot, highly detailed game environment concept art, anime background art",
+      "seed": 7092511,
+      "width": 1152,
+      "height": 768
+    },
+    {
       "file": "skin-circuit.png",
       "prompt": "masterpiece, best quality, no humans, dark charcoal teal futuristic circuit board surface pattern, thin mint cyan geometric circuit traces, microchip paths, intricate etched lines, subtle metallic finish, seamless flat surface, no perspective, game weapon skin texture, top down orthographic material swatch, flat even lighting, full frame abstract pattern",
       "seed": 7092600,

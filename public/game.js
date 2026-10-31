@@ -13,6 +13,7 @@ import { AimRecoil } from './aim-recoil.js';
 import { ShotFeedback } from './shot-feedback.js';
 import { weaponMastery } from '/shared/progression.js';
 import { FootstepTracker, footstepMix } from './footsteps.js';
+import { drawThemedArena } from './themed-arena.js';
 
 const $ = (id) => document.getElementById(id);
 const lerp = THREE.MathUtils.lerp;
@@ -133,6 +134,11 @@ export class FPSGame {
     this.sun.shadow.camera.top = halfD + 8; this.sun.shadow.camera.bottom = -halfD - 8; this.sun.shadow.camera.near = 1; this.sun.shadow.camera.far = Math.max(world.width, world.depth) * 2.5;
     this.sun.shadow.bias = -0.0006; this.sun.shadow.normalBias = 0.035; this.scene.add(this.sun);
     const blueLight = new THREE.DirectionalLight('#a5d5ed', 0.7); blueLight.position.set(12, 14, -18); this.scene.add(blueLight);
+    if (world.theme === 'greenhouse' || world.theme === 'market') {
+      if (world.theme === 'market') { hemi.intensity = 1.8; this.sun.intensity = 2.4; }
+      else { this.scene.background.set('#b6cbd0'); this.scene.fog.color.set('#b6cbd0'); hemi.color.set('#d2eee1'); hemi.groundColor.set('#4c6043'); this.sun.color.set('#ffe4a7'); blueLight.intensity = .45; }
+      Object.assign(this, drawThemedArena(this.scene, world, this.material.bind(this))); return;
+    }
     const loader = new THREE.TextureLoader();
     this.panelTexture = loader.load('/assets/foundry-panel.png'); this.panelTexture.colorSpace = THREE.SRGBColorSpace;
     this.panelTexture.wrapS = this.panelTexture.wrapT = THREE.RepeatWrapping; this.panelTexture.repeat.set(2, 1);
@@ -340,7 +346,9 @@ export class FPSGame {
       if (event.button === 2) this.ads = true;
     }, options);
     document.addEventListener('mouseup', (event) => { if (event.button === 0) { this.fireHeld = false; this.fireLatched = false; if (this.locked) this.send(this.input()); } if (event.button === 2) this.ads = false; }, options);
-    this.canvas.addEventListener('contextmenu', (event) => event.preventDefault(), options);
+    // Mouse-up may land on an overlay after ADS loses pointer lock at round
+    // end. Cover the whole game surface, not just the canvas; abort on leave.
+    $('game-shell').addEventListener('contextmenu', (event) => event.preventDefault(), { ...options, capture: true });
     this.canvas.addEventListener('wheel', (event) => {
       if (!this.locked || !event.deltaY) return;
       event.preventDefault();
@@ -389,6 +397,7 @@ export class FPSGame {
 
   clearInput(spawnCount = this.local?.spawnCount) {
     this.keys.clear(); this.fireHeld = false; this.fireLatched = false; this.localFirePending = false; this.firePressedUntil = 0; this.ads = false; this.reloadPressedUntil = 0; this.jumpPressedUntil = 0; this.localBurstLeft = 0;
+    $('scope-overlay').hidden = true; $('ads-reticle').hidden = true;
     $('scoreboard-overlay').hidden = true;
     this.send({ type: 'input', ...EMPTY_INPUT, yaw: this.yaw, pitch: this.pitch, weaponId: this.requestedWeaponId, spawnCount });
   }

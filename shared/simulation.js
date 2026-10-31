@@ -330,7 +330,7 @@ export class Room {
       bot.botPath = []; bot.nextPathAt = 0; bot.stairRouteKey = null;
     }
     if (now > bot.nextPathAt) {
-      const buildings = this.world.buildings || [];
+      const buildings = [...(this.world.buildings || []), ...(this.world.walkways || [])];
       const own = buildings.find((b) => Math.abs(bot.x - b.x) < b.w / 2 && Math.abs(bot.z - b.z) < b.d / 2);
       const leaving = own && bot.y > 0.2 && (Math.abs(target.x - own.x) >= own.w / 2 || Math.abs(target.z - own.z) >= own.d / 2);
       const up = !leaving && buildings.find((b) => Math.abs(target.x - b.x) < b.w / 2 && Math.abs(target.z - b.z) < b.d / 2 && target.y > bot.y + 0.2);

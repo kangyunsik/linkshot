@@ -214,6 +214,33 @@ test('a centered 110m scoped sniper shot registers damage and immediately exits 
   } finally { await dispose(page); }
 });
 
+test('holding ADS through ROUND OVER cannot open browser context menus on overlays and leaving restores normal page interaction', async ({ page }) => {
+  await fixture(page);
+  try {
+    await page.evaluate(() => {
+      const { game } = window.__rules; window.__contextMenus = [];
+      document.addEventListener('contextmenu', (event) => window.__contextMenus.push({ prevented: event.defaultPrevented, target: event.target.id }), { signal: game.abort.signal });
+      document.getElementById('restart-button').addEventListener('click', () => { const { room, player } = window.__rules; room.restart(player.id); game.applySnapshot(room.snapshot()); }, { signal: game.abort.signal });
+    });
+    await page.mouse.down({ button: 'right' }); await expect(page.locator('#ads-reticle')).toBeVisible();
+    await page.evaluate(() => { const { room, game } = window.__rules; room.finish(); game.applySnapshot(room.snapshot()); });
+    await expect(page.locator('#round-overlay')).toBeVisible(); await expect(page.locator('#ads-reticle')).toBeHidden();
+    await expect.poll(() => page.evaluate(() => document.pointerLockElement === null)).toBe(true);
+    await page.mouse.up({ button: 'right' }); await page.locator('#round-table').click({ button: 'right' });
+    await page.getByRole('button', { name: '다시 출격', exact: true }).click({ button: 'right' });
+    const result = await page.evaluate(() => {
+      const dispatch = (id) => { const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }); document.getElementById(id).dispatchEvent(event); return event.defaultPrevented; };
+      return { natural: [...window.__contextMenus], overlay: dispatch('round-overlay'), result: dispatch('round-table'), button: dispatch('restart-button'), lobby: dispatch('lobby'), ads: window.__rules.game.ads, phase: window.__rules.room.phase };
+    });
+    expect(result.natural.length).toBeGreaterThan(0); expect(result.natural.every((event) => event.prevented)).toBe(true);
+    expect(result.overlay && result.result && result.button).toBe(true); expect(result.lobby).toBe(false); expect(result.ads).toBe(false); expect(result.phase).toBe('ended');
+    await page.getByRole('button', { name: '다시 출격', exact: true }).click(); await expect(page.locator('#round-overlay')).toBeHidden();
+    await dispose(page);
+    const restored = await page.evaluate(() => { const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }); document.getElementById('game-shell').dispatchEvent(event); return !event.defaultPrevented; });
+    expect(restored).toBe(true);
+  } finally { await dispose(page); }
+});
+
 test('host kill/time settings persist and are displayed in the actual LAN match', async ({ page }) => {
   let state; page.on('websocket', (socket) => socket.on('framereceived', ({ payload }) => { try { const data = JSON.parse(String(payload)); if (data.type === 'state') state = data; } catch { /* Non-JSON. */ } }));
   await page.goto('/'); await expect(page.getByText('LAN SERVER ONLINE')).toBeVisible();

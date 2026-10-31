@@ -6,6 +6,7 @@ export function expandBuildings(world) {
   for (let addition = 0; addition < 2; addition++) {
     const choices = [];
     for (let z = -world.depth / 2 + 5; z <= world.depth / 2 - 5; z++) for (let x = -world.width / 2 + 5; x <= world.width / 2 - 5; x++) {
+      if (world.reservedAreas?.some((r) => Math.abs(r.x - x) < (r.w + 6) / 2 + .5 && Math.abs(r.z - z) < (r.d + 7) / 2 + .5)) continue;
       if (world.spawns.some((p) => Math.abs(p.x - x) < 4.6 && Math.abs(p.z - z) < 5.1)) continue;
       if (sources.some((box) => Math.abs(box.x - x) < (Math.max(6, box.w) + 6) / 2 + 1.5 && Math.abs(box.z - z) < (Math.max(6.6, box.d) + 7) / 2 + 1.5)) continue;
       if (obstacles.some((box) => Math.abs(box.x - x) < (box.w + 6) / 2 + 1.25 && Math.abs(box.z - z) < (box.d + 7) / 2 + 1.25)) continue;
@@ -16,7 +17,7 @@ export function expandBuildings(world) {
     if (choices[0]) sources.push({ id: `operations-tower-${addition}`, ...choices[0], w: 6, d: 7, h: 6 });
   }
   for (const source of sources) {
-    const building = { id: source.id, x: source.x, z: source.z, w: Math.max(6, source.w), d: Math.max(6.6, source.d), storeys: source.id === 'operations-tower-0' || source.w >= 10 && source.d >= 9 ? 3 : 2, windows: [], solidPanels: 0, route: [] };
+    const building = { id: source.id, x: source.x, z: source.z, w: Math.max(6, source.w), d: Math.max(6.6, source.d), storeys: source.storeys || (source.id === 'operations-tower-0' || source.w >= 10 && source.d >= 9 ? 3 : 2), windows: [], solidPanels: 0, route: [] };
     const { w, d } = building, levelHeight = 3, thickness = 0.24;
     building.height = building.storeys * levelHeight;
     const left = -w / 2 + 0.95, right = left + 1.45, startZ = d / 2 - 1.25, run = 3.7, landingZ = startZ - run - 0.45;
@@ -70,6 +71,7 @@ export function expandBuildings(world) {
   for (let i = 0; i < 8; i++) {
     const width = i % 2 ? 0.38 : 4.2, depth = i % 2 ? 4.2 : 0.38, choices = [];
     for (let z = -world.depth / 2 + 4; z < world.depth / 2 - 3; z += 1) for (let x = -world.width / 2 + 4; x < world.width / 2 - 3; x += 1) {
+      if (world.reservedAreas?.some((r) => Math.abs(r.x - x) < (r.w + width) / 2 + .5 && Math.abs(r.z - z) < (r.d + depth) / 2 + .5)) continue;
       if (Math.abs(x) < 3 && Math.abs(z) < 3) continue;
       if (world.spawns.some((p) => Math.abs(p.x - x) < width / 2 + 2.5 && Math.abs(p.z - z) < depth / 2 + 2.5)) continue;
       if (sources.some((box) => Math.abs(box.x - x) < (Math.max(6, box.w) + width) / 2 + 1.7 && Math.abs(box.z - z) < (Math.max(6.6, box.d) + depth) / 2 + 1.7)) continue;

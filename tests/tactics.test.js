@@ -68,9 +68,9 @@ test('seven weapons have distinct weight, sprint and ADS movement penalties', ()
   assert.equal(movementSpeed(player({ weaponId: 'lmg' }), input({ weaponId: 'pistol', forward: 1 })), walk.lmg);
 });
 
-test('all maps have four walkable firing platforms and twelve extra solid cover objects', () => {
+test('each arena has its own walkable firing platforms and twelve extra solid cover objects', () => {
   for (const world of MAPS) {
-    assert.equal(world.platforms.length, 4, world.id); assert.equal(world.extraCover.length, 12, world.id);
+    assert.equal(world.platforms.length, world.id === 'nightmarket' ? 3 : 4, world.id); assert.equal(world.extraCover.length, 12, world.id);
     for (const platform of world.platforms) {
       const p = player({ x: platform.approach.x, z: platform.approach.z, yaw: Math.PI }); let top = 0;
       for (let i = 0; i < 90; i++) { movePlayer(p, input({ forward: 1, yaw: Math.PI }), 1 / 60, world); top = Math.max(top, p.y); }

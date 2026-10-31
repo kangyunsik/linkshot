@@ -1,6 +1,6 @@
 import { expandBuildings } from './buildings.js';
 import { addSpawnZones } from './spawns.js';
-export const NETWORK_PROTOCOL = 10;
+export const NETWORK_PROTOCOL = 12;
 
 export const RULES = Object.freeze({
   tickRate: 60, snapshotRate: 20, maxPlayers: 8, roundSeconds: 300,
@@ -78,9 +78,21 @@ const FOUNDRY = Object.freeze({
 function arena(config, obstacles) {
   const { width: w, depth: d } = config;
   const points = [[-w / 2 + 5, d / 2 - 5], [w / 2 - 5, -d / 2 + 5], [-w / 2 + 5, -d / 2 + 5], [w / 2 - 5, d / 2 - 5], [0, -d / 2 + 4], [0, d / 2 - 4], [-w / 2 + 4, 0], [w / 2 - 4, 0]];
+  const perimeter = [block('north', 0, -d / 2 - 0.5, w + 2, 1, 7, 'wall'), block('south', 0, d / 2 + 0.5, w + 2, 1, 7, 'wall'), block('west', -w / 2 - 0.5, 0, 1, d + 2, 7, 'wall'), block('east', w / 2 + 0.5, 0, 1, d + 2, 7, 'wall')];
+  if (config.footprint) {
+    // Rectangles are only the simulation's outer bounds. Closed annexes fill
+    // the space outside the connected, non-rectangular playable footprint.
+    const xs = [...new Set([-w / 2, w / 2, ...config.footprint.flatMap((r) => [r.x - r.w / 2, r.x + r.w / 2])])].sort((a, b) => a - b);
+    const zs = [...new Set([-d / 2, d / 2, ...config.footprint.flatMap((r) => [r.z - r.d / 2, r.z + r.d / 2])])].sort((a, b) => a - b);
+    for (let iz = 0; iz < zs.length - 1; iz++) for (let ix = 0; ix < xs.length - 1; ix++) {
+      const x = (xs[ix] + xs[ix + 1]) / 2, z = (zs[iz] + zs[iz + 1]) / 2;
+      if (config.footprint.some((r) => Math.abs(x - r.x) < r.w / 2 && Math.abs(z - r.z) < r.d / 2)) continue;
+      perimeter.push(block(`closed-annex-${ix}-${iz}`, x, z, xs[ix + 1] - xs[ix], zs[iz + 1] - zs[iz], 14, 'closed-annex'));
+    }
+  }
   return Object.freeze({
     ...config,
-    obstacles: [block('north', 0, -d / 2 - 0.5, w + 2, 1, 7, 'wall'), block('south', 0, d / 2 + 0.5, w + 2, 1, 7, 'wall'), block('west', -w / 2 - 0.5, 0, 1, d + 2, 7, 'wall'), block('east', w / 2 + 0.5, 0, 1, d + 2, 7, 'wall'), ...obstacles],
+    obstacles: [...perimeter, ...obstacles],
     spawns: points.map(([x, z]) => ({ x, z, yaw: Math.atan2(x, z) })),
   });
 }
@@ -145,6 +157,53 @@ const redline = arena({
   block('cargo-west', -30, 0, 4, 3, 1.6, 'crate', 'orange'), block('cargo-east', 30, 0, 4, 3, 1.6, 'crate', 'orange'),
 ]);
 
+const overgrowth = arena({
+  id: 'overgrowth', name: 'OVERGROWTH', title: 'OVERGROWTH', label: '버려진 온실', width: 72, depth: 68,
+  tag: '온실 · 상하 교전', theme: 'greenhouse', image: 'overgrowth-hero.png',
+  description: '거대한 나무가 유리 온실을 잠식했습니다. 뿌리·화단 사이를 우회하거나 계단으로 3m 관리교에 올라 중앙 통로를 장악하세요.',
+  sky: '#9daea0', ground: '#a1a489', wall: '#697d66', accent: '#a96540', light: '#fff1cd',
+  footprint: [{ x: 0, z: 0, w: 28, d: 68 }, { x: -24, z: -4, w: 22, d: 44 }, { x: 24, z: 4, w: 22, d: 44 }],
+  walkways: [{ id: 'canopy-walk', x: 0, z: 0, w: 40, d: 3.2, height: 3, entry: { x: -20, y: 0, z: 0 }, roof: { x: 0, y: 3, z: 0 }, route: [{ x: -20, y: 0, z: 0 }, { x: -18.65, y: .3, z: 0 }, { x: -11.5, y: 3, z: 0 }, { x: 0, y: 3, z: 0 }] }],
+}, [
+  block('ancient-tree', 0, -9, 2.8, 4.4, 9, 'tree'),
+  block('ancient-tree-bark-x', 0, -9, 4.4, 2.8, 9, 'tree-bark'),
+  block('ancient-tree-bark-core', 0, -9, 3.8, 3.8, 9, 'tree-bark'),
+  ...[-1, 1].flatMap((side) => [
+    block(`root-${side}`, side * 3.8, -8, 3.2, 3, 1.45, 'root'),
+    block(`fern-bed-${side}`, side * 9, -15, 5, 4, 1.15, 'planter'),
+    block(`tropical-bed-${side}`, side * 9, 12, 5, 5, 1.35, 'planter'),
+    block(`nursery-rack-${side}`, side * 18, -side * 12, 6, 2.6, 2.5, 'garden-shed'),
+    block(`potting-table-${side}`, side * 26, 4, 3, 5, 1.2, 'planter'),
+    block(`botanical-lab-${side}`, side * 24, side * 20, 10, 9, 6, 'building'),
+    ...Array.from({ length: 10 }, (_, step) => block(`canopy-step-${side}-${step}`, side * (18.65 - step * .7), 0, .7, 3.2, (step + 1) * .3, 'garden-step')),
+    ...[-8, 8].map((x, i) => block(`canopy-column-${side}-${i}`, x, side * 1.45, .28, .28, 2.78, 'garden-column')),
+    { ...block(`canopy-rail-${side}`, 0, side * 1.55, 24, .14, .8, 'garden-rail'), y: 3 },
+  ]),
+  { ...block('canopy-deck', 0, 0, 24, 3.2, .22, 'garden-deck'), y: 2.78 },
+]);
+
+const nightmarket = arena({
+  id: 'nightmarket', name: 'NIGHT MARKET', title: 'NIGHT MARKET', label: '한국 야시장', width: 76, depth: 64,
+  tag: '야시장 · 골목전', theme: 'market', image: 'nightmarket-hero.png',
+  description: '한글 네온과 천막 아래의 밤빛시장. 노점 사이 짧은 골목과 긴 중앙 시장길, 계단으로 연결된 2층 식당을 오가며 교전하세요.',
+  sky: '#293449', ground: '#727780', wall: '#847a75', accent: '#ad5047', light: '#ffddad',
+  footprint: [{ x: -8, z: -1, w: 26, d: 58 }, { x: 14, z: 11, w: 40, d: 32 }, { x: -26, z: -14, w: 22, d: 26 }],
+  reservedAreas: [{ x: -8, z: -9, w: 7.5, d: 34 }, { x: 4, z: 12, w: 14, d: 5 }],
+}, [
+  ...[[-29, -18], [-12, 21], [25, 2], [26, 21]].map(([x, z], i) => ({ ...block(`restaurant-${i}`, x, z, 10, 9, 6, 'building'), storeys: 2 })),
+  ...[[-15.5, -18, 1], [-.5, -18, -1], [-15.5, -8, 1], [-.5, -8, -1], [-15.5, 2, 1], [-.5, 2, -1], [8, 7, 1], [20, 11, -1], [8, 21, 1], [0, 16, 1]].flatMap(([x, z, front], i) => [
+    { ...block(`food-stall-${i}`, x, z, 3.4, 4.6, 1.15, 'market-stall', i % 2 ? 'slate' : 'orange'), front },
+    block(`stall-back-${i}`, x - front * 1.65, z, .16, 4.6, 2.55, 'market-back'),
+    { ...block(`stall-awning-${i}`, x, z, 4.3, 5.2, .16, 'market-awning', i % 2 ? 'slate' : 'orange'), y: 2.6, front },
+    ...[-1, 1].map((end) => block(`stall-post-${i}-${end}`, x + front * 1.85, z + end * 2.4, .12, .12, 2.6, 'market-post')),
+  ]),
+  block('courtyard-planter', 13, 14, 5, 5, .9, 'planter'),
+  block('courtyard-ginkgo', 13, 14, 2.2, 2.2, 7.5, 'market-tree'),
+  ...[-1, 1].flatMap((side) => [block(`courtyard-bench-x-${side}`, 13 + side * 4, 14, .8, 3.4, .8, 'market-bench'), block(`courtyard-bench-z-${side}`, 13, 14 + side * 4, 3.4, .8, .8, 'market-bench')]),
+  block('produce-stack-n', -28, -5, 2.4, 3.6, 2.1, 'market-crates'),
+  block('delivery-kiosk-n', -8, -26, 3, 2.2, 2.6, 'market-kiosk'),
+]);
+
 function addTacticalFeatures(base) {
   const obstacles = [...base.obstacles], platforms = [], extraCover = [];
   const candidates = [];
@@ -156,6 +215,7 @@ function addTacticalFeatures(base) {
     if (Math.abs(x) + w / 2 > base.width / 2 - 4.5 || Math.abs(z) + d / 2 > base.depth / 2 - 4.5) return false;
     // Keep the cross-map approaches and the signature long sightlines open.
     if (Math.abs(x) < w / 2 + 2.2 || Math.abs(z) < d / 2 + 2.2) return false;
+    if (base.reservedAreas?.some((r) => Math.abs(r.x - x) < (r.w + w) / 2 && Math.abs(r.z - z) < (r.d + d) / 2)) return false;
     if (base.spawns.some((s) => Math.abs(s.x - x) < w / 2 + 2 && Math.abs(s.z - z) < d / 2 + 2)) return false;
     return !obstacles.some((box) => Math.abs(box.x - x) < (box.w + w) / 2 + padding && Math.abs(box.z - z) < (box.d + d) / 2 + padding);
   }
@@ -183,7 +243,7 @@ function addTacticalFeatures(base) {
 }
 
 export const WORLD = addSpawnZones(expandBuildings(addTacticalFeatures(FOUNDRY)), RULES);
-export const MAPS = Object.freeze([WORLD, ...[longrail, drydock, blocknine, whiteout, redline].map((map) => addSpawnZones(expandBuildings(addTacticalFeatures(map)), RULES))]);
+export const MAPS = Object.freeze([WORLD, ...[longrail, drydock, blocknine, whiteout, redline, overgrowth, nightmarket].map((map) => addSpawnZones(expandBuildings(addTacticalFeatures(map)), RULES))]);
 export const getMap = (id) => MAPS.find((map) => map.id === id) || WORLD;
 
 export function bounds(box, padding = 0) {

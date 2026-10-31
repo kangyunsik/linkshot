@@ -5,9 +5,9 @@ import { WEAPONS, SKINS, getWeapon, getSkin, freshMagazines, shotAngles, damageA
 import { Room, traceShot } from '../shared/simulation.js';
 import { movePlayer, EMPTY_INPUT, sanitizeInput } from '../shared/movement.js';
 
-test('six genuinely distinct arenas have clear spawns facing an unobstructed exit on every floor', () => {
-  assert.equal(MAPS.length, 6);
-  assert.equal(new Set(MAPS.map((map) => JSON.stringify(map.obstacles))).size, 6);
+test('eight genuinely distinct arenas have clear spawns facing an unobstructed exit on every floor', () => {
+  assert.equal(MAPS.length, 8);
+  assert.equal(new Set(MAPS.map((map) => JSON.stringify(map.obstacles))).size, 8);
   assert.ok(MAPS.some((map) => map.depth >= 110)); assert.ok(MAPS.some((map) => map.width >= 120));
   for (const map of MAPS) {
     assert.ok(map.spawns.length >= 34);

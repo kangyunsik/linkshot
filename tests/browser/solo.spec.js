@@ -15,7 +15,7 @@ test('static solo build supports loadout selection, scope, live weapon lock and 
   await expect(page).toHaveTitle(/^LINKSHOT/);
   await expect(page.getByRole('tab', { name: 'LAN 대전' })).toBeHidden(); await expect(page.locator('#join-section')).toBeHidden();
   await page.getByRole('button', { name: '전장 변경', exact: false }).click();
-  await expect(page.locator('.map-choice')).toHaveCount(6);
+  await expect(page.locator('.map-choice')).toHaveCount(MAPS.length);
   await page.getByRole('button', { name: '레드라인 전장 선택', exact: true }).click(); await expect(page.locator('#hero-map-name')).toHaveText('REDLINE 19');
   await page.getByRole('button', { name: '무기 및 스킨 선택' }).click();
   await expect(page.locator('#weapon-choices button')).toHaveCount(20); await expect(page.locator('#skin-choices button')).toHaveCount(6);
@@ -70,6 +70,38 @@ test('every arena can be entered and disposed in the static build', async ({ pag
     await page.getByRole('button', { name: '로비로 나가기', exact: true }).click(); await expect(page.locator('#lobby')).toBeVisible();
   }
   expect(errors).toEqual([]);
+});
+
+for (const mapId of ['overgrowth', 'nightmarket']) test(`${mapId} selection survives refresh and its solo worker accepts movement and fire without a backend`, async ({ page, context }) => {
+  await context.addInitScript(() => {
+    const NativeWorker = window.Worker;
+    window.Worker = class extends NativeWorker { constructor(...args) { super(...args); this.addEventListener('message', ({ data }) => { if (data.type === 'state' || data.type === 'joined') window.__newMapState = data; }); } };
+  });
+  const errors = [], requests = [], sockets = [], map = MAPS.find((map) => map.id === mapId);
+  page.on('pageerror', (error) => errors.push(error.message)); page.on('request', (request) => requests.push(request.url())); page.on('websocket', (socket) => sockets.push(socket.url()));
+  await page.goto('/'); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
+  await expect(page.locator('#choose-map')).toContainText(`${MAPS.length} MAPS`);
+  await page.getByRole('button', { name: '전장 변경', exact: false }).click(); await page.getByRole('button', { name: `${map.label} 전장 선택`, exact: true }).click();
+  await page.reload(); await expect(page.locator('#hero-map-name')).toHaveText(map.name);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('sector07-loadout')).mapId)).toBe(mapId);
+  await expect(page.locator('.hero-index i')).toHaveText(`/ ${String(MAPS.length).padStart(2, '0')}`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole('button', { name: '봇 한 명 줄이기' }).click();
+  await page.getByRole('button', { name: '연습전 시작', exact: true }).click(); await expect(page.locator('#pause-overlay')).toBeVisible();
+  await expect(page.locator('#hud-map-name')).toHaveText(map.name);
+  expect(await page.evaluate(() => window.__newMapState.room.mapId)).toBe(mapId);
+  await page.getByRole('button', { name: '교전 시작', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id)).toBe('game-canvas');
+  const origin = await page.evaluate(() => { const p = window.__newMapState.players.find((p) => p.id === 'local-operator'); return { x: p.x, z: p.z }; });
+  await page.keyboard.down('KeyW');
+  await expect.poll(() => page.evaluate((origin) => { const p = window.__newMapState.players.find((p) => p.id === 'local-operator'); return Math.hypot(p.x - origin.x, p.z - origin.z); }, origin)).toBeGreaterThan(.8);
+  await page.keyboard.up('KeyW'); await page.mouse.down(); await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => window.__newMapState.players.find((p) => p.id === 'local-operator').ammo)).toBeLessThan(30);
+  await page.evaluate(() => document.exitPointerLock()); await expect(page.locator('#pause-overlay')).toBeVisible();
+  await page.getByRole('button', { name: '로비로 나가기', exact: true }).click(); await expect(page.locator('#lobby')).toBeVisible();
+  expect(sockets).toEqual([]); expect(requests.some((url) => url.includes('/api/'))).toBe(false); expect(errors).toEqual([]);
 });
 
 test('solo worker preserves bot difficulty and E-selected weapon, then accepts movement after respawn', async ({ context, page }) => {

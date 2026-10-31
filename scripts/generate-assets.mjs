@@ -33,6 +33,16 @@ const assets = [
     ['whiteout', 'a futuristic arctic research outpost in a vast snowy plain, white modular laboratories, icy blue cargo crates, glacier mountains, pale cyan overcast sky, cold bright light, snow drifts, crisp science fiction military environment'],
     ['redline', 'an extremely long desert freight highway between red sandstone cliffs, rust colored industrial depots and low concrete barriers, sand and dust, warm copper sunset, distant mesas, abandoned tactical arena, cinematic wide desert landscape'],
   ].map(([id, scene], i) => ({ file: `${id}-hero.png`, width: 1152, height: 768, seed: 7092500 + i, prompt: `masterpiece, best quality, very aesthetic, scenery, no humans, ${scene}, wide angle establishing shot, highly detailed background, game environment concept art, moody cinematic composition, anime background art` })),
+  {
+    file: 'overgrowth-hero.png', width: 1152, height: 768, seed: 7092510,
+    prompt: 'masterpiece, best quality, very aesthetic, scenery, no humans, abandoned monumental botanical conservatory, enormous weathered glass barrel vault and oxidized green steel arches, giant tropical tree and twisted roots growing through terracotta planters, lush green ferns, elevated narrow maintenance footbridge with stairs, pale warm sunlight through broken glass, moss covered tiled floor, derelict botanical laboratory wings, readable open walking paths, cinematic wide angle establishing shot, highly detailed game environment concept art, anime background art',
+    negative: 'worst quality, low quality, blurry, text, logo, watermark, signature, people, character, firearm, dense fog, dark silhouette, jungle hiding every path, oversaturated',
+  },
+  {
+    file: 'nightmarket-hero.png', width: 1152, height: 768, seed: 7092511,
+    prompt: 'masterpiece, best quality, very aesthetic, scenery, no humans, closed Korean night street market at blue hour, narrow Seoul market street lined with small Korean food stalls, striped red and teal canvas awnings, warm amber hanging lanterns, colorful rectangular neon shop signs, two storey brick restaurants with open upper windows, stainless steel food counters and wooden produce crates, wet dark paving with soft colored reflections, overhead electrical cables, wide central market lane and side alleys, clear bright readable foreground, cinematic wide angle establishing shot, highly detailed game environment concept art, anime background art',
+    negative: 'worst quality, low quality, blurry, watermark, signature, people, crowd, cars blocking street, pitch black, dark silhouette, heavy fog, oversaturated, futuristic megacity, skyscraper canyon',
+  },
   ...[
     ['circuit', 'dark charcoal teal futuristic circuit board surface pattern, thin mint cyan geometric circuit traces, microchip paths, intricate etched lines, subtle metallic finish, seamless flat surface, no perspective'],
     ['forge', 'dark gunmetal and burnt orange forged steel surface pattern, angular copper molten cracks, geometric armor camouflage, scratched metal, intricate abstract industrial pattern, seamless flat surface, no perspective'],
@@ -83,6 +93,7 @@ if (!checkpoint) throw new Error('ComfyUI에 체크포인트가 없습니다.');
 
 for (const asset of assets) {
   if (selectedAsset && asset.file !== selectedAsset) continue;
+  if (process.argv.includes('--maps') && !asset.file.endsWith('-hero.png')) continue;
   if (process.argv.includes('--materials') && !asset.file.startsWith('operator-')) continue;
   if (selectedOutfits && !selectedOutfits.some((id) => asset.file === `outfit-${id}.png`)) continue;
   if (process.argv.includes('--outfits') && !/^outfit-(?:field|runner|hazmat|orbital|retrobot)\.png$/.test(asset.file)) continue;

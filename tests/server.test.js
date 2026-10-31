@@ -89,6 +89,18 @@ test('selected map, skin and starting weapon are shared with other LAN clients',
   assert.equal((await (await fetch(`${base}/api/info`)).json()).rooms[0].mapId, 'longrail');
 });
 
+for (const mapId of ['overgrowth', 'nightmarket']) test(`${mapId} is available to real LAN hosts and guests with the same map and natural spawns`, async (t) => {
+  const app = createGameServer({ port: 0, host: '127.0.0.1' }), info = await app.listen(); t.after(() => app.close());
+  const base = `http://127.0.0.1:${info.port}`, a = await client(base), b = await client(base);
+  t.after(() => { a.socket.terminate(); b.socket.terminate(); });
+  let pending = message(a.socket, 'joined'); a.send({ type: 'create', name: 'HOST', mapId, bots: 2 }); const first = await pending;
+  pending = message(b.socket, 'joined'); b.send({ type: 'join', code: first.room.code, name: 'GUEST' }); const joined = await pending;
+  assert.equal(first.room.mapId, mapId); assert.equal(joined.room.mapId, mapId); assert.equal(joined.players.length, 4);
+  const world = app.rooms.get(first.room.code).world;
+  for (const player of joined.players) assert.ok(world.spawns.some((spawn) => spawn.spawnId === player.spawnId && spawn.y === player.y));
+  assert.equal((await (await fetch(`${base}/api/info`)).json()).rooms[0].mapId, mapId);
+});
+
 test('real LAN input can jump from ground onto an elevated firing deck and remain grounded', async (t) => {
   const app = createGameServer({ port: 0, host: '127.0.0.1' }); const info = await app.listen(); t.after(() => app.close());
   const a = await client(`http://127.0.0.1:${info.port}`); t.after(() => a.socket.terminate());

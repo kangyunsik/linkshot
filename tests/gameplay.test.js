@@ -143,7 +143,7 @@ test('eight humans replace training bots, and a ninth cannot enter', () => {
   assert.throws(() => room.addPlayer('ninth', 'NINTH'), /가득/);
 });
 
-test('all twenty-five hollow buildings have walkable stairs, floors and roofs without jumping', () => {
+test('all thirty-four hollow buildings have walkable stairs, floors and roofs without jumping', () => {
   let count = 0;
   for (const world of MAPS) for (const building of world.buildings) {
     count++; assert.ok(building.height >= 6); const p = player(building.entry);
@@ -158,7 +158,7 @@ test('all twenty-five hollow buildings have walkable stairs, floors and roofs wi
     }
     assert.equal(p.y, building.height);
   }
-  assert.equal(count, 25);
+  assert.equal(count, 34);
   for (const world of MAPS) { assert.equal(world.coverWalls.length, 8); assert.ok(world.buildings.every((building) => building.solidPanels > building.windows.length)); }
 });
 

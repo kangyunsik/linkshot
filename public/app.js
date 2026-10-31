@@ -315,6 +315,9 @@ function renderShop() {
 function updateSelections() {
   const world = getMap(loadout.mapId), weapon = getWeapon(selectedWeaponId), equipped = getWeapon(loadout.weaponId), skin = getSkin(loadout.skinId);
   const index = MAPS.indexOf(world) + 1;
+  $('choose-map').querySelector('span').textContent = `${MAPS.length} MAPS ↗`;
+  $('map-card').querySelector('.card-eyebrow').textContent = `THE BATTLEGROUND / ${String(MAPS.length).padStart(2, '0')} MAPS`;
+  document.querySelector('.hero-index i').textContent = `/ ${String(MAPS.length).padStart(2, '0')}`;
   $('hero-map-title').textContent = `${world.title}.`; $('hero-map-title').style.fontSize = world.title.length > 8 ? '.78em' : '';
   $('hero-map-name').textContent = world.name; $('hero-map-index').textContent = String(index).padStart(2, '0');
   $('hero-operation').textContent = `OPERATION ${String(index).padStart(3, '0')}`; $('hero-description').textContent = world.description;

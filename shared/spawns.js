@@ -21,23 +21,26 @@ export function addSpawnZones(world, rules) {
     return exit ? [exit] : null;
   };
   const scenery = (box) => { obstacles.push(box); colliders.push(boxBounds(box)); };
-  const reserved = world.buildings.flatMap((building) => building.route.flatMap((point, i, route) => i ? samples(route[i - 1], point) : [point]));
+  const reserved = [...world.buildings, ...(world.walkways || [])].flatMap((building) => building.route.flatMap((point, i, route) => i ? samples(route[i - 1], point) : [point]));
 
   // A few full-size freight stacks/utility installations break exposed outer
   // lanes as part of the map, not as structures centred on a spawn point.
   for (const [i, anchor] of world.spawns.filter((_, i) => i < 6).entries()) {
+    if (world.theme === 'market' && Math.abs(anchor.x) < 1) continue; // Preserve the central market street.
     const cargo = ['harbor', 'rail', 'desert'].includes(world.theme) || i % 2 === 0;
     const w = cargo ? 5.6 : 3.0, d = cargo ? 2.8 : 2.2, h = cargo ? 2.7 : 2.15;
     const target = { x: anchor.x * 0.82, z: anchor.z * 0.8 }, choices = [];
     for (let dz = -4; dz <= 4; dz++) for (let dx = -4; dx <= 4; dx++) choices.push({ x: target.x + dx, z: target.z + dz });
     choices.sort((a, b) => (a.x - target.x) ** 2 + (a.z - target.z) ** 2 - (b.x - target.x) ** 2 - (b.z - target.z) ** 2);
     const point = choices.find((p) => {
+      if (world.reservedAreas?.some((r) => Math.abs(r.x - p.x) < (r.w + w) / 2 + .5 && Math.abs(r.z - p.z) < (r.d + d) / 2 + .5)) return false;
       if (Math.abs(p.x) + w / 2 > world.width / 2 - 2 || Math.abs(p.z) + d / 2 > world.depth / 2 - 3.5) return false;
       if (world.buildings.some((b) => Math.abs(p.x - b.x) < (w + b.w) / 2 + 1.1 && Math.abs(p.z - b.z) < (d + b.d) / 2 + 1.1)) return false;
       const b = boxBounds({ ...p, y: 0, w: w + 1.4, d: d + 1.4, h });
       return !colliders.some((other) => intersects(b, other)) && !reserved.some((p) => intersects(b, bodyBox(p)));
     });
-    if (point) scenery({ id: `yard-${cargo ? 'freight' : 'utilities'}-${i}`, ...point, y: 0, w, d, h, kind: cargo ? 'container' : 'equipment', color: i % 3 ? 'slate' : 'orange', scenery: true });
+    const kind = world.theme === 'greenhouse' ? 'garden-shed' : world.theme === 'market' ? 'market-kiosk' : cargo ? 'container' : 'equipment';
+    if (point) scenery({ id: `yard-${cargo ? 'freight' : 'utilities'}-${i}`, ...point, y: 0, w, d, h, kind, color: i % 3 ? 'slate' : 'orange', scenery: true });
   }
 
   const groundSight = colliders.filter((box) => box.minY <= rules.eyeHeight && box.maxY >= rules.eyeHeight);
