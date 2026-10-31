@@ -27,6 +27,10 @@
 - Prompts, seeds and image model provenance: `asset-manifest.json`.
 - The image engine generates materials; the 3D anatomical base is the separately licensed Quaternius asset above. No claim is made that a 2D image model generated the 3D rig.
 
+## Firearm meshes and surface finish
+
+The firearm meshes in `public/firearm-design.js` / `public/firearm-geometry.js` and their procedural metal/polymer/wood micro-finishes are authored in this project, not downloaded weapon-model assets. They reuse the existing finish colors/patterns credited in `asset-manifest.json`. No new third-party weapon model pack or paid service is required.
+
 ## Recorded firearm sounds
 
 - Author/recordist: Tabasco

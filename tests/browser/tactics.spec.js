@@ -5,23 +5,23 @@ test.beforeEach(async ({ context }) => {
   await context.addInitScript(() => { try { localStorage.setItem('sector07-settings', JSON.stringify({ sensitivity: 1, fov: 82, volume: 0, quality: 'low' })); } catch { /* about:blank */ } });
 });
 
-async function componentGame(page) {
+async function componentGame(page, weaponId = 'rifle') {
   await page.goto('/'); await expect(page.getByText('LAN SERVER ONLINE')).toBeVisible();
-  await page.evaluate(async () => {
+  await page.evaluate(async (weaponId) => {
     const [{ FPSGame }, { Room }] = await Promise.all([import('/game.js'), import('/shared/simulation.js')]);
     const room = new Room('HUD22', { bots: 0 });
-    const player = room.addPlayer('viewer', 'VIEWER'), attacker = room.addPlayer('attacker', 'ATTACKER');
+    const player = room.addPlayer('viewer', 'VIEWER', false, { weaponId, ownedWeapons: [weaponId] }), attacker = room.addPlayer('attacker', 'ATTACKER');
     Object.assign(player, { x: 24, y: 0, z: 10, yaw: Math.PI / 2, pitch: 0, protectedUntil: 0 });
     Object.assign(attacker, { x: 24, y: 0, z: 0, yaw: Math.PI, pitch: 0, protectedUntil: 0 });
     room.events.length = 0;
     const audio = { unlock: async () => {}, shot() {}, hit() {}, hurt() {}, kill() {}, step() {}, reload() {} };
     document.getElementById('lobby').hidden = true; document.getElementById('game-shell').hidden = false;
-    const game = new FPSGame({ canvas: document.getElementById('game-canvas'), minimap: document.getElementById('minimap'), settings: { sensitivity: 1, fov: 82, volume: 0, quality: 'low' }, audio, mapId: 'foundry', send() {}, onMenu: (show) => { document.getElementById('pause-overlay').hidden = !show; }, onFatal: (message) => { throw new Error(message); } });
+    const game = new FPSGame({ canvas: document.getElementById('game-canvas'), minimap: document.getElementById('minimap'), settings: { sensitivity: 1, fov: 82, volume: 0, quality: 'low' }, audio, mapId: 'foundry', weaponId, send() {}, onMenu: (show) => { document.getElementById('pause-overlay').hidden = !show; }, onFatal: (message) => { throw new Error(message); } });
     game.applySnapshot(room.snapshot(), player.id); await game.prepareGraphics();
     document.getElementById('pause-overlay').hidden = false;
     const start = () => game.lock(); document.getElementById('resume-button').addEventListener('click', start);
     window.__tacticalTest = { game, room, player, attacker, start };
-  });
+  }, weaponId);
   await page.getByRole('button', { name: '교전 시작', exact: true }).click();
   await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id)).toBe('game-canvas');
 }
@@ -34,9 +34,9 @@ async function disposeComponent(page) {
   });
 }
 
-test('rifle ADS reticle stays centered and visual recoil cannot change authoritative aim', async ({ page }) => {
+for (const weaponId of ['rifle', 'famas']) test(`${weaponId} ADS reticle stays centered and visual recoil cannot change authoritative aim`, async ({ page }) => {
   const errors = []; page.on('pageerror', (error) => errors.push(error.message));
-  await componentGame(page);
+  await componentGame(page, weaponId);
   try {
     await page.mouse.down({ button: 'right' });
     await expect.poll(() => page.evaluate(async () => {
@@ -55,7 +55,7 @@ test('rifle ADS reticle stays centered and visual recoil cannot change authorita
     await page.keyboard.down('KeyC');
     await expect.poll(() => page.evaluate(() => window.__tacticalTest.game.predicted.crouching)).toBe(true);
     await expect.poll(() => page.evaluate(() => { const { game } = window.__tacticalTest; return game.camera.position.y - game.predicted.y; })).toBeCloseTo(0.92, 5);
-    await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/rifle-ads-crouched.png' });
+    await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: `artifacts/${weaponId}-ads-crouched.png` });
     await page.keyboard.up('KeyC'); await page.mouse.up({ button: 'right' });
     expect(errors).toEqual([]);
   } finally { await disposeComponent(page); }
