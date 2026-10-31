@@ -7,7 +7,7 @@ import { createProfile } from '../../shared/progression.js';
 
 test('portable host keeps identity and purchases after browser storage is cleared', async ({ browser }) => {
   test.setTimeout(90_000);
-  const root = process.cwd(), go = path.join(root, '.toolchain/go/bin', process.platform === 'win32' ? 'go.exe' : 'go');
+  const root = process.cwd(), go = process.env.GO_BINARY || path.join(root, '.toolchain/go/bin', process.platform === 'win32' ? 'go.exe' : 'go');
   try { await access(go); } catch { test.skip(true, 'Optional local packaging compiler is not installed.'); }
   const base = path.join(root, 'artifacts/native-profile-e2e'); await mkdir(base, { recursive: true });
   const stage = await mkdtemp(path.join(base, 'run-'));

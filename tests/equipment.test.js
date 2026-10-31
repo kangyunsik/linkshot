@@ -95,3 +95,8 @@ test('knife kill ledgers persist idempotently without adding a shop weapon or al
   assert.equal(recordRound(next, report).changed, false); assert.equal(normalizeProfile(next, next.id).weaponKills.knife, 1);
   const f = fixture(); const player = f.room.addPlayer('invalid', 'INVALID', false, { weaponId: 'knife', ownedWeapons: ['knife'] }); assert.equal(player.weaponId, 'rifle');
 });
+
+test('round completion freezes combat but the final dropped gun still falls to the floor', () => {
+  const f = fixture(), { room, player } = f, drop = room.dropWeapon(player); room.finish(); const ammo = player.ammo;
+  f.advance(500); assert.equal(drop.grounded, true); assert.equal(drop.y, 0); assert.equal(player.ammo, ammo); assert.equal(room.phase, 'ended');
+});

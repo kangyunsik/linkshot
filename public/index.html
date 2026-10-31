@@ -9,6 +9,7 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/hitmarker.css">
+  <link rel="stylesheet" href="/modes.css">
   <script type="importmap">{"imports":{"three":"/vendor/three.module.js"}}</script>
 </head>
 <body>
@@ -79,7 +80,10 @@
           <section class="deploy-card" aria-labelledby="deploy-title">
             <div class="card-eyebrow"><span id="deploy-title">DEPLOYMENT</span><svg><use href="#i-target"/></svg></div>
             <h2>다음 교전을 준비하세요</h2>
-            <div class="mode-switch" role="tablist" aria-label="플레이 모드"><button id="mode-lan" role="tab" aria-selected="true" class="selected"><svg><use href="#i-people"/></svg> LAN 대전</button><button id="mode-practice" role="tab" aria-selected="false"><svg><use href="#i-target"/></svg> 혼자 연습</button></div>
+            <div class="mode-switch" role="tablist" aria-label="플레이 모드"><button id="mode-tutorial" role="tab" aria-selected="false">튜토리얼</button><button id="mode-practice" role="tab" aria-selected="false">혼자 연습</button><button id="mode-lan" role="tab" aria-selected="true" class="selected">LAN 대전</button><button id="mode-casual" role="tab" aria-selected="false">일반</button><button id="mode-ranked" role="tab" aria-selected="false">랭크</button></div>
+            <p id="mode-description" class="mode-description"></p><p id="mode-unavailable" class="mode-unavailable" role="status" hidden></p>
+            <div id="tutorial-recommendation" class="tutorial-recommendation" hidden><span>처음이라면 훈련장에서 먼저 익혀보세요.</span><button id="recommend-tutorial" type="button">튜토리얼 열기</button><button id="dismiss-tutorial" type="button">나중에</button></div>
+            <form id="lan-connect-guide" class="lan-connect-guide" hidden><p>LAN 서버 컴퓨터에서 <code>npm start</code>를 실행하고, 같은 네트워크에서 해당 서버가 제공하는 페이지로 접속하세요. HTTPS 페이지에서 사설망 서버를 자동 탐색하거나 직접 연결하지 않습니다.</p><label for="lan-server-address">LAN 서버 접속 주소</label><input id="lan-server-address" type="url" placeholder="http://localhost:3000" required><button class="secondary-button" type="submit">로컬 LAN 서버 열기</button></form>
             <label class="field-label" for="player-name">콜사인 <span>CALLSIGN</span></label>
             <div class="name-input"><svg><use href="#i-user"/></svg><input id="player-name" maxlength="16" placeholder="OPERATOR" value="" autocomplete="nickname" spellcheck="false" aria-label="플레이어 콜사인"><span class="input-mark">01</span></div>
              <div class="bot-row"><div><span>연습 봇</span><small id="bot-description">친구를 기다리는 동안 가볍게</small></div><div class="stepper"><button id="bots-minus" aria-label="봇 한 명 줄이기"><svg><use href="#i-minus"/></svg></button><output id="bot-count" aria-live="polite">2</output><button id="bots-plus" aria-label="봇 한 명 늘리기"><svg><use href="#i-plus"/></svg></button></div></div>
@@ -88,7 +92,7 @@
             <button id="create-button" class="primary-button deploy-button"><span>방 만들고 출격</span><svg><use href="#i-arrow"/></svg></button>
             <p class="deploy-note" id="deploy-note"><svg><use href="#i-shield"/></svg> 방 코드로 친구를 초대할 수 있어요</p>
             <div id="join-section"><div class="or-divider"><span></span> 이미 방이 있나요? <span></span></div><form id="join-form" class="join-form"><input id="room-code" placeholder="방 코드 5자리" aria-label="참가할 방 코드" maxlength="5" minlength="5" required pattern="[A-Za-z2-9]{5}" autocomplete="off" spellcheck="false"><button type="submit" aria-label="코드로 방 참가">참가 <svg><use href="#i-arrow"/></svg></button></form></div>
-            <p id="practice-note" class="practice-note" hidden>실제 플레이어 없이 봇과 연습합니다.<br>모든 판정은 로컬 서버에서 동일하게 처리됩니다.</p>
+             <p id="practice-note" class="practice-note" hidden>실제 플레이어 없이 봇과 연습합니다.<br>모든 판정은 이 브라우저의 공통 전투 시뮬레이션에서 처리됩니다.</p>
           </section>
         </section>
 
@@ -110,6 +114,7 @@
     <div class="game-hud">
       <div class="hud-top-left"><div class="hud-location"><span class="tiny-live"></span><span id="hud-map-name">FOUNDRY 07</span><small>FREE-FOR-ALL</small></div><canvas id="minimap" width="256" height="216" aria-label="미니맵"></canvas><div class="hud-room"><span id="hud-connection-kind">ROOM</span> <strong id="hud-room-code">-----</strong><span id="hud-ping">-- MS</span></div></div>
       <div class="match-clock"><span>DEATHMATCH</span><strong id="hud-timer">05:00</strong><small id="hud-frag-limit">FIRST TO 20</small></div>
+      <section id="tutorial-hud" class="tutorial-hud" aria-label="튜토리얼 목표" hidden><header><span>FIELD TRAINING</span><strong id="tutorial-progress"></strong></header><h2 id="tutorial-title"></h2><p id="tutorial-description"></p><ul id="tutorial-goals"></ul><small>초록 고리: 이동/표적 위치 · Esc: 다시 시작 / 건너뛰기</small></section>
       <div class="combat-awards" aria-live="polite" aria-atomic="true">
         <div id="kill-announcement" class="kill-announcement" hidden><span class="kill-rays" aria-hidden="true"></span><span id="kill-chain-count" class="kill-chain-count">×1</span><strong id="kill-chain-label">KILL</strong><small id="kill-chain-detail"></small></div>
         <div id="mastery-feedback" class="mastery-feedback" hidden><div><span id="mastery-weapon"></span><strong id="mastery-level">Lv.0</strong></div><div id="mastery-track" class="mastery-track" role="progressbar" aria-valuemin="0" aria-valuemax="50" aria-valuenow="0"><i id="mastery-fill"></i></div><small id="mastery-count">0 / 50 KILLS → Lv.1</small></div>

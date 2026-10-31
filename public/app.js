@@ -11,6 +11,8 @@ import { profileStats, POINT_RULES, weaponMastery } from '/shared/progression.js
 import { OUTFITS, getOutfit, CHARACTERS, getCharacter } from '/shared/outfits.js';
 import { OperatorPreview } from './operator-model.js';
 import { BOT_DIFFICULTIES, getBotDifficulty } from '/shared/simulation.js';
+import { PLAY_MODES, getPlayMode, recordsLocalProgress } from './play-modes.js';
+import { TRAINING_WORLD } from '/shared/training-world.js';
 
 const $ = (id) => document.getElementById(id);
 const defaults = { sensitivity: 1, fov: 82, volume: 65, quality: 'normal' };
@@ -31,13 +33,14 @@ const loadout = { mapId: getMap(savedLoadout.mapId).id, weaponId: getWeapon(save
 let preview = null;
 let operatorPreview = null, selectedOutfitId = 'field', purchaseRequestId = null, shopBusy = false;
 let selfSessionId = null, lastRoundReward = null;
+let tutorialCompletedRound = null;
 const profileStore = await new ProfileStore({ host: PROFILE_STORAGE === 'host', name: stored('sector07-name', `OP-${Math.floor(100 + Math.random() * 900)}`) }).load();
 if (!ownsWeapon(profileStore.profile, loadout.weaponId)) loadout.weaponId = 'rifle';
 let selectedWeaponId = loadout.weaponId;
 selectedOutfitId = profileStore.profile.equippedOutfitId;
 const audio = new GameAudio(settings);
 audio.muted = stored('sector07-muted', 'false') === 'true';
-let socket, game = null, connected = false, mode = 'lan', botCount = 2, rooms = [], lanUrl = location.origin;
+let socket, game = null, connected = false, mode = SOLO ? 'practice' : 'lan', transportKind = SOLO ? 'local' : 'lan', botCount = 2, rooms = [], lanUrl = location.origin;
 let botDifficulty = getBotDifficulty(stored('linkshot-bot-difficulty', 'beginner')).id;
 let savedRound = {}; try { savedRound = JSON.parse(stored('linkshot-round-options', '{}')) || {}; } catch { /* Defaults. */ }
 let roundOptions = normalizeRoundOptions(savedRound);
@@ -85,7 +88,7 @@ function setBusy(value) {
 function updateConnection(value) {
   connected = value;
   $('connection-status').classList.toggle('offline', !value);
-  $('connection-status').lastElementChild.textContent = value ? SOLO ? 'SOLO READY · LOCAL SIMULATION' : 'LAN SERVER ONLINE' : SOLO ? '시뮬레이션 준비 중' : '서버 연결 대기 중';
+  $('connection-status').lastElementChild.textContent = value ? transportKind === 'local' ? 'SOLO READY · LOCAL SIMULATION' : 'LAN SERVER ONLINE' : transportKind === 'online' ? 'ONLINE SERVER NOT CONFIGURED' : transportKind === 'local' ? '시뮬레이션 준비 중' : SOLO ? 'LAN 서버 페이지로 접속하세요' : '서버 연결 대기 중';
   document.querySelector('.connection-dot').style.background = value ? '#a3dbc9' : '#ff6249';
   $('create-button').disabled = !value || busy;
   $('join-form').querySelector('button').disabled = !value || busy;
@@ -94,7 +97,7 @@ function updateConnection(value) {
 function updateRooms(list) {
   rooms = list;
   const players = rooms.reduce((sum, room) => sum + room.players, 0);
-  $('room-summary').textContent = SOLO ? `${MAPS.length}개 전장 · ${WEAPONS.length}종 무기 · ${SKINS.length}종 스킨 · 별도 서버 없이 플레이` : !connected ? '로컬 서버에 다시 연결하고 있습니다' : rooms.length ? `${rooms.length}개의 열린 방 · ${players}명 교전 중` : '네트워크 준비 완료 · 첫 번째 방을 만들어 보세요';
+  $('room-summary').textContent = transportKind === 'local' ? `${MAPS.length}개 전장 · ${WEAPONS.length}종 무기 · 튜토리얼/연습은 별도 서버 없이 플레이` : transportKind === 'online' ? '일반·랭크: 중앙 온라인 서버와 계정 연결이 필요합니다' : !connected ? '로컬 LAN 서버에 연결되어 있지 않습니다 · 튜토리얼/혼자 연습은 이용 가능' : rooms.length ? `${rooms.length}개의 열린 방 · ${players}명 교전 중` : '네트워크 준비 완료 · 첫 번째 방을 만들어 보세요';
   const container = $('room-list'); container.replaceChildren();
   if (!rooms.length) {
     const empty = document.createElement('div'); empty.className = 'empty-rooms';
@@ -116,7 +119,7 @@ function updateRooms(list) {
 }
 
 function updateServerInfo(data) {
-  if (SOLO) { updateRooms([]); return; }
+  if (transportKind !== 'lan') { updateRooms([]); return; }
   const isLocalhost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
   lanUrl = isLocalhost ? data.urls?.[0] || location.origin : location.origin;
   $('lan-address').textContent = lanUrl.replace(/^https?:\/\//, '');
@@ -124,11 +127,15 @@ function updateServerInfo(data) {
   updateRooms(data.rooms || rooms);
 }
 
-function connect() {
+function connect(kind = getPlayMode(mode).transport) {
   clearTimeout(reconnectTimeout);
+  const previous = socket; socket = null; previous?.close(); selfSessionId = null; transportKind = kind;
+  updateConnection(false); updateRooms([]);
+  if (kind === 'online' || kind === 'lan' && SOLO) return;
   const url = new URL('/play', location.href); url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  socket = SOLO ? new SoloConnection() : new WebSocket(url);
-  socket.addEventListener('message', (event) => {
+  const connection = kind === 'local' ? new SoloConnection() : new WebSocket(url); socket = connection;
+  connection.addEventListener('message', (event) => {
+    if (socket !== connection) return;
     let data; try { data = JSON.parse(event.data); } catch { return; }
     if (data.type === 'hello') {
       reconnectDelay = 1000; updateConnection(true); updateServerInfo(data); send({ type: 'ping', sent: Date.now() });
@@ -138,21 +145,22 @@ function connect() {
     if (data.type === 'pong') {
       const latency = Math.max(1, Date.now() - data.sent);
       $('hud-ping').textContent = `${latency} MS`;
-      $('connection-status').title = SOLO ? `브라우저 시뮬레이션 응답: ${latency}ms` : `서버 왕복 지연: ${latency}ms`;
+      $('connection-status').title = kind === 'local' ? `브라우저 시뮬레이션 응답: ${latency}ms` : `서버 왕복 지연: ${latency}ms`;
     }
     if (data.type === 'joined') { selfSessionId = data.id; syncProgress(data); enterGame(data); }
-    if (data.type === 'state') { syncProgress(data); game?.applySnapshot(data); }
+    if (data.type === 'state') { syncProgress(data); game?.applySnapshot(data); handleTutorialState(data); }
     if (data.type === 'left') { selfSessionId = null; if (game) leaveGame(false); }
     if (data.type === 'error') { setBusy(false); toast(data.message, true); }
   });
-  socket.addEventListener('close', () => {
+  connection.addEventListener('close', () => {
+    if (socket !== connection) return;
     const wasPlaying = !!game;
     updateConnection(false); setBusy(false); updateRooms([]);
-    if (wasPlaying) { leaveGame(false); toast(SOLO ? '브라우저 시뮬레이션이 중단되었습니다. 다시 시작해 주세요.' : '서버 연결이 끊겼습니다. 로컬 서버가 실행 중인지 확인해 주세요.', true); }
+    if (wasPlaying) { leaveGame(false); toast(kind === 'local' ? '브라우저 시뮬레이션이 중단되었습니다. 다시 시작해 주세요.' : '서버 연결이 끊겼습니다. 튜토리얼/혼자 연습은 서버 없이 이용할 수 있습니다.', true); }
     selfSessionId = null;
-    reconnectTimeout = setTimeout(connect, reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 1.5, 8000);
+    reconnectTimeout = setTimeout(() => connect(kind), reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 1.5, 8000);
   });
-  socket.addEventListener('error', () => { /* close handles recovery. */ });
+  connection.addEventListener('error', () => { /* close handles recovery. */ });
 }
 
 function callsign() {
@@ -180,6 +188,9 @@ function showMenu(visible) {
   $('pause-title').textContent = hasDeployed ? 'STAY IN THE FIGHT.' : 'READY TO BREACH';
   $('pause-description').textContent = hasDeployed ? '호흡을 가다듬고, 다시 교전으로.' : '마우스를 클릭해 조준과 이동을 시작하세요.';
   $('resume-button').querySelector('span').textContent = hasDeployed ? '교전 계속하기' : '교전 시작';
+  const training = game.room?.mode === 'tutorial'; $('tutorial-actions').hidden = !training;
+  if (training && game.room.phase === 'training-complete') { $('pause-title').textContent = 'TRAINING COMPLETE'; $('pause-description').textContent = '기초 훈련을 마쳤습니다. 다시 도전하거나 혼자 연습으로 이어가세요.'; $('resume-button').hidden = true; }
+  else $('resume-button').hidden = false;
 }
 
 async function enterGame(data) {
@@ -190,6 +201,7 @@ async function enterGame(data) {
     game = new FPSGame({
       canvas: $('game-canvas'), minimap: $('minimap'), settings, audio, send,
       mapId: data.room.mapId, weaponId: data.players.find((player) => player.id === data.id)?.weaponId, skinId: data.players.find((player) => player.id === data.id)?.skinId,
+      world: data.room.mode === 'tutorial' ? TRAINING_WORLD : undefined,
       outfitId: data.players.find((player) => player.id === data.id)?.outfitId,
       characterId: data.players.find((player) => player.id === data.id)?.characterId,
       onMenu: showMenu,
@@ -199,7 +211,7 @@ async function enterGame(data) {
     $('loading-overlay').querySelector('h2').textContent = '그래픽을 준비하는 중'; $('loading-overlay').querySelector('.eyebrow').textContent = 'PREPARING GRAPHICS';
     const created = game; await created.prepareGraphics(); if (game !== created || created.disposed) return;
     $('pause-room-code').textContent = data.room.code;
-    $('copy-invite').hidden = data.room.mode === 'practice';
+    $('copy-invite').hidden = data.room.mode !== 'lan'; $('hud-connection-kind').textContent = transportKind === 'local' ? 'LOCAL' : 'ROOM';
     if (data.room.phase !== 'ended') showMenu(true);
     const address = new URL(location.href); address.searchParams.delete('room'); history.replaceState(null, '', address);
   } catch (error) {
@@ -211,6 +223,7 @@ async function enterGame(data) {
 function leaveGame(notify = true) {
   if (notify) send({ type: 'leave' });
   game?.dispose(); game = null;
+  selfSessionId = null; $('tutorial-actions').hidden = true; $('resume-button').hidden = false;
   $('lobby').hidden = false; $('game-shell').hidden = true;
   if (document.fullscreenElement === $('game-shell')) document.exitFullscreen?.().catch(() => {});
   for (const id of ['pause-overlay', 'round-overlay', 'scoreboard-overlay', 'respawn-overlay']) $(id).hidden = true;
@@ -218,15 +231,33 @@ function leaveGame(notify = true) {
 }
 
 function setMode(value) {
-  mode = SOLO ? 'practice' : value;
-  $('mode-lan').classList.toggle('selected', mode === 'lan'); $('mode-lan').setAttribute('aria-selected', String(mode === 'lan'));
-  $('mode-practice').classList.toggle('selected', mode === 'practice'); $('mode-practice').setAttribute('aria-selected', String(mode === 'practice'));
-  $('create-button').querySelector('span').textContent = mode === 'lan' ? '방 만들고 출격' : '연습전 시작';
-  $('deploy-note').lastChild.textContent = mode === 'lan' ? ' 방 코드로 친구를 초대할 수 있어요' : ' 나만의 전장에서 감각을 익혀보세요';
+  if (game || busy) return;
+  const selected = getPlayMode(value); mode = selected.id;
+  for (const item of PLAY_MODES) { $(`mode-${item.id}`).classList.toggle('selected', mode === item.id); $(`mode-${item.id}`).setAttribute('aria-selected', String(mode === item.id)); $(`mode-${item.id}`).tabIndex = mode === item.id ? 0 : -1; }
+  $('create-button').querySelector('span').textContent = selected.action; $('mode-description').textContent = selected.description;
+  const unavailable = selected.transport === 'online' || SOLO && mode === 'lan';
+  $('mode-unavailable').hidden = !unavailable;
+  $('mode-unavailable').textContent = selected.transport === 'online' ? '중앙 온라인 서버가 아직 구성되지 않았습니다. Java/Spring Boot 계정·매칭 서버 연결 후 제공할 모드이며, 현재는 매칭이나 경쟁 점수를 생성하지 않습니다.' : '이 페이지에는 LAN 서버가 없습니다. 아래 주소로 로컬 서버 페이지를 열어 주세요.';
+  $('lan-connect-guide').hidden = !(SOLO && mode === 'lan');
+  $('deploy-note').lastChild.textContent = mode === 'lan' ? ' 방 코드로 친구를 초대할 수 있어요' : mode === 'tutorial' ? ' 약 3–5분 · 언제든 건너뛰기 / 다시 시작' : ' 튜토리얼·혼자 연습은 서버 없이 이용할 수 있어요';
   $('bot-description').textContent = mode === 'lan' ? '친구를 기다리는 동안 가볍게' : '함께 실력을 쌓아갈 연습 상대';
-  $('join-section').hidden = mode !== 'lan'; $('practice-note').hidden = mode !== 'practice';
+  $('join-section').hidden = mode !== 'lan' || SOLO; $('practice-note').hidden = mode !== 'practice';
+  const settingsVisible = mode === 'practice' || mode === 'lan' && !SOLO;
+  for (const selector of ['.bot-row', '.bot-level-row', '.match-options']) document.querySelector(selector).hidden = !settingsVisible;
+  $('choose-map').disabled = mode === 'tutorial' || selected.transport === 'online';
   if (mode === 'practice' && botCount === 0) botCount = 1;
+  if (socket && transportKind !== selected.transport || !socket && (selected.transport === 'local' || selected.transport === 'lan' && !SOLO)) connect(selected.transport);
+  else if (unavailable && transportKind !== selected.transport) connect(selected.transport);
+  updateConnection(connected && !unavailable);
   updateBots();
+}
+
+function handleTutorialState(data) {
+  if (data.room?.mode !== 'tutorial' || !game) return;
+  if (!data.tutorial?.completed) { tutorialCompletedRound = null; return; }
+  if (tutorialCompletedRound === data.room.roundId) return;
+  tutorialCompletedRound = data.room.roundId; store('linkshot-tutorial-v1', 'completed'); $('tutorial-recommendation').hidden = true;
+  game.clearInput(); if (game.locked) document.exitPointerLock(); showMenu(true);
 }
 
 function updateBots() {
@@ -274,6 +305,7 @@ function renderProfile() {
 }
 
 function syncProgress(data) {
+  if (!recordsLocalProgress(data.room)) { lastRoundReward = null; renderRoundReward(); return; }
   if (!selfSessionId || !data.room?.roundId) return;
   const player = data.players.find((entry) => entry.id === selfSessionId); if (!player) return;
   const result = data.room.result?.roundId === data.room.roundId ? data.room.result.rewards?.[selfSessionId] : null;
@@ -440,8 +472,20 @@ $('create-button').addEventListener('click', () => {
 $('join-form').addEventListener('submit', (event) => { event.preventDefault(); requestJoin($('room-code').value.trim().toUpperCase()); });
 $('room-code').addEventListener('input', () => { $('room-code').value = $('room-code').value.toUpperCase().replace(/[^A-Z2-9]/g, ''); });
 $('player-name').addEventListener('change', () => callsign());
-$('mode-lan').addEventListener('click', () => setMode('lan'));
-$('mode-practice').addEventListener('click', () => setMode('practice'));
+for (const item of PLAY_MODES) $(`mode-${item.id}`).addEventListener('click', () => setMode(item.id));
+document.querySelector('.mode-switch').addEventListener('keydown', (event) => {
+  const index = PLAY_MODES.findIndex((item) => `mode-${item.id}` === event.target.id);
+  if (index < 0 || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? PLAY_MODES.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + PLAY_MODES.length) % PLAY_MODES.length;
+  setMode(PLAY_MODES[next].id); $(`mode-${PLAY_MODES[next].id}`).focus();
+});
+$('recommend-tutorial').addEventListener('click', () => setMode('tutorial'));
+$('dismiss-tutorial').addEventListener('click', () => { store('linkshot-tutorial-v1', 'dismissed'); $('tutorial-recommendation').hidden = true; });
+$('lan-connect-guide').addEventListener('submit', (event) => {
+  event.preventDefault();
+  try { const address = new URL($('lan-server-address').value.trim()); if (!['http:', 'https:'].includes(address.protocol) || address.username || address.password) throw new Error(); location.assign(address.href); }
+  catch { toast('http:// 또는 https://로 시작하는 LAN 서버 주소를 입력하세요.', true); }
+});
 $('bots-minus').addEventListener('click', () => { botCount = Math.max(mode === 'practice' ? 1 : 0, botCount - 1); updateBots(); });
 $('bots-plus').addEventListener('click', () => { botCount = Math.min(RULES.maxPlayers - 1, botCount + 1); updateBots(); });
 $('resume-button').addEventListener('click', () => game?.lock());
@@ -495,10 +539,10 @@ $('confirm-purchase').addEventListener('click', async () => {
   } catch (error) { toast(error.message, true); } finally { shopBusy = false; purchaseRequestId = null; $('confirm-purchase').disabled = false; renderShop(); renderWeaponOwnership(); }
 });
 $('nav-play').addEventListener('click', () => {
-  setMode('lan'); $('create-button').focus({ preventScroll: true });
+  setMode(SOLO ? 'practice' : 'lan'); $('create-button').focus({ preventScroll: true });
   document.querySelector('.operation-grid').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'center' });
 });
-function browseRooms() { send({ type: 'list' }); openDialog('rooms-dialog'); updateRooms(rooms); }
+function browseRooms() { if (mode !== 'lan') setMode('lan'); if (SOLO) { $('lan-server-address').focus(); return; } send({ type: 'list' }); openDialog('rooms-dialog'); updateRooms(rooms); }
 $('nav-rooms').addEventListener('click', browseRooms); $('browse-rooms').addEventListener('click', browseRooms);
 $('refresh-rooms').addEventListener('click', () => { if (send({ type: 'list' })) toast('방 목록을 새로고침했습니다.'); else toast('로컬 서버에 연결되어 있지 않습니다.', true); });
 document.querySelectorAll('[data-open]').forEach((button) => button.addEventListener('click', () => openDialog(button.dataset.open)));
@@ -517,19 +561,25 @@ profileStore.addEventListener('change', renderProfile);
 profileStore.addEventListener('award', (event) => toast(`라운드 정산 완료 · +${event.award.points} LP`));
 window.addEventListener('storage', (event) => { if (event.key === PROFILE_KEY && !game) { profileStore.refreshLocal(); renderProfile(); } });
 if (profileStore.warning) toast(profileStore.warning, true);
+const tutorialActions = document.createElement('div'); tutorialActions.id = 'tutorial-actions'; tutorialActions.className = 'tutorial-actions'; tutorialActions.hidden = true;
+for (const [id, text] of [['tutorial-retry', '튜토리얼 다시 시작'], ['tutorial-skip', '건너뛰기 · 혼자 연습으로']]) { const button = document.createElement('button'); button.id = id; button.className = 'secondary-button'; button.textContent = text; tutorialActions.append(button); }
+document.querySelector('.pause-bottom').before(tutorialActions);
+$('tutorial-retry').addEventListener('click', () => { send({ type: 'restart' }); game?.lock(); });
+$('tutorial-skip').addEventListener('click', () => { store('linkshot-tutorial-v1', stored('linkshot-tutorial-v1', 'dismissed')); leaveGame(); setMode('practice'); $('tutorial-recommendation').hidden = true; });
+$('tutorial-recommendation').hidden = !!stored('linkshot-tutorial-v1', '');
 const extraControls = document.createElement('p'); extraControls.className = 'controls-addition'; extraControls.textContent = `G: 가까운 총 줍기·교체 / 총이 없으면 현재 총 버리기 → 기본 나이프 (좌클릭 공격). 사망 시 사용하던 총을 떨어뜨립니다. 주운 총은 영구 해금이나 다음 부활 장비를 바꾸지 않습니다. 사망 후 E: ${WEAPONS.length}종 목록에서 다음 부활 무기 선택 (처음 10종은 숫자 1–9, 0). 숫자·휠로 생존 중 교체는 불가 · C / Ctrl: 앉기 (달리기·공중에서는 불가). 달리거나 공중에서 쏘면 탄이 크게 퍼집니다.`; $('help-dialog').append(extraControls);
 if (SOLO) {
   document.body.classList.add('solo-edition'); document.title = 'LINKSHOT · 링크샷 — Solo combat';
-  document.querySelector('.page-heading h1').textContent = '여섯 개의 전장, 나만의 교전.';
+  document.querySelector('.page-heading h1').textContent = '서버 없이 훈련하고, 함께 교전하세요.';
   document.querySelector('.page-heading p').textContent = '설치 없이 브라우저에서. 연습 봇과 실력을 겨루고 포인트로 나만의 외형을 모으세요.';
-  for (const id of ['mode-lan', 'join-section', 'nav-rooms', 'browse-rooms', 'copy-lan']) $(id).hidden = true;
-  setMode('practice'); $('hero-player-note').textContent = 'SOLO / BOT COMBAT'; $('hud-connection-kind').textContent = 'LOCAL';
+  for (const id of ['join-section', 'copy-lan']) $(id).hidden = true;
+  $('hero-player-note').textContent = 'SOLO / BOT COMBAT'; $('hud-connection-kind').textContent = 'LOCAL';
   document.querySelector('.build-tag').childNodes[1].textContent = ' SOLO EDITION ';
   const card = document.querySelector('.network-info'); card.querySelector('.card-eyebrow').textContent = 'NO GAME SERVER REQUIRED';
   card.querySelector('h3').textContent = '혼자서도, 어디서나.'; card.querySelector('p').textContent = '게임과 봇은 이 브라우저 안에서 실행됩니다.';
   const badge = document.createElement('span'); badge.className = 'solo-network-badge'; badge.textContent = 'LOCAL SIMULATION · WEB WORKER'; card.querySelector('.info-copy').append(badge);
   const steps = $('help-dialog').querySelectorAll('.help-steps p span');
   for (const [i, text] of [`전장과 장비를 고르세요. ${MAPS.length}개 전장 · ${WEAPONS.length}종 중 1–4번은 무료, 나머지는 LP로 영구 해금합니다.`, '연습전 시작을 누르세요. 전적·무기 숙련도는 자동 저장되며 포인트는 라운드 완료 후 지급됩니다.', `목표 킬·시간을 설정하세요. 외형과 무기 숙련도는 능력치를 높이지 않습니다.`].entries()) steps[i].textContent = text;
-  $('help-dialog').querySelector('.rooms-footnote').textContent = '이 배포는 1인 플레이 전용입니다. LAN 멀티플레이는 프로젝트를 로컬에서 npm start로 실행하면 사용할 수 있습니다.';
+  $('help-dialog').querySelector('.rooms-footnote').textContent = '튜토리얼과 혼자 연습은 서버 없이 실행됩니다. LAN대전은 로컬 서버 페이지로 접속하며, 일반·랭크는 별도의 중앙 온라인 서버가 필요합니다.';
 }
-updateSettings(); updateBots(); updateConnection(false); updateRooms([]); connect();
+updateSettings(); updateBots(); setMode(mode); updateRooms([]);

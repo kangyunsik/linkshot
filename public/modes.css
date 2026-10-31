@@ -1,0 +1,21 @@
+.mode-switch, .solo-edition .mode-switch { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 12px; }
+.mode-switch > button { padding: 0 4px; white-space: nowrap; }
+.mode-description { font-size: 11px; line-height: 1.7; color: #b0c4cc; margin: 0 0 17px; }
+.mode-unavailable { padding: 12px; margin: 0 0 16px; border: 1px solid #b88c574a; background: #30281e; color: #e5c79d; font-size: 11px; line-height: 1.8; }
+.tutorial-recommendation { display: flex; flex-wrap: wrap; gap: 9px; padding: 11px; margin-bottom: 17px; background: #20352e; border: 1px solid #92c6ad33; border-radius: 3px; font-size: 10px; }
+.tutorial-recommendation > span { flex-basis: 100%; color: #bbdbcb; }
+.tutorial-recommendation > button { padding: 5px 8px; border: 1px solid #83b09b55; border-radius: 2px; }
+.tutorial-recommendation > button:last-child { color: #99aba3; border-color: transparent; }
+.lan-connect-guide { margin-bottom: 18px; font-size: 11px; line-height: 1.8; color: #b8c8ce; }
+.lan-connect-guide label { display: block; margin: 10px 0 5px; }
+.lan-connect-guide input { width: 100%; padding: 10px; border: 1px solid #46616d; background: #15212a; color: #dae8e6; border-radius: 3px; margin-bottom: 9px; }
+.tutorial-hud { position: absolute; left: 230px; top: 26px; width: 340px; padding: 17px 19px; border: 1px solid #9dd5bd70; border-left: 3px solid #a3dbc9; border-radius: 3px; background: #10231fe8; }
+.tutorial-hud header { display: flex; justify-content: space-between; color: #acd6c8; font: 9px var(--mono); letter-spacing: 1px; }
+.tutorial-hud h2 { margin: 10px 0 7px; font-size: 18px; }
+.tutorial-hud p { margin: 0 0 10px; font-size: 12px; line-height: 1.7; color: #d2e1d9; }
+.tutorial-hud ul { list-style: none; padding: 0; margin: 0 0 10px; font-size: 12px; line-height: 1.9; color: #9aafa6; }
+.tutorial-hud li.done { color: #b4f0cf; }
+.tutorial-hud > small { color: #8aa99a; font-size: 9px; }
+.tutorial-actions { display: grid; gap: 8px; margin-top: 12px; }
+@media (max-width: 1100px) { .tutorial-hud { left: 20px; top: 235px; width: 290px; padding: 12px 15px; } }
+@media (max-width: 740px) { .tutorial-hud { top: 175px; width: 250px; } .tutorial-hud p,.tutorial-hud ul { font-size: 10px; } }

@@ -16,6 +16,7 @@ import { weaponMastery } from '/shared/progression.js';
 import { FootstepTracker, footstepMix } from './footsteps.js';
 import { drawThemedArena } from './themed-arena.js';
 import { VIEWMODEL_LAYER, compileViewmodelPrograms, renderViewmodelFrame } from './viewmodel-renderer.js';
+import { updateTutorialView } from './tutorial-view.js';
 
 const $ = (id) => document.getElementById(id);
 const lerp = THREE.MathUtils.lerp;
@@ -59,7 +60,7 @@ function signTexture(title, subtitle, orange = false) {
 }
 
 export class FPSGame {
-  constructor({ canvas, minimap, settings, audio, send, onMenu, onFatal, mapId, weaponId = 'rifle', skinId = 'standard', outfitId = 'field', characterId = 'male' }) {
+  constructor({ canvas, minimap, settings, audio, send, onMenu, onFatal, mapId, world, weaponId = 'rifle', skinId = 'standard', outfitId = 'field', characterId = 'male' }) {
     this.canvas = canvas; this.minimap = minimap; this.settings = settings; this.audio = audio;
     this.send = send; this.onMenu = onMenu; this.onFatal = onFatal;
     this.abort = new AbortController(); this.keys = new Set(); this.remote = new Map(); this.effects = [];
@@ -70,7 +71,7 @@ export class FPSGame {
     this.yaw = 0; this.pitch = 0; this.fireHeld = false; this.ads = false; this.disposed = false;
     this.lastFire = 0; this.lastSend = 0; this.lastMap = 0; this.lastScoreboard = 0;
     this.reloadPressedUntil = 0; this.jumpPressedUntil = 0; this.recoil = 0; this.muzzleUntil = 0; this.serverOffset = 0; this.hadReload = false;
-    this.world = getMap(mapId); this.skinId = getSkin(skinId).id; this.requestedWeaponId = getWeapon(weaponId).id;
+    this.world = world || getMap(mapId); this.skinId = getSkin(skinId).id; this.requestedWeaponId = getWeapon(weaponId).id;
     this.outfitId = getOutfit(outfitId).id;
     this.characterId = getCharacter(characterId).id;
     this.models = new WeaponModels(); this.fireLatched = false; this.switchAnimation = 0; this.localNextFire = 0;
@@ -88,6 +89,7 @@ export class FPSGame {
     this.materials = {};
     this.makeWorld(); this.makeWeapon(); this.applySettings(); this.resize(); this.bindInput();
     this.combat = new CombatEffects(this.scene, this.models, this.world);
+    if (this.world.id === 'training') { this.trainingMarker = new THREE.Mesh(new THREE.TorusGeometry(.6, .045, 6, 32), new THREE.MeshBasicMaterial({ color: '#b4f0cf', depthWrite: false })); this.trainingMarker.rotation.x = -Math.PI / 2; this.trainingMarker.visible = false; this.scene.add(this.trainingMarker); }
     this.graphicsReady = false; this.graphicsPromise = null; this.graphicsPreparing = false; this.retiredGraphics = [];
     this.previousFrame = performance.now(); this.fpsTime = this.previousFrame; this.fpsFrames = 0;
     this.animate = this.animate.bind(this); this.frameId = requestAnimationFrame(this.animate);
@@ -458,6 +460,9 @@ export class FPSGame {
   applySnapshot(data, id = this.selfId) {
     if (this.disposed) return;
     this.selfId = id; this.room = data.room; this.players = data.players;
+    this.tutorial = data.tutorial;
+    updateTutorialView(data.tutorial);
+    if (this.trainingMarker) { const marker = data.tutorial?.marker; this.trainingMarker.visible = !!marker; if (marker) this.trainingMarker.position.set(marker.x, marker.y + .04, marker.z); }
     this.serverOffset = data.serverTime - Date.now();
     const local = data.players.find((p) => p.id === id);
     if (!local) return;
@@ -529,8 +534,10 @@ export class FPSGame {
     this.hud['hud-ammo'].textContent = weapon.melee ? '—' : local.ammo.toString().padStart(2, '0');
     $('hud-ammo-reserve').textContent = weapon.melee ? 'MELEE' : '/ ∞';
     this.hud['hud-ammo'].style.color = lowAmmo ? '#ff876a' : '';
-    this.hud['hud-timer'].textContent = clockText(this.room.timeLeft);
-    $('hud-frag-limit').textContent = `FIRST TO ${this.room.fragLimit}`;
+    const training = this.room.mode === 'tutorial';
+    this.hud['hud-timer'].textContent = training ? 'TRAINING' : clockText(this.room.timeLeft); this.hud['hud-timer'].style.fontSize = training ? '22px' : '';
+    document.querySelector('.match-clock>span').textContent = training ? 'LOCAL LESSONS' : 'DEATHMATCH'; document.querySelector('.hud-location small').hidden = training;
+    $('hud-frag-limit').textContent = training ? `${this.tutorial?.total || 6} STEPS · NO RATING / LP` : `FIRST TO ${this.room.fragLimit}`;
     this.hud['hud-timer'].style.color = this.room.timeLeft < 30 ? '#ff876a' : '';
     this.hud['hud-kd'].textContent = `${local.kills} K  /  ${local.deaths} D`;
     const reloading = local.hp > 0 && this.room.phase === 'active' && local.reloadUntil > this.serverNow;
@@ -891,6 +898,7 @@ export class FPSGame {
     $('scope-overlay').hidden = true; $('ads-reticle').hidden = true;
     this.clearDamageDirections();
     this.clearKillFeedback();
+    updateTutorialView(null);
     this.remote.clear(); this.groundItems.clear(); this.effects.length = 0; $('equipment-hint').hidden = true;
     this.closeLoadout(false);
     for (const id of ['pause-overlay', 'round-overlay', 'scoreboard-overlay', 'respawn-overlay']) $(id).hidden = true;

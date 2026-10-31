@@ -13,7 +13,7 @@ test('static solo build supports loadout selection, scope, live weapon lock and 
   page.on('pageerror', (error) => errors.push(error.message)); page.on('request', (request) => requests.push(request.url())); page.on('websocket', (socket) => sockets.push(socket.url()));
   await page.goto('/'); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
   await expect(page).toHaveTitle(/^LINKSHOT/);
-  await expect(page.getByRole('tab', { name: 'LAN 대전' })).toBeHidden(); await expect(page.locator('#join-section')).toBeHidden();
+  await expect(page.getByRole('tab', { name: 'LAN 대전' })).toBeVisible(); await expect(page.locator('#join-section')).toBeHidden();
   await page.getByRole('button', { name: '전장 변경', exact: false }).click();
   await expect(page.locator('.map-choice')).toHaveCount(MAPS.length);
   await page.getByRole('button', { name: '레드라인 전장 선택', exact: true }).click(); await expect(page.locator('#hero-map-name')).toHaveText('REDLINE 19');

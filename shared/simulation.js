@@ -429,9 +429,9 @@ export class Room {
 
   tick(dt) {
     const now = this.clock();
+    for (const [id, drop] of this.droppedWeapons) { if (now >= drop.expiresAt) this.droppedWeapons.delete(id); else settleDroppedWeapon(drop, dt, this.world); }
     if (this.phase !== 'active') return;
     if (now >= this.endsAt) { this.finish(); return; }
-    for (const [id, drop] of this.droppedWeapons) { if (now >= drop.expiresAt) this.droppedWeapons.delete(id); else settleDroppedWeapon(drop, dt, this.world); }
     for (const player of this.players.values()) {
       if (player.hp <= 0) { if (now >= player.respawnAt) this.spawn(player); else continue; }
       const input = player.isBot ? this.botInput(player, now, dt) : now - player.lastInput > 500 ? { ...EMPTY_INPUT, yaw: player.yaw, pitch: player.pitch, weaponId: player.weaponId } : player.input;
