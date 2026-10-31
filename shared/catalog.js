@@ -47,6 +47,9 @@ export const WEAPONS = Object.freeze([
 ].map((weapon) => Object.freeze({ ...weapon, price: WEAPON_PRICES[weapon.id] || 0, ...WEAPON_MOVEMENT[weapon.id] })));
 
 export const FREE_WEAPON_IDS = Object.freeze(WEAPONS.filter((weapon) => !weapon.price).map((weapon) => weapon.id));
+// Fallback equipment is deliberately outside the firearm shop/audio catalogue.
+export const KNIFE = Object.freeze({ id: 'knife', model: 'knife', name: 'FIELD KNIFE', label: '근접 나이프', type: 'MELEE', action: 'SLASH', melee: true, magazine: 0, fireSeconds: .55, reloadSeconds: 0, damage: 45, headDamage: 45, pellets: 1, spread: 0, adsSpread: 0, range: 1.85, falloffStart: 1.85, minDamage: 1, zoom: 1, recoil: 0, automatic: false, caliber: '근접', walkMultiplier: 1.1, sprintMultiplier: 1.08, adsMoveMultiplier: 1 });
+export const EQUIPMENT = Object.freeze([...WEAPONS, KNIFE]);
 export const normalizeOwnedWeapons = (ids) => [...new Set([...FREE_WEAPON_IDS, ...(Array.isArray(ids) ? ids.filter((id) => WEAPONS.some((weapon) => weapon.id === id)) : [])])];
 export const ownsWeapon = (profile, id) => FREE_WEAPON_IDS.includes(id) || Array.isArray(profile?.ownedWeapons) && profile.ownedWeapons.includes(id) && isWeaponId(id);
 
@@ -63,7 +66,7 @@ export const DEFAULT_WEAPON = 'rifle';
 export const DEFAULT_SKIN = 'standard';
 export const isWeaponId = (id) => WEAPONS.some((weapon) => weapon.id === id);
 export const isSkinId = (id) => SKINS.some((skin) => skin.id === id);
-export const getWeapon = (id) => WEAPONS.find((weapon) => weapon.id === id) || WEAPONS[0];
+export const getWeapon = (id) => id === KNIFE.id ? KNIFE : WEAPONS.find((weapon) => weapon.id === id) || WEAPONS[0];
 export const getSkin = (id) => SKINS.find((skin) => skin.id === id) || SKINS[0];
 export const weaponModel = (weapon) => weapon.model || weapon.id;
 export const freshMagazines = () => Object.fromEntries(WEAPONS.map((weapon) => [weapon.id, weapon.magazine]));

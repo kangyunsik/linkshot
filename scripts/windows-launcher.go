@@ -166,7 +166,10 @@ func profileCount(value int64) int64 { if value < 0 { return 0 }; if value > 100
 func hasOutfit(p localProfile, id string) bool { for _, owned := range p.OwnedOutfits { if owned == id { return true } }; return false }
 func hasWeapon(p localProfile, id string) bool { for _, owned := range p.OwnedWeapons { if owned == id { return true } }; return false }
 func (s *profileStore) weaponCounts(raw map[string]int64) map[string]int64 {
-	result := map[string]int64{}; for _, item := range s.economy.Weapons { if value := profileCount(raw[item.ID]); value > 0 { result[item.ID] = value } }; return result
+	result := map[string]int64{}; for _, id := range s.combatIDs() { if value := profileCount(raw[id]); value > 0 { result[id] = value } }; return result
+}
+func (s *profileStore) combatIDs() []string {
+	ids := []string{}; for _, item := range s.economy.Weapons { ids = append(ids, item.ID) }; return append(ids, "knife")
 }
 func (s *profileStore) migrateWeapons() {
 	if s.profile.CharacterID != "male" && s.profile.CharacterID != "female" { s.profile.CharacterID = "male" }
@@ -244,9 +247,9 @@ func (s *profileStore) serve(w http.ResponseWriter, r *http.Request) {
 		prior := next.RoundLedger[operation.RoundID]; kills := max(prior.Kills, profileCount(operation.Kills)); deaths := max(prior.Deaths, profileCount(operation.Deaths))
 		pay := operation.Completed && !prior.Awarded; changed = kills != prior.Kills || deaths != prior.Deaths || pay
 		weapons := s.weaponCounts(prior.WeaponKills); remaining := kills; for _, value := range weapons { remaining -= value }; remaining = max(int64(0), remaining)
-		for _, item := range s.economy.Weapons {
-			delta := min(remaining, max(int64(0), profileCount(operation.WeaponKills[item.ID]) - weapons[item.ID]))
-			if delta > 0 { weapons[item.ID] += delta; next.WeaponKills[item.ID] = profileCount(next.WeaponKills[item.ID] + delta); remaining -= delta; changed = true }
+		for _, id := range s.combatIDs() {
+			delta := min(remaining, max(int64(0), profileCount(operation.WeaponKills[id]) - weapons[id]))
+			if delta > 0 { weapons[id] += delta; next.WeaponKills[id] = profileCount(next.WeaponKills[id] + delta); remaining -= delta; changed = true }
 		}
 		next.Kills = profileCount(next.Kills + kills - prior.Kills); next.Deaths = profileCount(next.Deaths + deaths - prior.Deaths)
 		if changed { next.RoundLedger[operation.RoundID] = roundProgress{Kills: kills, Deaths: deaths, WeaponKills: weapons, Awarded: prior.Awarded || pay, UpdatedAt: now} }

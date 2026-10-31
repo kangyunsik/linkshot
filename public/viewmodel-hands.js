@@ -1,6 +1,7 @@
 import * as THREE from '/vendor/three.module.js';
 import { GLTFLoader } from '/vendor/addons/loaders/GLTFLoader.js';
 import { clone } from '/vendor/addons/utils/SkeletonUtils.js';
+import { weaponGrip } from './weapon-grips.js';
 
 const loader = new GLTFLoader();
 const sources = new Map(await Promise.all(['male', 'female'].map(async (id) => [id, await loader.loadAsync(`/assets/models/view-hands-${id}-v1.glb`)])));
@@ -67,17 +68,18 @@ function skinMaterial(models, source, character) {
   return skin;
 }
 
-function sleeveGeometry(points, wristWidth, side, wristRotation, straightSupport = false) {
-  const curve = straightSupport ? new THREE.LineCurve3(v(points[0]), v(points.at(-1))) : new THREE.CatmullRomCurve3(points.map(v));
+function sleeveGeometry(points, wristWidth, side, wristRotation) {
+  // A forearm is a rigid bone, not a Catmull–Rom hose. The elbow/upper arm stay
+  // outside the first-person frustum; no artificial S-bend near the cuff.
+  const curve = new THREE.LineCurve3(v(points[0]), v(points.at(-1)));
   const positions = [], uvs = [], indices = [], radii = [], rings = 15, segments = 16;
   const wristX = new THREE.Vector3(1, 0, 0).applyQuaternion(wristRotation);
   for (let ring = 0; ring <= rings; ring++) {
     const t = ring / rings, center = curve.getPoint(t), direction = curve.getTangent(t).normalize();
-    const horizontal = straightSupport ? wristX.clone() : new THREE.Vector3(0, 1, 0).cross(direction).normalize();
-    if (!straightSupport) horizontal.lerp(wristX, THREE.MathUtils.smoothstep(t, .65, 1));
+    const horizontal = wristX.clone();
     horizontal.addScaledVector(direction, -horizontal.dot(direction)).normalize();
     const vertical = direction.clone().cross(horizontal).normalize();
-    const radius = straightSupport ? wristWidth + (.084 - wristWidth) * (1 - t) ** .55 : THREE.MathUtils.lerp(.063, wristWidth, t) * (1 + Math.sin(t * 29 + side) * .055 * Math.sin(t * Math.PI));
+    const radius = wristWidth + (.084 - wristWidth) * (1 - t) ** .55;
     radii.push(radius);
     for (let section = 0; section <= segments; section++) {
       const angle = section / segments * Math.PI * 2, depth = THREE.MathUtils.lerp(.86, 1.35, t ** 3);
@@ -88,7 +90,7 @@ function sleeveGeometry(points, wristWidth, side, wristRotation, straightSupport
   }
   const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3)); geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2)); geometry.setIndex(indices); geometry.computeVertexNormals();
   geometry.userData.sleevePath = points.map((point) => [...point]); geometry.userData.sleeveLength = curve.getLength();
-  geometry.userData.sleeveRadii = radii; geometry.userData.straightSupport = straightSupport; return geometry;
+  geometry.userData.sleeveRadii = radii; geometry.userData.straightSupport = true; geometry.userData.rigidForearm = true; return geometry;
 }
 
 export function createViewmodelHands(models, { group, shape, weaponId, outfit, skin, character }) {
@@ -99,46 +101,29 @@ export function createViewmodelHands(models, { group, shape, weaponId, outfit, s
   const glove = new THREE.MeshStandardMaterial({ name: 'view-tactical-glove', color: gloveColor, map: gloveMap, bumpMap: gloveMap, bumpScale: .0007, roughness: .86, metalness: 0, fog: false });
   const trim = new THREE.MeshStandardMaterial({ name: 'view-cuff', color: outfit.id === 'field' ? skin.dark : outfit.dark, roughness: .95, metalness: 0, fog: false });
   const compactSupport = shape === 'rifle' || shape === 'sniper';
-  const supportZ = { rifle: -.28, smg: -.25, shotgun: -.43, sniper: -.34, lmg: -.52, dmr: -.42 }[shape];
-  const foreend = weaponId === 'm82' ? -.40 : weaponId === 'p90' ? -.23 : supportZ;
   let supportArm;
   for (const side of ['r', 'l']) {
-    const right = side === 'r', pistol = shape === 'pistol', profile = right ? 'trigger' : pistol ? 'wrap' : 'cradle';
+    const right = side === 'r', profile = shape === 'knife' ? 'fist' : right ? 'trigger' : shape === 'pistol' ? 'wrap' : 'cradle';
     const prepared = anatomicalHand(character.id, side, profile, covered), name = right ? 'right-hand' : 'left-hand';
     const assembly = new THREE.Group(); assembly.name = `${right ? 'right' : 'left'}-arm`; root.add(assembly); if (!right) supportArm = assembly;
     const hand = new THREE.Group(); hand.name = name; hand.userData.fingers = 5; hand.userData.anatomical = true; hand.userData.side = side; hand.userData.pose = profile; hand.userData.rigBones = prepared.bones;
-    let wrist;
-    if (right || pistol) {
-      wrist = [right ? .057 : -.055, right ? -.135 : -.16, .13 + prepared.palmLength + (right ? 0 : .008)];
-      hand.quaternion.setFromEuler(new THREE.Euler(-1.64, 0, right ? .04 : -.05));
-    } else {
-      const normal = compactSupport ? new THREE.Vector3(.85, -.1, .51).normalize() : new THREE.Vector3(.55, .75, .36).normalize();
-      const along = compactSupport ? new THREE.Vector3(.30, .75, -.58) : new THREE.Vector3(.5, .4, -.77);
-      if (compactSupport) { along.normalize(); normal.addScaledVector(along, -normal.dot(along)).normalize(); }
-      else along.addScaledVector(normal, -along.dot(normal)).normalize();
-      const across = normal.clone().cross(along);
-      hand.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(normal, along, across));
-      const center = new THREE.Vector3(compactSupport ? -.065 : -.055, compactSupport ? -.045 : shape === 'lmg' ? -.1 : shape === 'smg' ? -.067 : -.085, foreend + .025);
-      wrist = center.addScaledVector(along, -prepared.palmLength * .64).toArray();
-    }
+    const grip = weaponGrip(shape, weaponId, right, prepared.palmLength), { wrist, foreend } = grip;
+    hand.quaternion.copy(grip.rotation);
+    const socket = new THREE.Object3D(); socket.name = `grip-${side}`; socket.position.set(...wrist); socket.quaternion.copy(grip.rotation); assembly.add(socket);
+    socket.userData.attachment = grip.parent;
     hand.position.set(...wrist); assembly.add(hand);
     const geometry = models.sharedOperatorGeometry(`view-hand/${prepared.key}`, prepared.geometry);
     const mesh = new THREE.Mesh(geometry, [glove, skinMaterial(models, prepared.sourceMaterial, character.id)]); mesh.name = 'palm'; hand.add(mesh);
     const cuff = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 20, 1, true), trim); cuff.name = `${name}-cuff`; cuff.position.y = -.008; cuff.scale.set(.029, .025, .041); hand.add(cuff);
-    let shoulder = right ? [.31, -.46, .62] : pistol ? [-.40, -.45, .65] : [-.43, -.43, .24];
-    let elbow = right ? [.20, -.30, .40] : pistol ? [-.23, -.31, .43] : [-.26, -.26, -.08];
     const end = v([0, -.017, 0]).applyQuaternion(hand.quaternion).add(hand.position);
-    const forearm = new THREE.Vector3(0, 1, 0).applyQuaternion(hand.quaternion), straightSupport = !right && compactSupport;
+    const forearm = new THREE.Vector3(0, 1, 0).applyQuaternion(hand.quaternion);
     const approach = end.clone().addScaledVector(forearm, -.075);
-    if (straightSupport) {
-      // Only the forearm belongs in view. Keep its axis aligned with the wrist
-      // and put the sleeve root below even the widest supported FOV; never
-      // force a visible elbow/S-bend just to shorten the model's bounds.
-      shoulder = end.clone().addScaledVector(forearm, -.70).toArray(); elbow = end.clone().addScaledVector(forearm, -.35).toArray();
-    }
-    const sleeve = new THREE.Mesh(sleeveGeometry([shoulder, elbow, approach.toArray(), end.toArray()], character.id === 'female' ? .029 : .031, right ? 1 : -1, hand.quaternion, straightSupport), fabric); sleeve.name = right ? 'right-sleeve' : 'left-sleeve'; assembly.add(sleeve);
+    const length = right || shape === 'pistol' ? .55 : shape === 'lmg' ? .74 : .70;
+    const shoulder = end.clone().addScaledVector(forearm, -length).toArray(), elbow = end.clone().addScaledVector(forearm, -length / 2).toArray();
+    const sleeve = new THREE.Mesh(sleeveGeometry([shoulder, elbow, approach.toArray(), end.toArray()], character.id === 'female' ? .029 : .031, right ? 1 : -1, hand.quaternion), fabric); sleeve.name = right ? 'right-sleeve' : 'left-sleeve'; assembly.add(sleeve);
     hand.userData.wrist = [...wrist]; hand.userData.foreend = foreend ?? null; hand.userData.compactSupport = !right && compactSupport;
   }
   root.userData.anatomy = 'quaternius-view-hands-v1'; root.userData.covered = covered; root.userData.characterId = character.id;
+  root.userData.gripSystem = 'weapon-local-neutral-wrist-v2';
   group.userData.supportArm = supportArm; group.userData.handRig = root; return root;
 }

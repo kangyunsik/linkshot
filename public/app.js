@@ -517,7 +517,7 @@ profileStore.addEventListener('change', renderProfile);
 profileStore.addEventListener('award', (event) => toast(`라운드 정산 완료 · +${event.award.points} LP`));
 window.addEventListener('storage', (event) => { if (event.key === PROFILE_KEY && !game) { profileStore.refreshLocal(); renderProfile(); } });
 if (profileStore.warning) toast(profileStore.warning, true);
-const extraControls = document.createElement('p'); extraControls.className = 'controls-addition'; extraControls.textContent = `생존 중 무기 교체 불가 · 사망 후 E: ${WEAPONS.length}종 목록에서 클릭해 다음 부활 무기 선택 (처음 10종은 숫자 1–9, 0) · C / Ctrl: 앉기 (달리기·공중에서는 불가) · 계단으로 건물·옥상까지 이동할 수 있습니다. 달리거나 공중에서 쏘면 탄이 크게 퍼집니다. 피격 방향은 붉은 표시만으로 알립니다.`; $('help-dialog').append(extraControls);
+const extraControls = document.createElement('p'); extraControls.className = 'controls-addition'; extraControls.textContent = `G: 가까운 총 줍기·교체 / 총이 없으면 현재 총 버리기 → 기본 나이프 (좌클릭 공격). 사망 시 사용하던 총을 떨어뜨립니다. 주운 총은 영구 해금이나 다음 부활 장비를 바꾸지 않습니다. 사망 후 E: ${WEAPONS.length}종 목록에서 다음 부활 무기 선택 (처음 10종은 숫자 1–9, 0). 숫자·휠로 생존 중 교체는 불가 · C / Ctrl: 앉기 (달리기·공중에서는 불가). 달리거나 공중에서 쏘면 탄이 크게 퍼집니다.`; $('help-dialog').append(extraControls);
 if (SOLO) {
   document.body.classList.add('solo-edition'); document.title = 'LINKSHOT · 링크샷 — Solo combat';
   document.querySelector('.page-heading h1').textContent = '여섯 개의 전장, 나만의 교전.';

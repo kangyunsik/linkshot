@@ -115,7 +115,7 @@ test('local and nearby remote movement both produce footsteps, but dead sources 
       const steps = []; game.audio.step = (sprint, crouched, mix) => steps.push({ sprint, crouched, ...mix });
       game.keys.add('KeyW'); const avatar = game.remote.get('other'); Object.assign(avatar.target, { moveSpeed: 5.7, grounded: true, hp: 100 });
       const start = performance.now(); game.previousFrame = start;
-      for (let i = 1; i <= 120; i++) { avatar.target.z = 6 - i * 5.7 / 60; game.animate(start + i * 1000 / 60); cancelAnimationFrame(game.frameId); }
+      for (let i = 1; i <= 120; i++) { avatar.target.z = 6 - i * 5.7 / 60; avatar.target.stepDistance = i * 5.7 / 60; game.animate(start + i * 1000 / 60); cancelAnimationFrame(game.frameId); }
       const local = steps.filter((step) => !step.remote), remote = steps.filter((step) => step.remote), beforeDeath = steps.length;
       game.local.hp = 0; avatar.target.hp = 0;
       for (let i = 121; i <= 180; i++) { avatar.target.z -= 0.1; game.animate(start + i * 1000 / 60); cancelAnimationFrame(game.frameId); }

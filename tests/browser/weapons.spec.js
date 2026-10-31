@@ -74,3 +74,21 @@ test('FAMAS uses one low carry handle and keeps the horizon clear with a centere
   });
   expect(result.top).toBeLessThan(.16); expect(result.aimHeight).toBeLessThan(.15); expect(result.handles).toBe(1); expect(result.highHolo).toBe(false); expect(result.error).toBeLessThan(.00001); expect(result.gun).toBeGreaterThan(2000); expect(result.above).toBe(0);
 });
+
+test('MP5 cocking handle and sights, scope rings and magazines have physical attachment paths to their receivers', async ({ page }) => {
+  await page.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: '' })); await page.goto('/');
+  const checks = await page.evaluate(async () => {
+    const [{ WeaponModels, disposeModel }] = await Promise.all([import('/weapon-model.js')]); const models = new WeaponModels(), checks = [];
+    const required = { mp5: ['mp5-cocking-handle', 'rear-sight-ear', 'front-sight-post', 'front-sight-hood'], sniper: ['scope-mount-ring', 'scope-main-tube', 'scope-eyepiece'], awp: ['scope-mount-ring', 'scope-main-tube'], m82: ['scope-mount-ring', 'scope-main-tube'], p90: ['p90-horizontal-magazine'], rifle: ['open-reflex-sight'], smg: ['open-reflex-sight'] };
+    for (const [id, names] of Object.entries(required)) {
+      const model = models.create(id, 'standard'), body = model.userData.firearmBody, features = body.userData.features.map((feature) => { const offset = model.getObjectByName(`firearm-${feature.parent}`).position; return { ...feature, min: feature.min.map((x, i) => x + offset.getComponent(i)), max: feature.max.map((x, i) => x + offset.getComponent(i)) }; });
+      const root = features.findIndex((feature) => ['contoured-receiver', 'mp5-round-receiver', 'p90-integrated-thumbhole-shell'].includes(feature.name));
+      const connected = new Set([root]), queue = [root];
+      for (const i of queue) for (let j = 0; j < features.length; j++) if (!connected.has(j) && [0, 1, 2].every((axis) => features[i].min[axis] <= features[j].max[axis] + .001 && features[j].min[axis] <= features[i].max[axis] + .001)) { connected.add(j); queue.push(j); }
+      for (const name of names) checks.push({ id, name, attached: features.some((feature, index) => feature.name === name && connected.has(index)) });
+      disposeModel(model);
+    }
+    models.dispose(); return checks;
+  });
+  for (const check of checks) expect(check.attached, `${check.id}: ${check.name} must not float`).toBe(true);
+});

@@ -3,6 +3,7 @@ import { getWeapon, getSkin, weaponModel } from '/shared/catalog.js';
 import { getOutfit, getCharacter } from '/shared/outfits.js';
 import { createViewmodelHands } from './viewmodel-hands.js';
 import { createFirearmBody } from './firearm-design.js';
+import { createKnifeBody } from './knife-design.js';
 import { NETWORK_PROTOCOL } from '/shared/world.js';
 
 export function disposeModel(group) {
@@ -48,7 +49,7 @@ export class WeaponModels {
     return this.textures.get(key);
   }
 
-  create(weaponId, skinId, firstPerson = false, outfitId = 'field', characterId = 'male') {
+  create(weaponId, skinId, firstPerson = false, outfitId = 'field', characterId = 'male', handsSkinId = skinId) {
     const weapon = getWeapon(weaponId), skin = getSkin(skinId), group = new THREE.Group(), shape = weaponModel(weapon); group.name = `weapon-${weapon.id}`;
     const material = (color, options = {}) => new THREE.MeshStandardMaterial({ color, roughness: .63, metalness: .35, ...(firstPerson ? { fog: false } : {}), ...options });
     const metal = this.finishTexture('metal'), polymer = this.finishTexture('polymer');
@@ -66,10 +67,10 @@ export class WeaponModels {
       magazineGlass: material('#b4a57b', { transparent: true, opacity: .67, depthWrite: false, metalness: .05, roughness: .42 }),
       luminous: material(skin.accent, { emissive: skin.accent, emissiveIntensity: .7 }),
     };
-    const { body, muzzleZ, aimHeight } = createFirearmBody(this, group, weapon, shape, materials);
+    const { body, muzzleZ, aimHeight } = weapon.melee ? createKnifeBody(this, group, materials) : createFirearmBody(this, group, weapon, shape, materials);
     const used = new Set(); body.traverse((object) => { if (object.material) used.add(object.material); });
     for (const material of Object.values(materials)) if (!used.has(material)) material.dispose();
-    if (firstPerson) createViewmodelHands(this, { group, shape, weaponId: weapon.id, outfit: getOutfit(outfitId), skin, character: getCharacter(characterId) });
+    if (firstPerson) createViewmodelHands(this, { group, shape, weaponId: weapon.id, outfit: getOutfit(outfitId), skin: getSkin(handsSkinId), character: getCharacter(characterId) });
     const muzzle = new THREE.Object3D(); muzzle.position.set(0, .02, muzzleZ); group.add(muzzle);
     const flash = new THREE.Mesh(new THREE.ConeGeometry(shape === 'shotgun' ? .11 : .07, .23, 5), new THREE.MeshBasicMaterial({ color: '#ffda98', transparent: true, opacity: .85, blending: THREE.AdditiveBlending, depthWrite: false }));
     flash.rotation.x = -Math.PI / 2; flash.position.set(0, .02, muzzleZ - .10); flash.visible = false; group.add(flash);

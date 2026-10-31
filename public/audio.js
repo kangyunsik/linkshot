@@ -111,11 +111,11 @@ export class GameAudio {
     const queuedAt = performance.now();
     this.ready?.then(() => { if ((!allowed || allowed()) && performance.now() - queuedAt < 350 && this.samples.get(weaponId)?.some(Boolean)) this.shot(volume, pan, weaponId, distance, allowed); });
   }
-  step(sprint = false, crouched = false, { volume = 1, pan = 0, distance = 0, occluded = false, foot = 0 } = {}) {
+  step(sprint = false, crouched = false, { volume = 1, pan = 0, distance = 0, occluded = false, foot = 0, remote = false } = {}) {
     if (!this.context || this.context.state !== 'running' || this.muted || this.settings.volume <= 0 || volume <= 0.0001) return null;
     const c = this.context, source = c.createBufferSource(), gain = c.createGain(), filter = c.createBiquadFilter(), panner = c.createStereoPanner();
     source.buffer = this.stepSamples[foot === 1 ? 1 : 0]; source.playbackRate.value = 1;
-    gain.gain.value = Math.max(0, Math.min(1, volume)) * (crouched ? 0.23 : sprint ? 0.9 : 0.65);
+    gain.gain.value = Math.max(0, Math.min(1, volume)) * (crouched ? 0.23 : sprint ? 0.9 : 0.65) * (remote ? 1.35 : 1);
     filter.type = 'lowpass'; filter.frequency.value = occluded ? crouched ? 650 : 850 : Math.max(900, (crouched ? 1900 : 2600) * Math.exp(-distance / 30));
     panner.pan.value = Math.max(-1, Math.min(1, pan)); source.connect(filter).connect(gain).connect(panner); panner.connect(this.master);
     const voice = { source, gain, filter, panner };
@@ -126,6 +126,10 @@ export class GameAudio {
   stopReload() {
     const voice = this.reloadVoice; this.reloadVoice = null;
     if (voice && this.context?.state !== 'closed') { voice.gain.gain.setTargetAtTime(0, this.context.currentTime, 0.008); voice.source.stop(this.context.currentTime + 0.025); }
+  }
+  melee(volume = 1, pan = 0) {
+    if (this.muted || this.settings.volume <= 0) return;
+    this.burst(.12, .16 * volume, 2400, pan);
   }
   reload(weaponId = 'rifle', remainingSeconds = getWeapon(weaponId).reloadSeconds, allowed = null) {
     if (!this.context || this.context.state !== 'running' || this.muted || this.settings.volume <= 0 || remainingSeconds <= 0 || allowed && !allowed()) return null;

@@ -19,6 +19,7 @@ self.addEventListener('message', ({ data }) => {
     if (data.type === 'create') start(data);
     if (data.type === 'input') room?.setInput(playerId, data);
     if (data.type === 'loadout') room?.selectLoadout(playerId, data);
+    if (data.type === 'equipment') room?.interactEquipment(playerId, data);
     if (data.type === 'restart') room?.restart(playerId);
     if (data.type === 'leave') { stop(); send({ type: 'left' }); }
     if (data.type === 'ping') send({ type: 'pong', sent: data.sent });

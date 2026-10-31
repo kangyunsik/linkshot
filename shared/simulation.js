@@ -3,6 +3,7 @@ import { EMPTY_INPUT, sanitizeInput, movePlayer, clamp, angleDelta } from './mov
 import { WEAPONS, SKINS, getWeapon, getSkin, freshMagazines, damageAtDistance, shotAngles, isWeaponId, normalizeOwnedWeapons, ownsWeapon, weaponModel } from './catalog.js';
 import { getOutfit, getCharacter, CHARACTERS } from './outfits.js';
 import { roundReward, normalizeWeaponKills, weaponMastery } from './progression.js';
+import { EQUIPMENT_RULES, nearestDroppedWeapon, settleDroppedWeapon } from './equipment.js';
 
 const BOT_NAMES = ['GHOST', 'RIVET', 'ECHO', 'CINDER', 'STATIC', 'ONYX', 'NOVA'];
 const botId = () => globalThis.crypto?.randomUUID?.().slice(0, 8) || Math.random().toString(36).slice(2, 10);
@@ -46,7 +47,7 @@ export function playerBodyVolumes(player) {
   ];
   for (const side of [-1, 1]) {
     const shoulder = { x: side * 0.225, y: pose.bodyTop - 0.1, z: 0 };
-    const grip = side === 1 ? { x: 0.055, y: -0.13, z: 0.13 } : shape === 'pistol' ? { x: -0.04, y: -0.13, z: 0.1 } : { x: -0.06, y: -0.05, z: -0.12 };
+    const grip = side === 1 ? { x: 0.055, y: -0.13, z: 0.13 } : shape === 'knife' ? { x: -.2, y: -.12, z: -.08 } : shape === 'pistol' ? { x: -0.04, y: -0.13, z: 0.1 } : { x: -0.06, y: -0.05, z: -0.12 };
     const hand = { x: 0.1 + grip.x, y: 1.19 - crouch * 0.52 + grip.y * Math.cos(pitch) - grip.z * Math.sin(pitch), z: -0.16 + grip.y * Math.sin(pitch) + grip.z * Math.cos(pitch) };
     const delta = sub(hand, shoulder), length = Math.hypot(delta.x, delta.y, delta.z), distance = clamp(length, 0.001, 0.529);
     const direction = { x: delta.x / length, y: delta.y / length, z: delta.z / length }, pole = sub({ x: side * 0.4, y: 0.98 - crouch * 0.5, z: 0.08 }, shoulder);
@@ -165,7 +166,7 @@ export class Room {
     this.startedAt = clock(); this.endsAt = this.startedAt + this.roundSeconds * 1000;
     this.roundId = newRoundId(); this.result = null;
     this.lastActivity = this.startedAt;
-    this.spawnUses = new Map();
+    this.spawnUses = new Map(); this.droppedWeapons = new Map(); this.dropSerial = 0;
     for (let i = 0; i < clamp(Math.floor(Number(bots) || 0), 0, RULES.maxPlayers - 1); i++) this.addPlayer(`bot-${botId()}`, BOT_NAMES[i], true);
   }
 
@@ -177,7 +178,7 @@ export class Room {
       else throw new Error('방이 가득 찼습니다.');
     }
     const ownedWeapons = isBot ? WEAPONS.map(({ id }) => id) : normalizeOwnedWeapons(loadout.ownedWeapons);
-    const requested = getWeapon(isBot && !isWeaponId(loadout.weaponId) ? WEAPONS[[...this.players.values()].filter((p) => p.isBot).length % WEAPONS.length].id : loadout.weaponId).id;
+    const requested = isBot && !isWeaponId(loadout.weaponId) ? WEAPONS[[...this.players.values()].filter((p) => p.isBot).length % WEAPONS.length].id : isWeaponId(loadout.weaponId) ? loadout.weaponId : 'rifle';
     const chosenWeapon = ownsWeapon({ ownedWeapons }, requested) ? requested : 'rifle';
     const player = {
       id, name: cleanName(name), isBot, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, vy: 0,
@@ -231,6 +232,8 @@ export class Room {
     player.input = { ...EMPTY_INPUT, yaw: player.yaw, weaponId: player.weaponId };
     player.pendingShot = null; player.viewTime = null; player.burstLeft = 0; player.triggerSeq = null; player.triggerShotIndex = 0;
     player.killChain = 0; player.lastKillAt = null;
+    player.weaponSkinId = player.skinId; player.equipmentSeq = (player.equipmentSeq || 0) + 1;
+    player.lastEquipmentAction = 0; player.equipmentCooldownUntil = 0; player.stepDistance = 0;
     player.spawnExitPath = player.isBot ? (spawn.exitPath || []).map((p) => ({ ...p })) : [];
     player.history = []; this.recordPlayerHistory(player, this.clock());
   }
@@ -259,8 +262,10 @@ export class Room {
     // respawn. Those packets must not overwrite the new spawn's exit-facing
     // yaw (or re-arm an old trigger) during the snapshot delivery window.
     if (input.spawnCount !== undefined && input.spawnCount !== player.spawnCount) return;
+    if (input.equipmentSeq !== undefined && input.equipmentSeq !== player.equipmentSeq) return;
     if (player.hp <= 0 || this.phase !== 'active') { player.input = { ...EMPTY_INPUT, yaw: player.yaw, pitch: player.pitch, weaponId: player.weaponId }; player.pendingShot = null; player.burstLeft = 0; player.fireLatched = false; return; }
     const next = sanitizeInput(input, player.input), now = this.clock();
+    if (getWeapon(player.weaponId).melee) next.ads = false;
     player.viewTime = typeof input.viewTime === 'number' && Number.isFinite(input.viewTime) ? clamp(input.viewTime, now - 200, now) : null;
     if (next.fire && !player.input.fire && !player.pendingShot) player.pendingShot = { newTrigger: true, fireSeq: Number.isSafeInteger(input.fireSeq) && input.fireSeq >= 0 ? input.fireSeq : null, yaw: next.yaw, pitch: next.pitch, ads: next.ads, at: now, movement: { grounded: player.grounded, sprinting: player.sprinting || next.sprint && next.forward > 0 && !next.ads && !player.crouching, moveSpeed: Math.max(player.moveSpeed || 0, Math.hypot(next.forward, next.strafe)) }, viewTime: typeof input.viewTime === 'number' && Number.isFinite(input.viewTime) ? clamp(input.viewTime, now - 200, now) : null };
     player.input = next;
@@ -285,16 +290,43 @@ export class Room {
   }
 
   startReload(player, now = this.clock()) {
-    if (!player || this.players.get(player.id) !== player || player.hp <= 0 || this.phase !== 'active' || player.reloadUntil || now < player.switchUntil || player.ammo >= getWeapon(player.weaponId).magazine) return false;
+    if (!player || getWeapon(player.weaponId).melee || this.players.get(player.id) !== player || player.hp <= 0 || this.phase !== 'active' || player.reloadUntil || now < player.switchUntil || player.ammo >= getWeapon(player.weaponId).magazine) return false;
     player.burstLeft = 0; player.pendingShot = null; player.reloadUntil = now + getWeapon(player.weaponId).reloadSeconds * 1000;
     this.events.push({ type: 'reload', id: player.id, weaponId: player.weaponId, reloadUntil: player.reloadUntil }); return true;
+  }
+
+  dropWeapon(player, now = this.clock()) {
+    if (!isWeaponId(player.weaponId)) return null;
+    const direction = aimDirection(player.yaw, 0), origin = { x: player.x, y: player.y + .4, z: player.z };
+    const offset = Math.max(0, Math.min(.65, wallDistance(origin, direction, .85, this.world) - .2));
+    const drop = { id: `${this.roundId}-drop-${++this.dropSerial}`, weaponId: player.weaponId, skinId: player.weaponSkinId || player.skinId, ammo: player.ammo, x: player.x + direction.x * offset, y: player.y + .65, z: player.z + direction.z * offset, yaw: player.yaw, vy: 0, grounded: false, pickupAt: now + 200, expiresAt: now + EQUIPMENT_RULES.lifetimeMs, nextFireAt: player.nextFireAt };
+    while (this.droppedWeapons.size >= EQUIPMENT_RULES.maxDrops) this.droppedWeapons.delete(this.droppedWeapons.keys().next().value);
+    this.droppedWeapons.set(drop.id, drop); return drop;
+  }
+
+  interactEquipment(id, data, now = this.clock()) {
+    const player = this.players.get(id);
+    if (!player || player.isBot || player.hp <= 0 || this.phase !== 'active' || data.roundId !== this.roundId || data.spawnCount !== player.spawnCount || data.equipmentSeq !== player.equipmentSeq || !Number.isSafeInteger(data.actionSeq) || data.actionSeq <= player.lastEquipmentAction) return false;
+    player.lastEquipmentAction = data.actionSeq;
+    if (now < player.equipmentCooldownUntil) return false;
+    const pickup = nearestDroppedWeapon(player, this.droppedWeapons.values(), this.world, now);
+    if (!pickup && !isWeaponId(player.weaponId)) return false;
+    if (pickup) this.droppedWeapons.delete(pickup.id);
+    this.dropWeapon(player, now);
+    player.weaponId = pickup?.weaponId || 'knife'; player.weaponSkinId = pickup?.skinId || player.skinId;
+    player.ammo = pickup?.ammo || 0; player.magazines[player.weaponId] = player.ammo;
+    player.equipmentSeq++; player.equipmentCooldownUntil = now + EQUIPMENT_RULES.actionMs;
+    player.switchUntil = now + EQUIPMENT_RULES.equipMs; player.nextFireAt = Math.max(player.nextFireAt, pickup?.nextFireAt || 0, player.switchUntil);
+    player.reloadUntil = 0; player.burstLeft = 0; player.pendingShot = null; player.shotHeat = 0;
+    player.input = { ...EMPTY_INPUT, yaw: player.yaw, pitch: player.pitch, weaponId: player.weaponId }; player.fireLatched = false;
+    this.events.push({ type: 'equipment', id, weaponId: player.weaponId, equipmentSeq: player.equipmentSeq }); return true;
   }
 
   restart(id) {
     if (id !== this.hostId) throw new Error('방장만 새 라운드를 시작할 수 있습니다.');
     this.phase = 'active'; this.startedAt = this.clock(); this.endsAt = this.startedAt + this.roundSeconds * 1000;
     this.roundId = newRoundId(); this.result = null;
-    this.events = [{ type: 'restart' }];
+    this.events = [{ type: 'restart' }]; this.droppedWeapons.clear();
     this.spawnUses.clear(); for (const player of this.players.values()) player.hp = 0;
     for (const player of this.players.values()) { player.kills = 0; player.deaths = 0; player.weaponKills = {}; this.spawn(player); }
   }
@@ -399,6 +431,7 @@ export class Room {
     const now = this.clock();
     if (this.phase !== 'active') return;
     if (now >= this.endsAt) { this.finish(); return; }
+    for (const [id, drop] of this.droppedWeapons) { if (now >= drop.expiresAt) this.droppedWeapons.delete(id); else settleDroppedWeapon(drop, dt, this.world); }
     for (const player of this.players.values()) {
       if (player.hp <= 0) { if (now >= player.respawnAt) this.spawn(player); else continue; }
       const input = player.isBot ? this.botInput(player, now, dt) : now - player.lastInput > 500 ? { ...EMPTY_INPUT, yaw: player.yaw, pitch: player.pitch, weaponId: player.weaponId } : player.input;
@@ -412,7 +445,7 @@ export class Room {
       const triggerReady = (input.fire || shot) && (weapon.automatic || !player.fireLatched || shot);
       if (weapon.burstCount && !player.burstLeft && triggerReady && !player.reloadUntil && player.ammo > 0 && now >= player.nextFireAt) player.burstLeft = weapon.burstCount;
       const ready = weapon.burstCount ? player.burstLeft > 0 : triggerReady;
-      if (ready && !player.reloadUntil && player.ammo > 0 && now >= player.nextFireAt) { this.shoot(player, now, shot?.ads ?? input.ads, shot || (!player.isBot && player.viewTime != null ? { viewTime: player.viewTime } : null)); player.pendingShot = null; }
+      if (ready && !player.reloadUntil && (weapon.melee || player.ammo > 0) && now >= player.nextFireAt && now >= player.switchUntil) { this.shoot(player, now, shot?.ads ?? input.ads, shot || (!player.isBot && player.viewTime != null ? { viewTime: player.viewTime } : null)); player.pendingShot = null; }
       player.fireLatched = input.fire;
       player.magazines[player.weaponId] = player.ammo;
       if (this.phase !== 'active') break;
@@ -421,8 +454,10 @@ export class Room {
   }
 
   shoot(player, now, ads = false, shot = null) {
-    if (!player || player.hp <= 0 || player.ammo <= 0 || this.phase !== 'active' || this.players.get(player.id) !== player) return false;
+    if (!player || player.hp <= 0 || this.phase !== 'active' || this.players.get(player.id) !== player) return false;
     const weapon = getWeapon(player.weaponId);
+    if (weapon.melee) return this.melee(player, now, shot);
+    if (player.ammo <= 0) return false;
     if (shot?.newTrigger) { player.triggerSeq = shot.fireSeq; player.triggerShotIndex = 0; }
     player.triggerShotIndex++; player.shotSerial++;
     player.ammo--; player.lastShot = now; player.protectedUntil = 0;
@@ -450,13 +485,37 @@ export class Room {
       hit.headshot ||= headshot; hits.set(victim.id, hit);
     }
     player.shotHeat = Math.min(1, (player.shotHeat || 0) + (weapon.type === 'ASSAULT' ? 0.25 : 0.17));
-    this.events.push({ type: 'shot', shotId: `${this.roundId}-${player.id}-${player.shotSerial}`, spawnCount: player.spawnCount, fireSeq: player.triggerSeq, shotIndex: player.triggerShotIndex, id: player.id, weaponId: weapon.id, origin, rays, end: rays[0].end, hit: rays.find((r) => r.hit)?.hit || null, headshot: rays.some((r) => r.hit && r.headshot) });
-    for (const { victim, damage: rawDamage, headshot } of hits.values()) {
+    this.events.push({ type: 'shot', shotId: `${this.roundId}-${player.id}-${player.shotSerial}`, spawnCount: player.spawnCount, equipmentSeq: player.equipmentSeq, fireSeq: player.triggerSeq, shotIndex: player.triggerShotIndex, id: player.id, weaponId: weapon.id, origin, rays, end: rays[0].end, hit: rays.find((r) => r.hit)?.hit || null, headshot: rays.some((r) => r.hit && r.headshot) });
+    for (const { victim, damage: rawDamage, headshot } of hits.values()) this.applyDamage(player, victim, rawDamage, headshot, origin, weapon, now);
+    if (player.ammo === 0) this.startReload(player, now);
+    return true;
+  }
+
+  melee(player, now, shot) {
+    const weapon = getWeapon(player.weaponId);
+    if (now < player.nextFireAt || now < player.switchUntil || player.reloadUntil) return false;
+    if (shot?.newTrigger) { player.triggerSeq = shot.fireSeq; player.triggerShotIndex = 0; }
+    player.triggerShotIndex++; player.shotSerial++; player.lastShot = now; player.protectedUntil = 0; player.nextFireAt = now + weapon.fireSeconds * 1000;
+    // A blade sweep is forgiving at arm's length, never lag-rewound and never
+    // allowed through cover. Only the nearest contact receives damage.
+    let contact = null;
+    for (const yaw of [0, -.13, .13]) for (const pitch of [0, -.1, .1]) {
+      const trace = traceShot(player, this.players.values(), now, this.world, aimDirection((shot?.yaw ?? player.yaw) + yaw, (shot?.pitch ?? player.pitch) + pitch), weapon.range);
+      if (!contact || (trace.victim || trace.protectedTarget) && (!(contact.victim || contact.protectedTarget) || trace.distance < contact.distance)) contact = trace;
+    }
+    const { origin, end, protectedTarget, victim } = contact;
+    this.events.push({ type: 'shot', melee: true, shotId: `${this.roundId}-${player.id}-${player.shotSerial}`, spawnCount: player.spawnCount, equipmentSeq: player.equipmentSeq, fireSeq: player.triggerSeq, shotIndex: player.triggerShotIndex, id: player.id, weaponId: weapon.id, origin, end, hit: victim?.id || null, headshot: false, rays: [{ end, hit: victim?.id || null, protectedTarget, headshot: false }] });
+    if (victim) this.applyDamage(player, victim, weapon.damage, false, origin, weapon, now);
+    return true;
+  }
+
+  applyDamage(player, victim, rawDamage, headshot, origin, weapon, now) {
       const damage = Math.round(rawDamage);
       victim.hp = Math.max(0, victim.hp - damage);
       if (damage > 0) victim.hitSlowUntil = victim.hp > 0 ? now + RULES.hitSlowSeconds * 1000 : 0;
       this.events.push({ type: 'damage', id: victim.id, attacker: player.id, damage, headshot, origin, hitSlowUntil: victim.hitSlowUntil });
       if (victim.hp <= 0) {
+        this.dropWeapon(victim, now); victim.reloadUntil = 0;
         victim.deaths++; victim.diedAt = now; victim.loadoutSelecting = false; victim.pendingShot = null; victim.burstLeft = 0; victim.respawnAt = now + RULES.respawnSeconds * 1000;
         victim.hitSlowUntil = 0;
         victim.killChain = 0; victim.lastKillAt = null;
@@ -469,9 +528,6 @@ export class Room {
         this.events.push({ type: 'kill', killId: `${this.roundId}-${player.id}-kill-${player.kills}`, at: now, killer: player.name, victim: victim.name, killerId: player.id, victimId: victim.id, weaponId: weapon.id, weaponLevel: mastery.level, weaponKills: mastery.kills, killChain: player.killChain, headshot });
         if (player.kills >= this.fragLimit) this.finish();
       }
-    }
-    if (player.ammo === 0) this.startReload(player, now);
-    return true;
   }
 
   finish() {
@@ -495,11 +551,12 @@ export class Room {
       room: { protocolVersion: NETWORK_PROTOCOL, code: this.code, roundId: this.roundId, result: this.result, mapId: this.world.id, botDifficulty: this.botDifficulty, mode: this.mode, hostId: this.hostId, phase: this.phase, timeLeft: Math.max(0, Math.ceil((this.endsAt - now) / 1000)), fragLimit: this.fragLimit, roundSeconds: this.roundSeconds },
       players: [...this.players.values()].map((p) => ({
         id: p.id, name: p.name, isBot: p.isBot, x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yaw: p.yaw, pitch: p.pitch,
-        vx: p.vx, vy: p.vy, vz: p.vz, grounded: p.grounded, crouching: p.crouching, crouchAmount: p.crouchAmount, sprinting: p.sprinting, moveSpeed: p.moveSpeed, shotHeat: p.shotHeat, hp: p.hp, ammo: p.ammo, kills: p.kills, deaths: p.deaths, spawnId: p.spawnId, spawnLevel: p.spawnLevel, lastDeath: p.lastDeath,
+        vx: p.vx, vy: p.vy, vz: p.vz, grounded: p.grounded, crouching: p.crouching, crouchAmount: p.crouchAmount, sprinting: p.sprinting, moveSpeed: p.moveSpeed, stepDistance: +p.stepDistance.toFixed(3), shotHeat: p.shotHeat, hp: p.hp, ammo: p.ammo, kills: p.kills, deaths: p.deaths, spawnId: p.spawnId, spawnLevel: p.spawnLevel, lastDeath: p.lastDeath,
         reloadUntil: p.reloadUntil, respawnAt: p.respawnAt, protectedUntil: p.protectedUntil, hitSlowUntil: p.hitSlowUntil,
-        weaponId: p.weaponId, nextWeaponId: p.nextWeaponId, loadoutSelecting: p.loadoutSelecting, skinId: p.skinId, outfitId: p.outfitId, characterId: p.characterId, magazines: { ...p.magazines }, switchUntil: p.switchUntil, nextFireAt: p.nextFireAt,
+        weaponId: p.weaponId, weaponSkinId: p.weaponSkinId, equipmentSeq: p.equipmentSeq, nextWeaponId: p.nextWeaponId, loadoutSelecting: p.loadoutSelecting, skinId: p.skinId, outfitId: p.outfitId, characterId: p.characterId, magazines: { ...p.magazines }, switchUntil: p.switchUntil, nextFireAt: p.nextFireAt,
         spawnCount: p.spawnCount, ownedWeapons: [...p.ownedWeapons], weaponKills: { ...p.weaponKills }, masteryKills: { ...p.masteryKills }, weaponLevel: weaponMastery(p.masteryKills[p.weaponId]).level,
       })),
+      droppedWeapons: [...this.droppedWeapons.values()].map(({ vy, nextFireAt, ...drop }) => ({ ...drop, x: +drop.x.toFixed(3), y: +drop.y.toFixed(3), z: +drop.z.toFixed(3) })),
       events: [...this.events],
     };
     if (flushEvents) this.events.length = 0;

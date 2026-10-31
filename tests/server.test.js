@@ -159,3 +159,21 @@ test('LAN loadout protocol rejects live changes and applies a dead selection on 
   c.send({ type: 'loadout', weaponId: 'sniper', open: false }); await barrier(); assert.equal(p.weaponId, 'rifle'); assert.equal(p.nextWeaponId, 'sniper');
   p.respawnAt = Date.now() - 1; app.tick(); assert.equal(p.weaponId, 'sniper'); assert.equal(p.hp, 100); assert.equal(p.ammo, 5);
 });
+
+test('real LAN equipment commands synchronize drops, late joins and atomic pickups without granting ownership', async (t) => {
+  const app = createGameServer({ port: 0, host: '127.0.0.1', loop: false }), info = await app.listen(); t.after(() => app.close());
+  const base = `http://127.0.0.1:${info.port}`, a = await client(base), b = await client(base); t.after(() => { a.socket.terminate(); b.socket.terminate(); });
+  let pending = message(a.socket, 'joined'); a.send({ type: 'create', bots: 0 }); const joined = await pending, room = app.rooms.get(joined.room.code), player = room.players.get(joined.id);
+  let now = Date.now(); room.clock = () => now; room.world = { ...room.world, width: 100, depth: 100, obstacles: [] }; Object.assign(player, { x: 0, y: 0, z: 0, yaw: 0, ammo: 7 });
+  const request = { type: 'equipment', roundId: room.roundId, spawnCount: player.spawnCount, equipmentSeq: player.equipmentSeq, actionSeq: 1 };
+  const barrier = async (c) => { const wait = message(c.socket, 'pong'); c.send({ type: 'ping' }); await wait; };
+  a.send(request); a.send(request); await barrier(a); assert.equal(player.weaponId, 'knife'); assert.equal(room.droppedWeapons.size, 1);
+  for (let i = 0; i < 30; i++) { now += 1000 / 60; room.tick(1 / 60); }
+  pending = message(b.socket, 'joined'); b.send({ type: 'join', code: room.code }); const second = await pending;
+  assert.equal(second.droppedWeapons.length, 1); assert.equal(second.droppedWeapons[0].ammo, 7); assert.equal(second.players.find((p) => p.id === player.id).weaponId, 'knife');
+  const guest = room.players.get(second.id); Object.assign(guest, { x: 0, y: 0, z: -.65, yaw: Math.PI });
+  b.send({ ...request, spawnCount: guest.spawnCount, equipmentSeq: guest.equipmentSeq }); await barrier(b);
+  assert.equal(guest.weaponId, 'rifle'); assert.equal(guest.ammo, 7); assert.equal(room.droppedWeapons.size, 1);
+  const state = message(a.socket, 'state'); app.broadcast(); assert.equal((await state).players.find((p) => p.id === guest.id).ammo, 7);
+  a.send({ type: 'input', equipmentSeq: request.equipmentSeq, spawnCount: player.spawnCount, fire: true }); await barrier(a); assert.equal(player.input.fire, false);
+});

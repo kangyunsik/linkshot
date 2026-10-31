@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { MAPS } from '../../shared/world.js';
 
-test.use({ baseURL: process.env.SOLO_SOURCE_TEST ? `http://127.0.0.1:${process.env.LAN_TEST_PORT || 3000}` : 'http://127.0.0.1:4173' });
+test.use({ baseURL: process.env.SOLO_SOURCE_TEST ? `http://127.0.0.1:${process.env.LAN_TEST_PORT || 3000}` : `http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}` });
 test.beforeEach(async ({ context }) => {
   if (process.env.SOLO_SOURCE_TEST) await context.route('**/runtime-config.js', (route) => route.fulfill({ contentType: 'text/javascript', body: "export const APP_MODE = 'solo'; export const PROFILE_STORAGE = 'browser';" }));
   await context.addInitScript(() => { try { localStorage.setItem('sector07-settings', JSON.stringify({ sensitivity: 1, fov: 82, volume: 0, quality: 'low' })); } catch { /* about:blank */ } });

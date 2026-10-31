@@ -68,6 +68,9 @@ test('portable launcher serves embedded files on loopback without Node or extern
   update = await operate({ type: 'character', characterId: 'female' }); assert.equal(update.status, 200); assert.equal(update.data.profile.characterId, 'female'); assert.equal(update.data.profile.points, 20); assert.equal(update.data.profile.equippedOutfitId, 'runner');
   assert.equal((await operate({ type: 'character', characterId: '__proto__' })).status, 409);
   assert.equal(JSON.parse(await readFile(path.join(profileData, 'profile.json'), 'utf8')).characterId, 'female');
+  update = await operate({ type: 'round', roundId: 'native-knife-0001', kills: 1, weaponKills: { knife: 1 } }); assert.equal(update.data.profile.weaponKills.knife, 1);
+  update = await operate({ type: 'round', roundId: 'native-knife-0001', kills: 1, weaponKills: { knife: 1 } }); assert.equal(update.data.profile.weaponKills.knife, 1);
+  assert.equal((await operate({ type: 'purchaseWeapon', weaponId: 'knife' })).status, 409);
   assert.equal((await fetch(`${url}/api/profile`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://unrelated.invalid' }, body: '{}' })).status, 403);
   assert.equal((await operate({ type: 'round', points: 999999 })).status, 400);
 });

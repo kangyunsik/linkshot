@@ -30,7 +30,7 @@ export function sanitizeInput(data, previous = EMPTY_INPUT) {
     yaw: finite(data.yaw, previous.yaw) % (Math.PI * 2), pitch: clamp(finite(data.pitch, previous.pitch), -1.48, 1.48),
     jump: data.jump === true, sprint: data.sprint === true, fire: data.fire === true, reload: data.reload === true,
     crouch: data.crouch === true,
-    ads: data.ads === true, weaponId: isWeaponId(data.weaponId) ? data.weaponId : previous.weaponId || DEFAULT_WEAPON,
+    ads: data.ads === true, weaponId: isWeaponId(data.weaponId) || data.weaponId === 'knife' ? data.weaponId : previous.weaponId || DEFAULT_WEAPON,
   };
 }
 
@@ -132,6 +132,9 @@ export function movePlayer(player, input, dt, world = WORLD, now = Date.now()) {
       if (player.y <= floor) { player.y = floor; player.vy = 0; player.grounded = true; }
     }
   }
-  player.moveSpeed = dt > 0 ? Math.hypot(player.x - startX, player.z - startZ) / dt : 0;
+  const travelled = Math.hypot(player.x - startX, player.z - startZ);
+  player.moveSpeed = dt > 0 ? travelled / dt : 0;
+  // Grounded travel survives snapshots which can end on an instantaneous stop.
+  if (!airborne && player.grounded) player.stepDistance = (player.stepDistance || 0) + travelled;
   return player;
 }

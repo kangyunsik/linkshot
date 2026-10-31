@@ -1,6 +1,7 @@
 import * as THREE from '/vendor/three.module.js';
 import { RULES, getMap, hasLineOfSight, playerPose, damageBearing } from '/shared/world.js';
-import { WEAPONS, getWeapon, getSkin, shotSpread, ownsWeapon } from '/shared/catalog.js';
+import { WEAPONS, EQUIPMENT, getWeapon, getSkin, shotSpread, ownsWeapon } from '/shared/catalog.js';
+import { nearestDroppedWeapon } from '/shared/equipment.js';
 import { EMPTY_INPUT, movePlayer, clamp, angleDelta } from '/shared/movement.js';
 import { drawTacticalMap } from './map.js';
 import { WeaponModels, disposeModel } from './weapon-model.js';
@@ -74,6 +75,7 @@ export class FPSGame {
     this.characterId = getCharacter(characterId).id;
     this.models = new WeaponModels(); this.fireLatched = false; this.switchAnimation = 0; this.localNextFire = 0;
     this.damageDirections = [];
+    this.groundItems = new Map(); this.droppedWeapons = []; this.equipmentActionSeq = 0;
     this.firePressedUntil = 0;
     this.hud = Object.fromEntries(['hud-health', 'hud-ammo', 'hud-timer', 'hud-kd', 'health-fill', 'respawn-overlay', 'respawn-count', 'crosshair', 'reload-indicator', 'reload-hint', 'protection-hint', 'damage-vignette', 'hitmarker', 'kill-confirmation', 'hud-fps'].map((id) => [id, $(id)]));
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -270,10 +272,11 @@ export class FPSGame {
     this.weapon = new THREE.Group(); this.camera.add(this.weapon); this.weaponModels = new Map();
     $('weapon-slots').replaceChildren();
     $('weapon-slots').style.setProperty('--weapon-count', WEAPONS.length);
-    for (const weapon of WEAPONS) {
+    for (const weapon of EQUIPMENT) {
       const model = this.models.create(weapon.id, this.skinId, true, this.outfitId, this.characterId); model.visible = false;
       model.traverse((object) => object.layers.set(VIEWMODEL_LAYER));
       this.weapon.add(model); this.weaponModels.set(weapon.id, model);
+      if (weapon.melee) continue;
       const slot = document.createElement('div'); slot.className = 'weapon-slot'; slot.dataset.weapon = weapon.id;
       const key = document.createElement('kbd'); key.textContent = weapon.slot;
       const name = document.createElement('b'); name.textContent = weapon.name;
@@ -285,25 +288,33 @@ export class FPSGame {
     this.weapon.position.set(0.18, -0.20, -0.54); this.activateWeapon(this.requestedWeaponId);
   }
 
-  activateWeapon(id) {
-    if (this.activeWeaponId === id) return;
+  activateWeapon(id, skinId = this.skinId) {
+    if (this.activeWeaponId === id && this.activeModel?.userData.skinId === skinId) return;
     this.audio.stopReload?.();
     this.activeWeaponId = getWeapon(id).id;
+    const previous = this.weaponModels.get(this.activeWeaponId);
+    if (previous.userData.skinId !== skinId) {
+      this.weapon.remove(previous);
+      if (this.graphicsPreparing) this.retiredGraphics.push(() => disposeModel(previous)); else disposeModel(previous);
+      const replacement = this.models.create(id, skinId, true, this.outfitId, this.characterId, this.skinId);
+      replacement.traverse((object) => object.layers.set(VIEWMODEL_LAYER)); this.weapon.add(replacement); this.weaponModels.set(id, replacement);
+    }
     for (const [weaponId, model] of this.weaponModels) model.visible = weaponId === this.activeWeaponId;
     this.activeModel = this.weaponModels.get(this.activeWeaponId); this.muzzleFlash = this.activeModel.userData.flash;
-    this.recoil = 0; this.switchAnimation = 1; this.muzzleUntil = 0; this.hadReload = false; this.localBurstLeft = 0;
+    this.recoil = 0; this.switchAnimation = 1; this.muzzleUntil = 0; this.hadReload = false; this.localBurstLeft = 0; this.swingUntil = 0;
     this.aimRecoil.reset(this.aimRecoil.aimPitch);
   }
 
   playLocalShot(weapon, now, predicted = true) {
     if (this.disposed || this.local?.hp <= 0 || !this.local || this.room?.phase !== 'active') return false;
     const deathAt = this.deathAt, roundId = this.room.roundId;
-    this.audio.shot(1, 0, weapon.id, 0, () => !this.disposed && this.local?.hp > 0 && this.room?.phase === 'active' && this.room.roundId === roundId && this.deathAt === deathAt);
-    this.recoil = weapon.recoil; this.muzzleUntil = now + 40; this.lastFire = now;
+    if (weapon.melee) { this.audio.melee?.(); this.swingUntil = now + 360; }
+    else this.audio.shot(1, 0, weapon.id, 0, () => !this.disposed && this.local?.hp > 0 && this.room?.phase === 'active' && this.room.roundId === roundId && this.deathAt === deathAt);
+    this.recoil = weapon.recoil; this.muzzleUntil = weapon.melee ? 0 : now + 40; this.lastFire = now;
     this.localFirePending = false;
     if (predicted) this.shotFeedback.predict(this.fireSeq, ++this.localShotIndex);
     if (weapon.type === 'SNIPER') { this.ads = false; $('scope-overlay').hidden = true; $('ads-reticle').hidden = true; }
-    if (this.local?.hp > 0) {
+    if (this.local?.hp > 0 && !weapon.melee) {
       this.aimRecoil.kick(weapon.recoil * (weapon.type === 'ASSAULT' ? 0.008 : 0.0045), now); this.camera.rotation.x = this.pitch; this.send(this.input());
     }
     this.muzzleFlash.rotation.y = Math.random() * Math.PI;
@@ -353,7 +364,7 @@ export class FPSGame {
     document.addEventListener('mousedown', (event) => {
       if (!this.locked || this.local?.hp <= 0 || !this.local || this.room?.phase !== 'active') return;
       if (event.button === 0) { this.fireSeq++; this.localShotIndex = 0; this.fireHeld = true; this.localFirePending = true; this.firePressedUntil = performance.now() + 150; this.send(this.input()); }
-      if (event.button === 2) this.ads = true;
+      if (event.button === 2 && !getWeapon(this.activeWeaponId).melee) this.ads = true;
     }, options);
     document.addEventListener('mouseup', (event) => { if (event.button === 0) { this.fireHeld = false; this.fireLatched = false; if (this.locked) this.send(this.input()); } if (event.button === 2) this.ads = false; }, options);
     // Mouse-up may land on an overlay after ADS loses pointer lock at round
@@ -375,6 +386,10 @@ export class FPSGame {
       }
       if (event.code === 'Tab' && this.room?.phase === 'active') { event.preventDefault(); $('scoreboard-overlay').hidden = false; renderScoreboard($('scoreboard-table'), this.players, this.selfId); }
       if (!this.locked) return;
+      if (event.code === 'KeyG' && !event.repeat && !this.keys.has('KeyG') && this.local?.hp > 0 && this.room?.phase === 'active') {
+        event.preventDefault(); this.cancelAttack(); this.keys.add('KeyG'); this.send(this.input());
+        this.send({ type: 'equipment', roundId: this.room.roundId, spawnCount: this.local.spawnCount, equipmentSeq: this.local.equipmentSeq, actionSeq: ++this.equipmentActionSeq }); return;
+      }
       if (/^(Digit|Numpad)\d$/.test(event.code)) event.preventDefault();
       if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'ControlLeft', 'ControlRight', 'Tab'].includes(event.code)) event.preventDefault();
       this.keys.add(event.code);
@@ -405,11 +420,15 @@ export class FPSGame {
     document.querySelector('.respawn-loadout-card>small').textContent = '사망 후 최대 15초 대기 · 목록을 클릭해 선택 · 처음 10종은 숫자 1–9, 0 지원';
   }
 
-  clearInput(spawnCount = this.local?.spawnCount) {
-    this.keys.clear(); this.fireHeld = false; this.fireLatched = false; this.localFirePending = false; this.firePressedUntil = 0; this.ads = false; this.reloadPressedUntil = 0; this.jumpPressedUntil = 0; this.localBurstLeft = 0;
+  cancelAttack() {
+    this.fireHeld = false; this.fireLatched = false; this.localFirePending = false; this.firePressedUntil = 0; this.ads = false; this.reloadPressedUntil = 0; this.localBurstLeft = 0;
     $('scope-overlay').hidden = true; $('ads-reticle').hidden = true;
+  }
+
+  clearInput(spawnCount = this.local?.spawnCount) {
+    this.keys.clear(); this.cancelAttack(); this.jumpPressedUntil = 0;
     $('scoreboard-overlay').hidden = true;
-    this.send({ type: 'input', ...EMPTY_INPUT, yaw: this.yaw, pitch: this.pitch, weaponId: this.requestedWeaponId, spawnCount });
+    this.send({ type: 'input', ...EMPTY_INPUT, yaw: this.yaw, pitch: this.pitch, weaponId: this.requestedWeaponId, spawnCount, equipmentSeq: this.local?.equipmentSeq });
   }
 
   async lock() {
@@ -443,6 +462,7 @@ export class FPSGame {
     const local = data.players.find((p) => p.id === id);
     if (!local) return;
     const respawned = !this.local || this.local.spawnCount !== local.spawnCount || (this.local.hp <= 0 && local.hp > 0) || data.events.some((e) => e.type === 'restart');
+    const equipmentChanged = this.local && (this.local.equipmentSeq !== local.equipmentSeq || this.local.weaponId !== local.weaponId);
     if (this.local?.hp > 0 && local.hp <= 0) {
       this.deathAt = performance.now(); this.clearInput(); this.recoil = 0; this.muzzleUntil = 0;
       this.aimRecoil.reset(this.aimRecoil.aimPitch); this.muzzleFlash.visible = false; this.muzzleLight.intensity = 0;
@@ -461,9 +481,13 @@ export class FPSGame {
       reconcileMovement(this.predicted, local, this.world);
     }
     this.local = local;
+    if (equipmentChanged && !respawned) {
+      this.requestedWeaponId = local.weaponId; this.cancelAttack(); this.send(this.input());
+      this.localNextFire = performance.now() + Math.max(0, local.nextFireAt - this.serverNow);
+    }
     this.predicted.weaponId = local.weaponId;
     this.predicted.shotHeat = local.shotHeat || 0;
-    this.activateWeapon(local.weaponId);
+    this.activateWeapon(local.weaponId, local.weaponSkinId || local.skinId);
     const present = new Set();
     for (const player of data.players) {
       if (player.id === id) continue;
@@ -475,14 +499,14 @@ export class FPSGame {
       if (!this.remote.has(player.id)) this.remote.set(player.id, this.makeAvatar(player));
       const avatar = this.remote.get(player.id); avatar.target = player;
       avatar.targetTime = data.serverTime; avatar.renderTime ??= data.serverTime;
-      if (avatar.weapon.userData.weaponId !== player.weaponId) {
+      if (avatar.weapon.userData.weaponId !== player.weaponId || avatar.weapon.userData.skinId !== (player.weaponSkinId || player.skinId)) {
         const previous = avatar.weapon; avatar.group.remove(previous);
         if (this.graphicsPreparing) this.retiredGraphics.push(() => disposeModel(previous)); else disposeModel(previous);
-        avatar.weapon = this.models.create(player.weaponId, player.skinId, false, player.outfitId, player.characterId); avatar.weapon.position.set(0.19, 1.05, -0.22); avatar.group.add(avatar.weapon);
+        avatar.weapon = this.models.create(player.weaponId, player.weaponSkinId || player.skinId, false, player.outfitId, player.characterId); avatar.group.add(avatar.weapon);
       }
     }
     for (const [remoteId, avatar] of this.remote) if (!present.has(remoteId)) { this.scene.remove(avatar.group); this.disposeObject(avatar.group, false); this.remote.delete(remoteId); }
-    this.updateHud();
+    this.syncDroppedWeapons(data.droppedWeapons || []); this.updateHud();
     for (const event of data.events) this.handleEvent(event);
     if (data.room.phase === 'ended') {
       this.closeLoadout(false);
@@ -498,11 +522,12 @@ export class FPSGame {
   }
 
   updateHud() {
-    const local = this.local, weapon = getWeapon(local.weaponId), lowAmmo = local.ammo <= Math.ceil(weapon.magazine * 0.2);
+    const local = this.local, weapon = getWeapon(local.weaponId), lowAmmo = !weapon.melee && local.ammo <= Math.ceil(weapon.magazine * 0.2);
     this.hud['hud-health'].textContent = local.hp;
     this.hud['health-fill'].style.width = `${local.hp}%`;
     this.hud['health-fill'].style.background = local.hp < 35 ? '#ff7057' : '#a3dbc9';
-    this.hud['hud-ammo'].textContent = local.ammo.toString().padStart(2, '0');
+    this.hud['hud-ammo'].textContent = weapon.melee ? '—' : local.ammo.toString().padStart(2, '0');
+    $('hud-ammo-reserve').textContent = weapon.melee ? 'MELEE' : '/ ∞';
     this.hud['hud-ammo'].style.color = lowAmmo ? '#ff876a' : '';
     this.hud['hud-timer'].textContent = clockText(this.room.timeLeft);
     $('hud-frag-limit').textContent = `FIRST TO ${this.room.fragLimit}`;
@@ -513,7 +538,7 @@ export class FPSGame {
     this.hud['reload-indicator'].hidden = !reloading || local.hp <= 0;
     this.hud['reload-hint'].textContent = reloading ? 'RELOADING...' : local.switchUntil > this.serverNow ? 'EQUIPPING...' : lowAmmo ? '[ R ] 재장전' : `${weapon.caliber} · ${weapon.type}`;
     $('hud-weapon-name').textContent = weapon.name; $('hud-weapon-action').textContent = weapon.action;
-    $('hud-skin-name').textContent = getSkin(local.skinId).name;
+    $('hud-skin-name').textContent = getSkin(local.weaponSkinId || local.skinId).name;
     $('hud-stance').hidden = !local.crouching || local.hp <= 0;
     $('hud-map-name').textContent = this.world.name; $('scoreboard-map-name').textContent = this.world.name;
     this.hud['reload-indicator'].querySelector('i').style.animationDuration = `${weapon.reloadSeconds}s`;
@@ -545,6 +570,30 @@ export class FPSGame {
     $('hud-room-code').textContent = this.room.code;
   }
 
+  syncDroppedWeapons(drops) {
+    this.droppedWeapons = drops; const present = new Set(drops.map((drop) => drop.id));
+    for (const [id, item] of this.groundItems) if (!present.has(id)) { this.scene.remove(item.group); this.disposeObject(item.group, false); this.groundItems.delete(id); }
+    for (const drop of drops) {
+      if (!this.groundItems.has(drop.id)) {
+        const group = new THREE.Group(), model = this.models.create(drop.weaponId, drop.skinId); group.name = 'dropped-weapon'; group.userData.dropId = drop.id;
+        model.rotation.z = Math.PI / 2; model.updateMatrixWorld(true); model.position.y = .025 - new THREE.Box3().setFromObject(model).min.y; group.add(model);
+        const marker = new THREE.Mesh(new THREE.TorusGeometry(.28, .008, 4, 24), new THREE.MeshBasicMaterial({ color: '#a4dcd6', transparent: true, opacity: .6, depthWrite: false }));
+        marker.rotation.x = -Math.PI / 2; marker.position.y = .015; group.add(marker);
+        group.position.set(drop.x, drop.y, drop.z); group.rotation.y = drop.yaw; this.scene.add(group); this.groundItems.set(drop.id, { group, marker, target: drop });
+      }
+      this.groundItems.get(drop.id).target = drop;
+    }
+  }
+
+  updateEquipmentPrompt() {
+    const prompt = $('equipment-hint'), active = this.local?.hp > 0 && this.room?.phase === 'active';
+    prompt.hidden = !active; if (!active || !this.predicted) return;
+    if (this.local.switchUntil > this.serverNow) { prompt.textContent = '장비 준비 중…'; return; }
+    const pickup = nearestDroppedWeapon({ ...this.predicted, hp: this.local.hp }, this.droppedWeapons, this.world, this.serverNow);
+    prompt.textContent = pickup ? `[ G ] ${getWeapon(pickup.weaponId).name} ${getWeapon(this.local.weaponId).melee ? '줍기' : '교체'} · ${pickup.ammo}발` : getWeapon(this.local.weaponId).melee ? '좌클릭: 나이프 공격 · 가까운 총에 G: 줍기' : '[ G ] 총 버리기 → 기본 나이프';
+    for (const [id, item] of this.groundItems) item.marker.visible = pickup?.id === id;
+  }
+
   handleEvent(event) {
     if (event.type === 'shot') {
       const feedback = this.shotFeedback.acknowledge(event); if (feedback.duplicate) return;
@@ -553,7 +602,7 @@ export class FPSGame {
         const now = performance.now();
         const sameTrigger = event.fireSeq === this.fireSeq && Number.isSafeInteger(event.shotIndex);
         if (sameTrigger) this.localShotIndex = Math.max(this.localShotIndex, event.shotIndex);
-        const sameLife = event.spawnCount == null || event.spawnCount === this.local.spawnCount;
+        const sameLife = (event.spawnCount == null || event.spawnCount === this.local.spawnCount) && (event.equipmentSeq == null || event.equipmentSeq === this.local.equipmentSeq);
         if (!feedback.predicted && sameLife && this.local.hp > 0 && event.weaponId === this.activeWeaponId) {
           const weapon = getWeapon(event.weaponId); this.playLocalShot(weapon, now, false);
           // The server can fire before the next render frame. Count that
@@ -572,12 +621,13 @@ export class FPSGame {
         const dx = event.origin.x - this.predicted.x, dz = event.origin.z - this.predicted.z, distance = Math.hypot(dx, dz);
         if (distance < 45) {
           const pan = clamp((dx * Math.cos(this.yaw) - dz * Math.sin(this.yaw)) / Math.max(distance, 0.1), -1, 1);
-          this.audio.shot(Math.max(0.03, 0.55 / (1 + distance / 9)), pan, event.weaponId, distance);
+          if (event.melee) { if (distance < 12) this.audio.melee?.(.5 / (1 + distance / 3), pan); }
+          else this.audio.shot(Math.max(0.03, 0.55 / (1 + distance / 9)), pan, event.weaponId, distance);
         }
       }
-      const avatar = this.remote.get(event.id); if (avatar) avatar.flashUntil = performance.now() + 45;
+      const avatar = this.remote.get(event.id); if (avatar) { avatar.flashUntil = event.melee ? 0 : performance.now() + 45; if (event.melee) avatar.swingUntil = performance.now() + 360; }
       for (const ray of event.rays || [{ end: event.end, hit: event.hit }]) {
-        this.tracer(origin, ray.end, event.id === this.selfId, !ray.hit && !ray.protectedTarget);
+        if (!event.melee) this.tracer(origin, ray.end, event.id === this.selfId, !ray.hit && !ray.protectedTarget);
         if (ray.hit && ray.hit !== this.selfId) this.combat.blood(ray.end, event.origin, this.players.find((player) => player.id === ray.hit)?.y || 0);
       }
     }
@@ -686,7 +736,7 @@ export class FPSGame {
       sprint: active && (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) && !this.ads,
       crouch,
       fire: active && this.fireHeld, reload: active && performance.now() < this.reloadPressedUntil,
-      ads: active && this.ads, weaponId: this.requestedWeaponId, fireSeq: this.fireSeq, spawnCount: this.local?.spawnCount, viewTime: this.viewTime ?? this.serverNow - 70,
+      ads: active && this.ads, weaponId: this.requestedWeaponId, fireSeq: this.fireSeq, spawnCount: this.local?.spawnCount, equipmentSeq: this.local?.equipmentSeq, viewTime: this.viewTime ?? this.serverNow - 70,
     };
   }
 
@@ -703,7 +753,7 @@ export class FPSGame {
       const step = this.localSteps.update(this.predicted, now, { active: this.local.hp > 0 && this.room.phase === 'active' && this.locked });
       if (step) this.audio.step(step.sprint, step.crouched, { foot: step.foot, volume: 1, pan: step.foot ? 0.06 : -0.06, distance: 0, remote: false, playerId: this.selfId });
       const moving = Math.abs(input.forward) + Math.abs(input.strafe) > 0;
-      const ads = this.ads && this.locked && !this.hadReload && this.local.switchUntil <= this.serverNow && this.requestedWeaponId === this.local.weaponId && this.local.hp > 0;
+      const ads = this.ads && !getWeapon(this.local.weaponId).melee && this.locked && !this.hadReload && this.local.switchUntil <= this.serverNow && this.requestedWeaponId === this.local.weaponId && this.local.hp > 0;
       const bob = !ads && moving && this.predicted.grounded ? Math.sin(now * (sprinting ? 0.017 : 0.012)) : 0;
       // Recoil recovers toward mouse aim; the composed pitch is also sent to
       // the server, so recovery never creates a camera-only aiming offset.
@@ -724,6 +774,7 @@ export class FPSGame {
       this.weapon.position.z = lerp(this.weapon.position.z, (ads ? -0.35 : -0.54) + this.recoil * 0.035, dt * 17);
       this.weapon.rotation.z = -reloadTilt * 0.65 + bob * 0.008;
       this.weapon.rotation.x = -reloadTilt * 0.25;
+      if (weapon.melee) { const swing = Math.sin(clamp((this.swingUntil - now) / 360, 0, 1) * Math.PI); this.weapon.rotation.z -= swing * .9; this.weapon.rotation.x += swing * .5; this.weapon.position.x -= swing * .16; }
       const sightAligned = ads && Math.abs(this.weapon.position.x) < 0.003 && Math.abs(this.weapon.position.y + this.activeModel.userData.aimHeight) < 0.003;
       if (sightAligned) { this.weapon.position.x = 0; this.weapon.position.y = -this.activeModel.userData.aimHeight; }
       this.sightAligned = sightAligned;
@@ -735,7 +786,7 @@ export class FPSGame {
       const trigger = input.fire || this.localFirePending;
       if (weapon.burstCount && !this.localBurstLeft && trigger && !this.fireLatched && now >= this.localNextFire) this.localBurstLeft = weapon.burstCount;
       const fireReady = weapon.burstCount ? this.localBurstLeft > 0 : trigger && (weapon.automatic || !this.fireLatched);
-      if (this.local.hp > 0 && this.room.phase === 'active' && this.locked && fireReady && !switching && !this.hadReload && this.local.ammo > 0 && now >= this.localNextFire && this.serverNow >= this.local.nextFireAt - 20) {
+      if (this.local.hp > 0 && this.room.phase === 'active' && this.locked && fireReady && !switching && !this.hadReload && (weapon.melee || this.local.ammo > 0) && now >= this.localNextFire && this.serverNow >= this.local.nextFireAt - 20) {
         this.playLocalShot(weapon, now); this.localNextFire = now + weapon.fireSeconds * 1000;
         if (weapon.burstCount) { this.localBurstLeft--; if (!this.localBurstLeft) this.localNextFire = now + weapon.burstPause * 1000; }
       }
@@ -764,12 +815,12 @@ export class FPSGame {
       avatar.renderTime = lerp(avatar.renderTime, avatar.targetTime, smoothing);
       position.x = lerp(position.x, target.x, smoothing); position.y = lerp(position.y, target.y, smoothing); position.z = lerp(position.z, target.z, smoothing);
       avatar.group.rotation.y += angleDelta(target.yaw, avatar.group.rotation.y) * smoothing;
-      avatar.weapon.rotation.x = target.pitch;
+      avatar.weapon.rotation.x = target.pitch + (target.weaponId === 'knife' ? Math.sin(clamp((avatar.swingUntil - now) / 360, 0, 1) * Math.PI) * .6 || 0 : 0);
       avatar.weapon.userData.flash.visible = now < avatar.flashUntil;
       const crouchTarget = target.crouchAmount ?? (target.crouching ? 1 : 0), crouchStep = dt / RULES.crouchSeconds;
       avatar.crouchAmount += clamp(crouchTarget - avatar.crouchAmount, -crouchStep, crouchStep);
       avatar.label.position.y = 2.15 - avatar.crouchAmount * 0.7;
-      const source = { x: position.x, y: position.y, z: position.z, hp: target.hp, grounded: target.grounded, moveSpeed: target.moveSpeed, spawnCount: target.spawnCount, crouching: target.crouching, sprinting: target.sprinting };
+      const source = { x: position.x, y: position.y, z: position.z, hp: target.hp, grounded: target.grounded, moveSpeed: target.moveSpeed, stepDistance: target.stepDistance, spawnCount: target.spawnCount, crouching: target.crouching, sprinting: target.sprinting };
       const step = avatar.steps.update(source, now, { active: this.room?.phase === 'active', teleport });
       if (step && this.predicted) {
         let mix = footstepMix(this.predicted, source, this.yaw);
@@ -786,6 +837,8 @@ export class FPSGame {
       avatar.lastX = position.x; avatar.lastZ = position.z;
     }
     const viewTimes = [...this.remote.values()].filter((avatar) => avatar.target.hp > 0).map((avatar) => avatar.renderTime);
+    for (const item of this.groundItems.values()) item.group.position.y = lerp(item.group.position.y, item.target.y, Math.min(1, dt * 20));
+    this.updateEquipmentPrompt();
     this.viewTime = viewTimes.length ? Math.min(...viewTimes) : this.serverNow;
     if (now - this.lastMap > 100 && this.predicted) {
       const origin = { x: this.predicted.x, y: this.predicted.y + playerPose(this.predicted).eyeHeight, z: this.predicted.z };
@@ -838,7 +891,7 @@ export class FPSGame {
     $('scope-overlay').hidden = true; $('ads-reticle').hidden = true;
     this.clearDamageDirections();
     this.clearKillFeedback();
-    this.remote.clear(); this.effects.length = 0;
+    this.remote.clear(); this.groundItems.clear(); this.effects.length = 0; $('equipment-hint').hidden = true;
     this.closeLoadout(false);
     for (const id of ['pause-overlay', 'round-overlay', 'scoreboard-overlay', 'respawn-overlay']) $(id).hidden = true;
     $('killfeed').replaceChildren();

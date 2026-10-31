@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { createProfile } from '../../shared/progression.js';
 import { createGameServer } from '../../server/index.js';
 
-test.use({ baseURL: 'http://127.0.0.1:4173' });
+test.use({ baseURL: `http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}` });
 test.beforeEach(async ({ context }) => {
   await context.addInitScript(() => { try { localStorage.setItem('sector07-settings', JSON.stringify({ sensitivity: 1, fov: 82, volume: 0, quality: 'low' })); } catch { /* about:blank */ } });
 });

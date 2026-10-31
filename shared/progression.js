@@ -1,5 +1,5 @@
 import { DEFAULT_OUTFIT, getOutfit, isOutfitId, DEFAULT_CHARACTER, getCharacter, isCharacterId } from './outfits.js';
-import { WEAPONS, FREE_WEAPON_IDS, normalizeOwnedWeapons, ownsWeapon, isWeaponId, getWeapon } from './catalog.js';
+import { EQUIPMENT, FREE_WEAPON_IDS, normalizeOwnedWeapons, ownsWeapon, isWeaponId, getWeapon } from './catalog.js';
 
 export const POINT_RULES = Object.freeze({ completion: 50, perKill: 20, victory: 100 });
 export const PROFILE_VERSION = 1;
@@ -9,7 +9,7 @@ const validId = (value) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_
 const callsign = (value) => typeof value === 'string' ? value.replace(/[\p{C}<>]/gu, '').trim().slice(0, 16) || 'OPERATOR' : 'OPERATOR';
 
 export function normalizeWeaponKills(value) {
-  return Object.fromEntries(WEAPONS.filter(({ id }) => count(value?.[id]) > 0).map(({ id }) => [id, count(value[id])]));
+  return Object.fromEntries(EQUIPMENT.filter(({ id }) => count(value?.[id]) > 0).map(({ id }) => [id, count(value[id])]));
 }
 
 export function weaponMastery(value = 0) {
@@ -59,7 +59,7 @@ export function recordRound(profile, { roundId, kills, deaths, weaponKills, comp
   const nextKills = Math.max(prior.kills, count(kills)), nextDeaths = Math.max(prior.deaths, count(deaths));
   const priorWeapons = normalizeWeaponKills(prior.weaponKills), nextWeapons = { ...priorWeapons }, incoming = normalizeWeaponKills(weaponKills);
   let remaining = Math.max(0, nextKills - Object.values(priorWeapons).reduce((sum, value) => sum + value, 0)), weaponDelta = 0;
-  for (const { id } of WEAPONS) {
+  for (const { id } of EQUIPMENT) {
     const delta = Math.min(remaining, Math.max(0, (incoming[id] || 0) - (priorWeapons[id] || 0)));
     if (delta) { nextWeapons[id] = (priorWeapons[id] || 0) + delta; remaining -= delta; weaponDelta += delta; }
   }

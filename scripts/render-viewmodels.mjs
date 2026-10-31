@@ -22,7 +22,7 @@ try {
     scene.add(new THREE.HemisphereLight('#d6eaf0', '#4a4038', 2.2));
     const light = new THREE.DirectionalLight('#ffe2c0', 3.5); light.position.set(-2, 3, 2); scene.add(light);
     const fill = new THREE.DirectionalLight('#a5d5ed', .7); fill.position.set(2, 1, -2); scene.add(fill);
-    const ids = ['rifle', 'pistol', 'shotgun', 'sniper', 'smg', 'lmg', 'dmr', 'p90', 'glock18c', 'm82', 'famas', 'm4a1'];
+    const ids = ['rifle', 'pistol', 'shotgun', 'sniper', 'smg', 'lmg', 'dmr', 'p90', 'glock18c', 'm82', 'famas', 'mp5'];
     const models = new WeaponModels(), manager = THREE.DefaultLoadingManager, oldStart = manager.onStart, oldLoad = manager.onLoad; let loading = false;
     const ready = new Promise((resolve) => { manager.onLoad = resolve; }); manager.onStart = () => { loading = true; };
     const entries = ids.map((id) => { const model = models.create(id, 'standard', true, 'field', character); model.visible = false; scene.add(model); return model; });

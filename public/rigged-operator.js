@@ -149,7 +149,7 @@ export function createOperator(player, models) {
     parts.oval(boot, [0.145, 0.20, 0.17], [position.x, 0.13, position.z + 0.005], dark, 'boot-upper');
     parts.panel(boot, [0.165, 0.035, 0.29], [position.x, 0.025, position.z - 0.055], dark, 'boot-sole'); foot.attach(boot);
   }
-  const weapon = models.create(player.weaponId || 'rifle', player.skinId || 'standard', false, outfit.id, character.id); weapon.position.set(0.10, 1.19, -0.16); group.add(weapon);
+  const weapon = models.create(player.weaponId || 'rifle', player.weaponSkinId || player.skinId || 'standard', false, outfit.id, character.id); weapon.position.set(0.10, 1.19, -0.16); group.add(weapon);
   const rest = Object.values(bones).map((bone) => ({ bone, position: bone.position.clone(), quaternion: bone.quaternion.clone() }));
   const feet = ['l', 'r'].map((side) => group.worldToLocal(bones[`foot_${side}`].getWorldPosition(new THREE.Vector3())));
   const footRotations = ['l', 'r'].map((side) => group.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(bones[`foot_${side}`].getWorldQuaternion(new THREE.Quaternion())));
@@ -177,7 +177,7 @@ export function poseOperator(operator, crouch, stride = 0) {
     setWorldRotation(bones[`foot_${side}`], group.getWorldQuaternion(new THREE.Quaternion()).multiply(operator.footRotations[i]));
   }
   weapon.position.set(0.10, 1.19 - crouch * 0.52, -0.16);
-  for (const [side, grip] of [['r', [0.055, -0.13, 0.13]], ['l', weapon.userData.modelBase === 'pistol' ? [-0.04, -0.13, 0.10] : [-0.06, -0.05, -0.12]]]) {
+  for (const [side, grip] of [['r', [0.055, -0.13, 0.13]], ['l', weapon.userData.modelBase === 'knife' ? [-.2, -.12, -.08] : weapon.userData.modelBase === 'pistol' ? [-0.04, -0.13, 0.10] : [-0.06, -0.05, -0.12]]]) {
     const target = v(grip).applyEuler(weapon.rotation).add(weapon.position);
     twoBone(bones[`upperarm_${side}`], bones[`lowerarm_${side}`], bones[`hand_${side}`], group.localToWorld(target), group.localToWorld(v([side === 'l' ? -0.4 : 0.4, 0.98 - crouch * 0.5, 0.08])));
     turnWorld(bones[`hand_${side}`], new THREE.Quaternion().setFromAxisAngle(axis, Math.PI / 2));

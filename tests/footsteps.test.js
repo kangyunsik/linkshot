@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { FootstepTracker, footstepMix } from '../public/footsteps.js';
 import { footstepSignal, killSignal } from '../public/sound-design.js';
+import { Room } from '../shared/simulation.js';
 
 const player = (extra = {}) => ({ x: 0, y: 0, z: 0, hp: 100, grounded: true, moveSpeed: 5.7, spawnCount: 1, ...extra });
 const hash = (signal) => createHash('sha256').update(Buffer.from(signal.buffer)).digest('hex');
@@ -28,6 +29,23 @@ test('standing, death, blocked movement and air travel never create queued or ph
   }
   for (let i = 0; i < 60; i++) { now += 1000 / 60; assert.equal(tracker.update(player({ x: 0 }), now, { active: false }), null); }
   tracker.update(player({ x: 0, moveSpeed: 0 }), now + 16); assert.equal(tracker.update(player({ x: 0, moveSpeed: 0 }), now + 32), null);
+});
+
+test('real 60Hz movement remains audible through 20Hz snapshots ending on a stop, at every render rate', () => {
+  for (const hz of [30, 60, 144]) {
+    let now = 1000; const room = new Room('STEPS', { bots: 0, clock: () => now }); room.world = { ...room.world, width: 100, depth: 100, obstacles: [] };
+    const source = room.addPlayer('walker', 'WALKER'); Object.assign(source, { x: 0, y: 0, z: 0 });
+    const tracker = new FootstepTracker(); let target = room.snapshot().players[0], tick = 0, steps = 0;
+    for (let frame = 0; frame < hz * 4; frame++) {
+      const time = 1000 + frame * 1000 / hz;
+      while (now + 1000 / 60 <= time + .0001) {
+        now += 1000 / 60; room.setInput(source.id, { forward: tick % 3 === 2 ? 0 : 1, yaw: 0 }); room.tick(1 / 60); tick++;
+        if (tick % 3 === 0) { target = room.snapshot().players[0]; assert.equal(target.moveSpeed, 0); }
+      }
+      if (tracker.update(target, time)) steps++;
+    }
+    assert.ok(steps >= 7, `${hz}Hz: ${steps} remote steps despite zero instantaneous snapshot speed`);
+  }
 });
 
 test('respawn, teleports, invalid positions and stalled render frames reset footstep distance safely', () => {
