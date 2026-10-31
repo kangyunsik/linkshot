@@ -1,0 +1,25 @@
+{
+  "license": "CC0-1.0",
+  "creator": "Quaternius",
+  "source": "Universal Base Characters Standard",
+  "sourceUrl": "https://quaternius.com/packs/universalbasecharacters.html",
+  "processing": "Anatomical hand topology, original finger rigs and skin/normal maps extracted from the prepared licensed male/female operators; unused body geometry removed, images resized and metadata stripped. Weapon-specific posing, gloves and sleeves are authored at runtime.",
+  "files": [
+    {
+      "file": "view-hands-male-v1.glb",
+      "source": "operator-human-v2.glb",
+      "bytes": 666096,
+      "sha256": "b3a6753ff6768070e5f9f8d0e1758e497afab17f2c2bdb03e7879bcc05b91f8f",
+      "hands": 2,
+      "triangles": 3348
+    },
+    {
+      "file": "view-hands-female-v1.glb",
+      "source": "operator-female-v3.glb",
+      "bytes": 598516,
+      "sha256": "f62e25a83906b02e3532df9720f744dfb2d54b0903f3f0582dee700ca338418b",
+      "hands": 2,
+      "triangles": 3000
+    }
+  ]
+}

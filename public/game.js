@@ -14,6 +14,7 @@ import { ShotFeedback } from './shot-feedback.js';
 import { weaponMastery } from '/shared/progression.js';
 import { FootstepTracker, footstepMix } from './footsteps.js';
 import { drawThemedArena } from './themed-arena.js';
+import { VIEWMODEL_LAYER, compileViewmodelPrograms, renderViewmodelFrame } from './viewmodel-renderer.js';
 
 const $ = (id) => document.getElementById(id);
 const lerp = THREE.MathUtils.lerp;
@@ -85,7 +86,7 @@ export class FPSGame {
     this.materials = {};
     this.makeWorld(); this.makeWeapon(); this.applySettings(); this.resize(); this.bindInput();
     this.combat = new CombatEffects(this.scene, this.models, this.world);
-    this.graphicsReady = false; this.graphicsPromise = null;
+    this.graphicsReady = false; this.graphicsPromise = null; this.graphicsPreparing = false; this.retiredGraphics = [];
     this.previousFrame = performance.now(); this.fpsTime = this.previousFrame; this.fpsFrames = 0;
     this.animate = this.animate.bind(this); this.frameId = requestAnimationFrame(this.animate);
   }
@@ -98,23 +99,30 @@ export class FPSGame {
   prepareGraphics() {
     if (this.graphicsPromise) return this.graphicsPromise;
     const warmup = this.combat.prepareWarmup(this.players), visibility = [];
+    visibility.push([this.weapon, this.weapon.visible]); this.weapon.visible = true;
     for (const model of this.weaponModels.values()) { visibility.push([model, model.visible], [model.userData.flash, model.userData.flash.visible]); model.visible = true; model.userData.flash.visible = true; }
     for (const avatar of this.remote.values()) { const flash = avatar.weapon.userData.flash; visibility.push([flash, flash.visible]); flash.visible = true; }
-    this.scene.add(warmup);
+    this.scene.add(warmup); this.graphicsPreparing = true;
     this.graphicsPromise = (async () => {
       try {
-        await this.renderer.compileAsync(this.scene, this.camera);
+        await compileViewmodelPrograms(this.renderer, this.scene, this.camera);
         // Upload buffers/initialize programs while the deployment overlay is
         // still up, including platforms without parallel shader compilation.
-        if (!this.disposed) this.renderer.render(this.scene, this.camera);
+        if (!this.disposed) this.renderFrame();
       } finally {
         this.scene.remove(warmup); for (const [object, visible] of visibility) object.visible = visible;
         for (const [id, model] of this.weaponModels) model.visible = id === this.activeWeaponId;
+        this.graphicsPreparing = false;
+        // compileAsync keeps material/program references while the driver
+        // finishes linking. A departing peer must not invalidate those refs.
+        const retired = this.retiredGraphics.splice(0); for (const dispose of retired) dispose();
       }
-      if (!this.disposed) { this.renderer.render(this.scene, this.camera); this.graphicsReady = true; }
+      if (!this.disposed) { this.renderFrame(); this.graphicsReady = true; }
     })();
     return this.graphicsPromise;
   }
+
+  renderFrame() { renderViewmodelFrame(this.renderer, this.scene, this.camera, this.weapon); }
 
   material(name, color, options = {}) {
     return this.materials[name] ||= new THREE.MeshStandardMaterial({ color, roughness: 0.78, metalness: 0.3, ...options });
@@ -264,6 +272,7 @@ export class FPSGame {
     $('weapon-slots').style.setProperty('--weapon-count', WEAPONS.length);
     for (const weapon of WEAPONS) {
       const model = this.models.create(weapon.id, this.skinId, true, this.outfitId, this.characterId); model.visible = false;
+      model.traverse((object) => object.layers.set(VIEWMODEL_LAYER));
       this.weapon.add(model); this.weaponModels.set(weapon.id, model);
       const slot = document.createElement('div'); slot.className = 'weapon-slot'; slot.dataset.weapon = weapon.id;
       const key = document.createElement('kbd'); key.textContent = weapon.slot;
@@ -272,7 +281,8 @@ export class FPSGame {
       slot.append(key, name, count); $('weapon-slots').append(slot);
     }
     this.muzzleLight = new THREE.PointLight('#ffad60', 0, 5); this.camera.add(this.muzzleLight); this.muzzleLight.position.set(0.2, -0.15, -0.75);
-    this.weapon.position.set(0.25, -0.23, -0.43); this.activateWeapon(this.requestedWeaponId);
+    this.muzzleLight.layers.enable(VIEWMODEL_LAYER); this.scene.traverse((object) => { if (object.isLight) object.layers.enable(VIEWMODEL_LAYER); });
+    this.weapon.position.set(0.18, -0.20, -0.54); this.activateWeapon(this.requestedWeaponId);
   }
 
   activateWeapon(id) {
@@ -466,7 +476,8 @@ export class FPSGame {
       const avatar = this.remote.get(player.id); avatar.target = player;
       avatar.targetTime = data.serverTime; avatar.renderTime ??= data.serverTime;
       if (avatar.weapon.userData.weaponId !== player.weaponId) {
-        avatar.group.remove(avatar.weapon); disposeModel(avatar.weapon);
+        const previous = avatar.weapon; avatar.group.remove(previous);
+        if (this.graphicsPreparing) this.retiredGraphics.push(() => disposeModel(previous)); else disposeModel(previous);
         avatar.weapon = this.models.create(player.weaponId, player.skinId, false, player.outfitId, player.characterId); avatar.weapon.position.set(0.19, 1.05, -0.22); avatar.group.add(avatar.weapon);
       }
     }
@@ -708,9 +719,9 @@ export class FPSGame {
       const reloadRemaining = this.local.reloadUntil - this.serverNow;
       const reloadTilt = reloadRemaining > 0 ? Math.sin(clamp(reloadRemaining / (weapon.reloadSeconds * 1000), 0, 1) * Math.PI) : 0;
       this.switchAnimation = lerp(this.switchAnimation, 0, dt * 10);
-      this.weapon.position.x = lerp(this.weapon.position.x, (ads ? 0 : 0.25) + bob * 0.005, dt * 14);
-      this.weapon.position.y = lerp(this.weapon.position.y, (ads ? -this.activeModel.userData.aimHeight : -0.23) - reloadTilt * 0.18 - this.switchAnimation * 0.25 + bob * 0.007 - (sprinting && moving ? 0.08 : 0), dt * 14);
-      this.weapon.position.z = lerp(this.weapon.position.z, (ads ? -0.35 : -0.43) + this.recoil * 0.035, dt * 17);
+      this.weapon.position.x = lerp(this.weapon.position.x, (ads ? 0 : 0.18) + bob * 0.005, dt * 14);
+      this.weapon.position.y = lerp(this.weapon.position.y, (ads ? -this.activeModel.userData.aimHeight : -0.20) - reloadTilt * 0.18 - this.switchAnimation * 0.25 + bob * 0.007 - (sprinting && moving ? 0.08 : 0), dt * 14);
+      this.weapon.position.z = lerp(this.weapon.position.z, (ads ? -0.35 : -0.54) + this.recoil * 0.035, dt * 17);
       this.weapon.rotation.z = -reloadTilt * 0.65 + bob * 0.008;
       this.weapon.rotation.x = -reloadTilt * 0.25;
       const sightAligned = ads && Math.abs(this.weapon.position.x) < 0.003 && Math.abs(this.weapon.position.y + this.activeModel.userData.aimHeight) < 0.003;
@@ -730,6 +741,7 @@ export class FPSGame {
       }
       this.fireLatched = input.fire;
       if (this.activeModel.userData.pump) this.activeModel.userData.pump.position.z = -0.43 + Math.sin(clamp((now - this.lastFire) / 600, 0, 1) * Math.PI) * 0.1;
+      if (this.activeModel.userData.pump && this.activeModel.userData.supportArm) this.activeModel.userData.supportArm.position.z = this.activeModel.userData.pump.position.z + .43;
       if (this.activeModel.userData.slide) this.activeModel.userData.slide.position.z = this.recoil * 0.025;
       this.recoil = lerp(this.recoil, 0, dt * 15);
       this.muzzleFlash.visible = now < this.muzzleUntil; this.muzzleLight.intensity = now < this.muzzleUntil ? 2 : 0;
@@ -796,11 +808,12 @@ export class FPSGame {
     this.fpsFrames++;
     if (now - this.fpsTime > 1000) { this.hud['hud-fps'].textContent = `${Math.round(this.fpsFrames * 1000 / (now - this.fpsTime))} FPS`; this.fpsFrames = 0; this.fpsTime = now; }
     if (this.graphicsReady && (this.locked || !this.lastRender || now - this.lastRender > 1000 / 10)) {
-      this.renderer.render(this.scene, this.camera); this.lastRender = now;
+      this.renderFrame(); this.lastRender = now;
     }
   }
 
   disposeObject(object, all = true) {
+    if (this.graphicsPreparing) { this.retiredGraphics.push(() => this.disposeObject(object, all)); return; }
     const geometries = new Set(), materials = new Set(), textures = new Set();
     object.traverse((child) => {
       if (child.geometry && !child.geometry.userData.operatorShared && (all || child.geometry !== this.boxGeometry)) geometries.add(child.geometry);
@@ -815,12 +828,13 @@ export class FPSGame {
   }
 
   dispose() {
-    if (this.disposed) return;
+    if (this.disposed) return this.disposalPromise;
     this.disposed = true; this.abort.abort(); cancelAnimationFrame(this.frameId);
     this.hitmarkerAnimation?.cancel();
     this.audio.stopReload?.();
     if (this.locked) document.exitPointerLock();
-    this.combat.dispose(); this.disposeObject(this.scene); this.sun.shadow.dispose(); this.models.dispose(); this.renderer.dispose();
+    if (this.graphicsPreparing) this.disposalPromise = this.graphicsPromise.catch(() => {}).then(() => this.releaseGraphics());
+    else { this.releaseGraphics(); this.disposalPromise = Promise.resolve(); }
     $('scope-overlay').hidden = true; $('ads-reticle').hidden = true;
     this.clearDamageDirections();
     this.clearKillFeedback();
@@ -829,5 +843,11 @@ export class FPSGame {
     for (const id of ['pause-overlay', 'round-overlay', 'scoreboard-overlay', 'respawn-overlay']) $(id).hidden = true;
     $('killfeed').replaceChildren();
     this.hud.hitmarker.classList.remove('visible'); this.hud['damage-vignette'].classList.remove('visible');
+    return this.disposalPromise;
+  }
+
+  releaseGraphics() {
+    if (this.graphicsReleased) return; this.graphicsReleased = true;
+    this.combat.dispose(); this.disposeObject(this.scene); this.sun.shadow.dispose(); this.models.dispose(); this.renderer.dispose();
   }
 }

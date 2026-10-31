@@ -24,7 +24,13 @@ test('every outfit and weapon finish retains human anatomy, facial features and 
     for (const character of CHARACTERS) for (const outfit of OUTFITS) for (const weapon of WEAPONS) {
       const model = models.create(weapon.id, 'standard', true, outfit.id, character.id), arms = model.getObjectByName('first-person-human-arms');
       const bounds = new THREE.Box3().setFromObject(model);
-      firstPerson.push({ outfit: outfit.id, weapon: weapon.id, hands: arms.children.filter((child) => child.userData.fingers === 5).length, rounded: arms.getObjectByName('right-sleeve').geometry.type !== 'BoxGeometry', noDepth: arms.getObjectByName('palm').material.depthTest === false, finite: [...bounds.min.toArray(), ...bounds.max.toArray(), ...model.userData.muzzle.position.toArray()].every(Number.isFinite) });
+      const hands = []; arms.traverse((child) => { if (child.userData.anatomical && child.userData.fingers === 5) hands.push(child); });
+      const sleeve = arms.getObjectByName('right-sleeve').geometry, p = sleeve.getAttribute('position'), n = sleeve.getAttribute('normal'); let outward = 0, count = 0;
+      for (let ring = 0; ring <= 15; ring++) {
+        const center = new THREE.Vector3(); for (let i = 0; i < 16; i++) center.add(new THREE.Vector3().fromBufferAttribute(p, ring * 17 + i)); center.multiplyScalar(1 / 16);
+        for (let i = 0; i < 16; i++) { const vertex = ring * 17 + i; outward += Number(new THREE.Vector3().fromBufferAttribute(p, vertex).sub(center).dot(new THREE.Vector3().fromBufferAttribute(n, vertex)) > 0); count++; }
+      }
+      firstPerson.push({ outfit: outfit.id, weapon: weapon.id, hands: hands.length, anatomy: arms.userData.anatomy, rounded: sleeve.type !== 'BoxGeometry', outward: outward / count, selfDepth: arms.getObjectByName('palm').material.every((material) => material.depthTest && material.depthWrite), triangles: hands.map((hand) => hand.getObjectByName('palm').geometry.index.count / 3), distinct: hands[0].getObjectByName('palm').geometry !== hands[1].getObjectByName('palm').geometry, finite: [...bounds.min.toArray(), ...bounds.max.toArray(), ...model.userData.muzzle.position.toArray()].every(Number.isFinite) });
       disposeModel(model);
     }
     models.dispose(); return { checks, firstPerson };
@@ -35,7 +41,7 @@ test('every outfit and weapon finish retains human anatomy, facial features and 
     expect(check.standingTop).toBeGreaterThan(1.77); expect(check.standingTop).toBeLessThanOrEqual(1.85);
     expect(check.headTop).toBeLessThanOrEqual(1.101); expect(check.engineMaterials).toContain('operator-fabric.png');
   }
-  for (const check of result.firstPerson) { expect(check.hands).toBe(2); expect(check.rounded).toBe(true); expect(check.noDepth).toBe(true); expect(check.finite).toBe(true); }
+  for (const check of result.firstPerson) { expect(check.hands).toBe(2); expect(check.anatomy).toBe('quaternius-view-hands-v1'); expect(check.rounded).toBe(true); expect(check.outward).toBeGreaterThan(.95); expect(check.selfDepth && check.distinct && check.finite).toBe(true); for (const triangles of check.triangles) expect(triangles).toBeGreaterThan(1000); }
   expect(errors).toEqual([]);
 });
 

@@ -25,7 +25,7 @@ try {
       if (data.type === 'hello') connection.send(JSON.stringify({ type: 'create', name: 'BENCHMARK', mapId, mode: 'practice', bots: 7, botDifficulty: 'advanced', fragLimit: 200, roundSeconds: 3600 }));
       if (data.type === 'joined') {
         game = new FPSGame({ canvas: document.getElementById('game-canvas'), minimap: document.getElementById('minimap'), settings, audio, mapId, send: (data) => connection.send(JSON.stringify(data)), onMenu: (show) => { document.getElementById('pause-overlay').hidden = !show; }, onFatal: (message) => { throw new Error(message); } });
-        timed(game, 'applySnapshot', measure.snapshot); timed(game, 'makeAvatar', measure.avatar); timed(game.combat, 'death', measure.death); timed(game.renderer, 'render', measure.render);
+        timed(game, 'applySnapshot', measure.snapshot); timed(game, 'makeAvatar', measure.avatar); timed(game.combat, 'death', measure.death); timed(game, 'renderFrame', measure.render);
         const original = game.animate; game.animate = (now) => { const start = performance.now(); original(now); measure.work.push(performance.now() - start); if (previous) measure.frames.push(now - previous); previous = now; };
         game.applySnapshot(data, data.id); game.prepareGraphics(); document.getElementById('pause-overlay').hidden = false;
         document.getElementById('resume-button').addEventListener('click', () => game.lock()); window.__benchmark = { game, connection, measure, reset: () => { previous = undefined; for (const value of Object.values(measure)) if (Array.isArray(value)) value.length = 0; measure.events = 0; } };

@@ -17,6 +17,9 @@ for (const image of images) {
   } catch { console.error(`빌드에 필요한 이미지가 준비되지 않았습니다: public/assets/${image}\n먼저 npm run assets:generate로 애셋을 준비하세요. GitHub에는 생성된 public/assets도 함께 올려야 합니다.`); process.exit(1); }
 }
 for (const file of CHARACTERS.flatMap((character) => [character.model, character.hair, character.helmetHair].filter(Boolean))) { const bytes = await readFile(path.join(root, 'public/assets/models', file)); if (bytes.readUInt32LE(0) !== 0x46546c67 || bytes.readUInt32LE(8) !== bytes.length) throw new Error(`Invalid character model: ${file}`); }
+const hands = JSON.parse(await readFile(path.join(root, 'public/assets/models/view-hands-manifest.json'), 'utf8'));
+if (hands.license !== 'CC0-1.0' || hands.files.length !== CHARACTERS.length) throw new Error('Missing licensed first-person anatomy');
+for (const character of CHARACTERS) { const file = `view-hands-${character.id}-v1.glb`, item = hands.files.find((item) => item.file === file), bytes = await readFile(path.join(root, 'public/assets/models', file)); if (!item || item.hands !== 2 || bytes.length !== item.bytes || bytes.readUInt32LE(0) !== 0x46546c67 || bytes.readUInt32LE(8) !== bytes.length) throw new Error(`Invalid first-person hand model: ${file}`); }
 const sounds = JSON.parse(await readFile(path.join(root, 'public/assets/sounds/manifest.json'), 'utf8'));
 if (sounds.license !== 'CC0-1.0' || sounds.files.length !== WEAPONS.length) throw new Error('Missing licensed firearm recordings');
 for (const { file } of sounds.files) { if (!/^[a-z][a-z0-9]*-1\.wav$/.test(file)) throw new Error('Invalid sound path'); const bytes = await readFile(path.join(root, 'public/assets/sounds', file)); if (bytes.toString('ascii', 0, 4) !== 'RIFF') throw new Error(`Invalid firearm sample: ${file}`); }

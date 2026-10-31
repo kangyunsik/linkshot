@@ -49,6 +49,21 @@ test('compact human models are valid self-contained glTF with documented free li
   }
 });
 
+test('first-person hands retain licensed anatomical topology, separate left/right meshes, finger rigs and original skin maps', async () => {
+  const directory = new URL('../public/assets/models/', import.meta.url), manifest = JSON.parse(await readFile(new URL('view-hands-manifest.json', directory), 'utf8'));
+  assert.equal(manifest.license, 'CC0-1.0'); assert.equal(manifest.creator, 'Quaternius'); assert.equal(manifest.files.length, 2);
+  for (const file of manifest.files) {
+    const bytes = await readFile(new URL(file.file, directory)); assert.equal(bytes.readUInt32LE(0), 0x46546c67); assert.equal(bytes.readUInt32LE(8), bytes.length);
+    assert.equal(bytes.length, file.bytes); assert.equal(createHash('sha256').update(bytes).digest('hex'), file.sha256); assert.ok(bytes.length < 750000);
+    const document = JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12)));
+    assert.match(document.asset.copyright, /Quaternius.*CC0/); assert.equal(document.buffers[0].uri, undefined);
+    assert.deepEqual(document.meshes.map((mesh) => mesh.name), ['ViewHand_L', 'ViewHand_R']); assert.ok(file.triangles >= 3000 && file.triangles < 4000);
+    assert.equal(document.images.length, 3); assert.ok(document.images.every((image) => image.bufferView !== undefined && image.uri === undefined));
+    for (const side of ['l', 'r']) for (const digit of ['thumb', 'index', 'middle', 'ring', 'pinky']) assert.ok(document.nodes.some((node) => node.name === `${digit}_03_${side}`));
+    for (const mesh of document.meshes) { const attrs = mesh.primitives[0].attributes; for (const key of ['POSITION', 'NORMAL', 'TEXCOORD_0', 'JOINTS_0', 'WEIGHTS_0']) assert.ok(Number.isInteger(attrs[key])); }
+  }
+});
+
 test('all twenty reloads use distinct licensed recorded foley, safe peaks and weapon-matched durations', async () => {
   const directory = new URL('../public/assets/sounds/', import.meta.url), manifest = JSON.parse(await readFile(new URL('reload-manifest.json', directory), 'utf8'));
   assert.equal(manifest.license, 'CC0-1.0'); assert.equal(manifest.engineProcessed, true); assert.equal(manifest.files.length, WEAPONS.length);
