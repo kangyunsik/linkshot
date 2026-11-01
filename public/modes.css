@@ -32,3 +32,12 @@
 .online-queue-panel button { margin-top: 7px; }
 @media (max-width: 1100px) { .tutorial-hud { left: 20px; top: 235px; width: 290px; padding: 12px 15px; } }
 @media (max-width: 740px) { .tutorial-hud { top: 175px; width: 250px; } .tutorial-hud p,.tutorial-hud ul { font-size: 10px; } }
+
+.profile-strip { grid-template-columns: minmax(170px, 1.5fr) repeat(6, minmax(0, 1fr)); }
+.profile-online-stat { background: #182b2d; }
+.profile-online-stat > strong { color: #b4e5d3; }
+.profile-online-stat > small { line-height: 1.6; overflow-wrap: anywhere; }
+.profile-rank > strong { font-size: clamp(14px, 1.1vw, 17px); letter-spacing: 0; }
+@media (max-width: 1100px) { .profile-strip { grid-template-columns: repeat(6, minmax(0, 1fr)); } .profile-identity { grid-column: 1 / -1; } }
+@media (max-width: 740px) { .profile-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } .profile-online-stat { grid-column: span 2; } }
+@media (max-width: 450px) { .profile-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .profile-online-stat { grid-column: auto; } }

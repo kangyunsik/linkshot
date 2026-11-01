@@ -15,7 +15,8 @@ public class RatingService {
     public record Applied(int ratingDelta, int pointsDelta) {}
     private record Before(int rating, RatingPolicy.RankProgress progress) {}
     @Transactional
-    public Map<String, Applied> settle(MatchService.Mode mode, List<MatchService.Performance> roster) {
+    public Map<String, Applied> settle(MatchService.Mode mode, List<MatchService.Performance> roster, int botRating) {
+        if (botRating < 0 || botRating > 10_000) throw new IllegalArgumentException("Invalid assigned AI rating");
         boolean ranked = mode == MatchService.Mode.RANKED;
         if (ranked) db.queryForObject("SELECT id FROM matchmaking_lock WHERE id = 2 FOR UPDATE", Integer.class);
         var humans = roster.stream().filter(player -> !player.bot()).sorted(java.util.Comparator.comparing(MatchService.Performance::id)).toList();
@@ -24,7 +25,7 @@ public class RatingService {
             var state = db.queryForObject("SELECT casual_rating, ranked_rating, rank_index, rank_points, rank_placements, ranked_games FROM profiles WHERE account_id = ? FOR UPDATE", (row, index) -> new Before(row.getInt(ranked ? 2 : 1), new RatingPolicy.RankProgress(row.getInt(3), row.getInt(4), row.getInt(5), row.getInt(6))), UUID.fromString(player.id()));
             before.put(player.id(), state);
         }
-        var changes = RatingPolicy.settle(ranked, humans.stream().map(player -> new RatingPolicy.Player(player.id(), before.get(player.id()).rating(), player.kills(), player.deaths(), player.humanKills(), player.humanDeaths(), player.abandoned())).toList());
+        var changes = RatingPolicy.settle(ranked, roster.stream().map(player -> new RatingPolicy.Player(player.id(), player.bot() ? botRating : before.get(player.id()).rating(), player.kills(), player.deaths(), player.humanKills(), player.humanDeaths(), player.abandoned())).toList());
         Map<String, Applied> result = new HashMap<>();
         for (var player : humans) {
             var prior = before.get(player.id()); var change = changes.get(player.id()); int rating = Math.max(0, Math.min(10_000, prior.rating() + change.ratingDelta())), points = 0;

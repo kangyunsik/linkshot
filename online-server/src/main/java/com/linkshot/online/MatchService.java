@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.json.JsonMapper;
@@ -23,7 +24,8 @@ import tools.jackson.databind.json.JsonMapper;
 @Service
 public class MatchService {
     public enum Mode { CASUAL, RANKED }
-    public record Plan(UUID id, Mode mode, String mapId, int bots, int fragLimit, int roundSeconds, String status, String engineId, List<AccountService.Profile> players) {}
+    public record Plan(UUID id, Mode mode, String mapId, int bots, int fragLimit, int roundSeconds, String status, String engineId, List<AccountService.Profile> players, boolean rankedAiEnabled, int botRating) {}
+    private record Availability(UUID active, int rating) {}
     public record Ticket(String ticket, String engineUrl, UUID matchId, Instant expiresAt) {}
     public record Performance(String id, boolean bot, int kills, int deaths, Map<String, Integer> weaponKills, int humanKills, int humanDeaths, boolean abandoned) {
         public Performance(String id, boolean bot, int kills, int deaths, Map<String, Integer> weaponKills) { this(id, bot, kills, deaths, weaponKills, bot ? 0 : kills, bot ? 0 : deaths, false); }
@@ -36,29 +38,34 @@ public class MatchService {
     private final OnlineProperties properties;
     private final RatingService ratings;
     private final EngineRegistry engines;
+    private final boolean rankedAiEnabled;
     private final SecureRandom random = new SecureRandom();
     private final JsonMapper json = JsonMapper.builder().build();
-    public MatchService(JdbcTemplate db, AccountService accounts, GameCatalog catalog, OnlineProperties properties, RatingService ratings, EngineRegistry engines) { this.db = db; this.accounts = accounts; this.catalog = catalog; this.properties = properties; this.ratings = ratings; this.engines = engines; }
+    public MatchService(JdbcTemplate db, AccountService accounts, GameCatalog catalog, OnlineProperties properties, RatingService ratings, EngineRegistry engines, @Value("${linkshot.matchmaking.ranked-ai-enabled:true}") boolean rankedAiEnabled) { this.db = db; this.accounts = accounts; this.catalog = catalog; this.properties = properties; this.ratings = ratings; this.engines = engines; this.rankedAiEnabled = rankedAiEnabled; }
+    public boolean rankedAiEnabled() { return rankedAiEnabled; }
 
     // Only trusted server-side matchmaking may call this. There is deliberately
     // no browser endpoint which creates an online match or imports a LAN room.
     @Transactional
     public Plan create(Mode mode, List<UUID> players, int bots, String mapId, int fragLimit, int roundSeconds) {
-        if (mode == null || players == null || players.isEmpty() || new HashSet<>(players).size() != players.size() || players.size() + bots > 8 || bots < 0 || bots > 7 || mode == Mode.RANKED && (bots != 0 || players.size() < 2) || !catalog.maps().contains(mapId) || fragLimit < 1 || fragLimit > 200 || roundSeconds < 60 || roundSeconds > 3600) throw new IllegalArgumentException("Invalid online match assignment");
+        if (mode == null || players == null || players.isEmpty() || new HashSet<>(players).size() != players.size() || players.size() + bots > 8 || bots < 0 || bots > 7 || mode == Mode.RANKED && (players.size() + bots < 2 || bots > 0 && !rankedAiEnabled) || !catalog.maps().contains(mapId) || fragLimit < 1 || fragLimit > 200 || roundSeconds < 60 || roundSeconds > 3600) throw new IllegalArgumentException("Invalid online match assignment");
         UUID id = UUID.randomUUID();
-        db.update("INSERT INTO online_matches(id, mode, map_id, bot_count, frag_limit, round_seconds) VALUES (?, ?, ?, ?, ?, ?)", id, mode.name(), mapId, bots, fragLimit, roundSeconds);
+        db.update("INSERT INTO online_matches(id, mode, map_id, bot_count, frag_limit, round_seconds, ranked_ai_enabled) VALUES (?, ?, ?, ?, ?, ?, ?)", id, mode.name(), mapId, bots, fragLimit, roundSeconds, mode == Mode.RANKED && rankedAiEnabled);
+        int totalRating = 0;
         for (UUID player : players.stream().sorted().toList()) {
-            var active = db.query("SELECT active_match_id FROM profiles WHERE account_id = ? FOR UPDATE", (row, index) -> row.getObject(1, UUID.class), player);
-            if (active.size() != 1 || active.get(0) != null) throw new IllegalArgumentException("A player is unavailable for this match");
+            var active = db.query("SELECT active_match_id, casual_rating, ranked_rating FROM profiles WHERE account_id = ? FOR UPDATE", (row, index) -> new Availability(row.getObject(1, UUID.class), row.getInt(mode == Mode.RANKED ? 3 : 2)), player);
+            if (active.size() != 1 || active.getFirst().active() != null) throw new IllegalArgumentException("A player is unavailable for this match");
+            totalRating += active.getFirst().rating();
             db.update("INSERT INTO match_players(match_id, account_id) VALUES (?, ?)", id, player);
             db.update("UPDATE profiles SET active_match_id = ? WHERE account_id = ?", id, player);
         }
+        db.update("UPDATE online_matches SET bot_rating = ? WHERE id = ?", Math.round(totalRating / (float) players.size()), id);
         return plan(id);
     }
 
     public Plan plan(UUID id) {
         List<UUID> players = db.queryForList("SELECT account_id FROM match_players WHERE match_id = ? ORDER BY account_id", UUID.class, id);
-        return db.query("SELECT * FROM online_matches WHERE id = ?", (row, index) -> new Plan(id, Mode.valueOf(row.getString("mode")), row.getString("map_id"), row.getInt("bot_count"), row.getInt("frag_limit"), row.getInt("round_seconds"), row.getString("status"), row.getString("engine_id"), players.stream().map(accounts::profile).toList()), id).stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Unknown match"));
+        return db.query("SELECT * FROM online_matches WHERE id = ?", (row, index) -> new Plan(id, Mode.valueOf(row.getString("mode")), row.getString("map_id"), row.getInt("bot_count"), row.getInt("frag_limit"), row.getInt("round_seconds"), row.getString("status"), row.getString("engine_id"), players.stream().map(accounts::profile).toList(), row.getBoolean("ranked_ai_enabled"), row.getInt("bot_rating")), id).stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Unknown match"));
     }
     public List<UUID> pending() { return db.queryForList("SELECT id FROM online_matches WHERE status = 'PENDING' ORDER BY created_at LIMIT 32", UUID.class); }
     public Plan active(UUID account) {
@@ -72,7 +79,7 @@ public class MatchService {
         int changed = db.update("UPDATE online_matches SET status = 'CLAIMED', engine_id = ?, heartbeat_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'PENDING'", engineId, id);
         Plan plan = plan(id);
         if (changed != 1 && !(plan.status().equals("CLAIMED") && engineId.equals(plan.engineId()))) throw new IllegalArgumentException("Match is not available to this engine");
-        if (plan.mode() == Mode.RANKED && plan.bots() != 0) throw new IllegalArgumentException("Ranked matches cannot contain AI");
+        if (plan.mode() == Mode.RANKED && plan.bots() != 0 && !plan.rankedAiEnabled()) throw new IllegalArgumentException("Ranked AI is not enabled for this assignment");
         return plan;
     }
     public void heartbeat(UUID id, String engineId) {
@@ -114,7 +121,7 @@ public class MatchService {
         if (plan.status().equals("COMPLETED")) { if (!fingerprint.equals(prior)) throw new IllegalArgumentException("A different result was already settled"); return false; }
         if (!plan.status().equals("CLAIMED")) throw new IllegalArgumentException("Match cannot be settled");
         Performance winner = ordered.stream().filter(player -> !player.abandoned()).sorted(Comparator.comparingInt(Performance::kills).reversed().thenComparingInt(Performance::deaths)).findFirst().orElse(null);
-        var ratingChanges = ratings.settle(plan.mode(), ordered);
+        var ratingChanges = ratings.settle(plan.mode(), ordered, plan.botRating());
         for (Performance player : ordered) {
             if (player.bot()) continue;
             UUID account = UUID.fromString(player.id()); boolean won = winner != null && winner.id().equals(player.id());
@@ -137,7 +144,7 @@ public class MatchService {
         int bots = 0, kills = 0, deaths = 0, humanKills = 0, humanDeaths = 0;
         for (Performance player : players) {
             if (player.id() == null || player.kills() < 0 || player.kills() > plan.fragLimit() + 7 || player.deaths() < 0 || player.deaths() > plan.fragLimit() * 8 || player.weaponKills() == null || player.weaponKills().size() > 21) throw new IllegalArgumentException("Invalid result counts");
-            if (player.humanKills() < 0 || player.humanKills() > player.kills() || player.humanDeaths() < 0 || player.humanDeaths() > player.deaths() || player.bot() && (player.humanKills() != 0 || player.humanDeaths() != 0 || player.abandoned()) || plan.mode() == Mode.RANKED && (player.humanKills() != player.kills() || player.humanDeaths() != player.deaths())) throw new IllegalArgumentException("Invalid human combat ledger");
+            if (player.humanKills() < 0 || player.humanKills() > player.kills() || player.humanDeaths() < 0 || player.humanDeaths() > player.deaths() || player.bot() && (player.humanKills() != 0 || player.humanDeaths() != 0 || player.abandoned()) || plan.mode() == Mode.RANKED && plan.bots() == 0 && (player.humanKills() != player.kills() || player.humanDeaths() != player.deaths())) throw new IllegalArgumentException("Invalid human combat ledger");
             if (player.bot()) { bots++; if (!player.id().matches("bot-[A-Za-z0-9-]{8,50}")) throw new IllegalArgumentException("Invalid AI identity"); }
             else if (!humans.remove(player.id())) throw new IllegalArgumentException("Unknown result participant");
             int weapons = 0; for (var weapon : player.weaponKills().entrySet()) { if (!catalog.weapon(weapon.getKey()) || weapon.getValue() == null || weapon.getValue() < 0 || weapon.getValue() > player.kills()) throw new IllegalArgumentException("Invalid weapon ledger"); weapons += weapon.getValue(); }
@@ -145,7 +152,7 @@ public class MatchService {
             kills += player.kills(); deaths += player.deaths();
             humanKills += player.humanKills(); humanDeaths += player.humanDeaths();
         }
-        if (!humans.isEmpty() || bots != plan.bots() || plan.mode() == Mode.RANKED && bots != 0 || kills != deaths || humanKills != humanDeaths) throw new IllegalArgumentException("Invalid result integrity");
+        if (!humans.isEmpty() || bots != plan.bots() || plan.mode() == Mode.RANKED && bots != 0 && !plan.rankedAiEnabled() || kills != deaths || humanKills != humanDeaths) throw new IllegalArgumentException("Invalid result integrity");
     }
 
     @Transactional

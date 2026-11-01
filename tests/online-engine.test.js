@@ -11,9 +11,9 @@ function message(socket, type) {
     socket.on('message', receive);
   });
 }
-async function fixture(t, { mode = 'RANKED', bots = 0, clock } = {}) {
-  const id = randomUUID(), players = [0, 1].map((i) => ({ id: randomUUID(), callsign: `HUMAN ${i}`, ownedWeapons: ['rifle', 'pistol', 'shotgun', 'sniper'], weaponKills: {}, casualRating: 1000 }));
-  const tickets = new Map(), results = [], plan = { id, mode, bots, players, mapId: 'foundry', fragLimit: 1, roundSeconds: 60 }, client = {
+async function fixture(t, { mode = 'RANKED', bots = 0, humans = 2, rankedAiEnabled = false, botRating = 1000, clock } = {}) {
+  const id = randomUUID(), players = Array.from({ length: humans }, (_, i) => ({ id: randomUUID(), callsign: `HUMAN ${i}`, ownedWeapons: ['rifle', 'pistol', 'shotgun', 'sniper'], weaponKills: {}, casualRating: 1000 }));
+  const tickets = new Map(), results = [], plan = { id, mode, bots, players, rankedAiEnabled, botRating, mapId: 'foundry', fragLimit: 1, roundSeconds: 60 }, client = {
     pending: async () => [id], claim: async () => plan, heartbeat: async () => {}, cancel: async () => {},
     async consume(matchId, ticket) { const player = tickets.get(ticket); tickets.delete(ticket); if (matchId !== id || !player) throw new Error('Invalid ticket'); return player; },
     async complete(matchId, roster) { results.push({ id: matchId, roster }); return { settled: true }; },
@@ -24,6 +24,10 @@ async function fixture(t, { mode = 'RANKED', bots = 0, clock } = {}) {
     const ticket = Buffer.from(randomUUID()).toString('base64url').slice(0, 43); tickets.set(ticket, profile); const joined = message(socket, 'joined'); socket.send(JSON.stringify({ type: 'authenticate', matchId: id, ticket, ...extra })); socket.joined = await joined; return socket;
   };
   return { app, id, players, plan, client, join, results, port: info.port };
+}
+
+async function disconnect(socket, match, id) {
+  const clientClosed = new Promise((resolve) => socket.once('close', resolve)), serverClosed = new Promise((resolve) => match.sockets.get(id).once('close', resolve)); socket.close(); await Promise.all([clientClosed, serverClosed]);
 }
 
 test('the online gateway consumes Spring tickets, ignores spoofed identity/ownership and requires every assigned human before starting', async (t) => {
@@ -39,8 +43,17 @@ test('ranked weapon access is temporary and does not mutate the canonical online
   const player = f.app.matches.get(f.id).room.players.get(f.players[0].id); assert.equal(player.weaponId, 'm82'); assert.equal(player.ownedWeapons.length, 20); assert.equal(f.players[0].ownedWeapons.includes('m82'), false);
 });
 
-test('ranked AI assignments are rejected even if a compromised planner sends one', async (t) => {
+test('ranked AI assignments still require explicit permission from the authoritative plan', async (t) => {
   const f = await fixture(t, { bots: 1 }); await assert.rejects(() => f.app.load(f.id), /Invalid authoritative/); assert.equal(f.app.matches.size, 0);
+});
+
+test('a single human can play a temporary ranked AI match without it ending immediately or trusting browser AI flags', async (t) => {
+  const f = await fixture(t, { humans: 1, bots: 3, rankedAiEnabled: true, botRating: 1700 }); const socket = await f.join(f.players[0], { weaponId: 'm82', bots: 7 }); const match = f.app.matches.get(f.id);
+  f.app.tick(1 / 60); assert.equal(match.room.phase, 'active'); assert.equal(match.room.botDifficulty, 'advanced'); assert.equal(socket.joined.players.filter((player) => player.isBot).length, 3);
+  const player = match.room.players.get(f.players[0].id), bots = [...match.room.players.values()].filter((entry) => entry.isBot); match.room.world = { ...match.room.world, width: 100, depth: 100, obstacles: [] };
+  Object.assign(player, { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, protectedUntil: 0 }); bots.forEach((bot, index) => Object.assign(bot, { x: index ? 40 : 0, y: 0, z: index ? -40 : -1, hp: 1, protectedUntil: 0 }));
+  match.room.setInput(player.id, { fire: true, yaw: 0, spawnCount: player.spawnCount, equipmentSeq: player.equipmentSeq }); f.app.tick(1 / 60); await Promise.resolve();
+  assert.equal(match.room.phase, 'ended'); assert.equal(f.results.length, 1); assert.equal(f.results[0].roster.length, 4); assert.equal(f.results[0].roster.find((entry) => entry.id === player.id).humanKills, 0); assert.equal(player.kills, 1);
 });
 
 test('online authoritative kills settle the original round ID and complete canonical weapon ledgers once', async (t) => {
@@ -56,8 +69,7 @@ test('online authoritative kills settle the original round ID and complete canon
 test('reconnecting within the grace window retains the same player/life and never fills a disconnected ranked slot with AI', async (t) => {
   let now = 1000; const f = await fixture(t, { clock: () => now }); const a = await f.join(f.players[0]); await f.join(f.players[1]);
   const match = f.app.matches.get(f.id), player = match.room.players.get(f.players[0].id), life = player.spawnCount; player.hp = 75; player.ammo = 9;
-  const closed = new Promise((resolve) => a.once('close', resolve)); a.close(); await closed;
-  for (let i = 0; i < 20; i++) { if (!match.sockets.has(player.id)) break; await new Promise((resolve) => setImmediate(resolve)); }
+  await disconnect(a, match, player.id);
   match.room.impacts.set('wall', { id: 'persistent-shot', at: now, point: { x: 0, y: 1, z: 0 } });
   now += 5000; const restored = await f.join(f.players[0]); assert.equal(player.hp, 75); assert.equal(player.ammo, 9); assert.equal(player.spawnCount, life); assert.equal(restored.joined.impacts[0].id, 'persistent-shot');
   assert.equal([...match.room.players.values()].some((player) => player.isBot), false);
@@ -66,7 +78,7 @@ test('reconnecting within the grace window retains the same player/life and neve
 test('the thirty-second grace expiry marks a leaver last, submits abandonment and never spawns a replacement AI', async (t) => {
   let now = 1000; const f = await fixture(t, { clock: () => now }); const a = await f.join(f.players[0]); await f.join(f.players[1]); const notices = []; f.client.abandon = async (match, account) => notices.push({ match, account });
   const match = f.app.matches.get(f.id), player = match.room.players.get(f.players[0].id); player.kills = 9;
-  const closed = new Promise((resolve) => a.once('close', resolve)); a.close(); await closed; await new Promise((resolve) => setImmediate(resolve));
+  await disconnect(a, match, player.id);
   now += 29_999; f.app.tick(1 / 60); assert.equal(player.abandoned, undefined); assert.equal(match.room.phase, 'active');
   now++; f.app.tick(1 / 60); await Promise.resolve(); assert.equal(player.abandoned, true); assert.equal(player.hp, 0); assert.equal(player.respawnAt, Infinity); assert.equal(match.room.phase, 'ended'); assert.equal(match.room.result.winnerId, f.players[1].id); assert.equal(match.room.result.rewards[player.id].points, 0);
   assert.deepEqual(notices, [{ match: f.id, account: player.id }]); assert.equal(f.results.length, 1); assert.equal(f.results[0].roster.find((entry) => entry.id === player.id).abandoned, true); assert.equal([...match.room.players.values()].some((entry) => entry.isBot), false);
@@ -74,6 +86,6 @@ test('the thirty-second grace expiry marks a leaver last, submits abandonment an
 
 test('a disconnect during the grace window cannot retroactively rewrite an already completed result as abandonment', async (t) => {
   let now = 1000; const f = await fixture(t, { clock: () => now }); const a = await f.join(f.players[0]); await f.join(f.players[1]); const match = f.app.matches.get(f.id), player = match.room.players.get(f.players[0].id);
-  const closed = new Promise((resolve) => a.once('close', resolve)); a.close(); await closed; await new Promise((resolve) => setImmediate(resolve)); match.room.finish(); f.app.tick(1 / 60); await Promise.resolve();
+  await disconnect(a, match, player.id); match.room.finish(); f.app.tick(1 / 60); await Promise.resolve();
   now += 30_001; f.app.tick(1 / 60); assert.equal(player.abandoned, undefined); assert.equal(f.results.length, 1); assert.equal(f.results[0].roster.find((entry) => entry.id === player.id).abandoned, false);
 });

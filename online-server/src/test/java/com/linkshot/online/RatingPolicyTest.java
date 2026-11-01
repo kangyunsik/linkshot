@@ -5,14 +5,14 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class RatingPolicyTest {
-    @Test void casualAiOnlyResultsNeverChangeSkillRating() {
-        var result = RatingPolicy.settle(false, List.of(new RatingPolicy.Player("human", 1000, 50, 0, 0, 0, false)));
-        assertEquals(0, result.get("human").ratingDelta());
+    @Test void casualWinsAgainstAiRaiseSkillRatingAndLossesLowerIt() {
+        var result = RatingPolicy.settle(false, List.of(new RatingPolicy.Player("human", 1000, 2, 0, 0, 0, false), new RatingPolicy.Player("bot", 1000, 0, 2, 0, 0, false)));
+        assertEquals(12, result.get("human").ratingDelta()); assertEquals(-12, result.get("bot").ratingDelta());
     }
-    @Test void casualRatingUsesOnlyHumanCombatAndCannotBeFarmedByKillingAi() {
+    @Test void casualRatingUsesTotalCombatIncludingAiKills() {
         var farmer = new RatingPolicy.Player("farmer", 1000, 40, 2, 0, 2, false); var fighter = new RatingPolicy.Player("fighter", 1000, 2, 0, 2, 0, false);
         var result = RatingPolicy.settle(false, List.of(farmer, fighter));
-        assertEquals(-12, result.get("farmer").ratingDelta()); assertEquals(12, result.get("fighter").ratingDelta());
+        assertEquals(12, result.get("farmer").ratingDelta()); assertEquals(-12, result.get("fighter").ratingDelta());
     }
     @Test void rankedPairwiseEloRewardsHumanPlacementAndIsZeroSumWithoutAbandonment() {
         var players = List.of(new RatingPolicy.Player("a", 1000, 4, 1, 4, 1, false), new RatingPolicy.Player("b", 1000, 3, 2, 3, 2, false), new RatingPolicy.Player("c", 1000, 2, 3, 2, 3, false), new RatingPolicy.Player("d", 1000, 1, 4, 1, 4, false));

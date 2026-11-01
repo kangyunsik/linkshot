@@ -65,8 +65,8 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
     const pending = (async () => {
       const plan = await client.claim(id);
       if (closed) throw new Error('Engine stopped.');
-      if (plan.id !== id || !['CASUAL', 'RANKED'].includes(plan.mode) || !Array.isArray(plan.players) || !plan.players.length || plan.players.length + plan.bots > RULES.maxPlayers || !Number.isInteger(plan.bots) || plan.bots < 0 || plan.mode === 'RANKED' && (plan.bots !== 0 || plan.players.length < 2) || !MAPS.some((map) => map.id === plan.mapId) || plan.players.some((player) => !validId(player.id)) || new Set(plan.players.map((player) => player.id)).size !== plan.players.length) throw new Error('Invalid authoritative match assignment.');
-      const average = plan.players.reduce((sum, player) => sum + player.casualRating, 0) / plan.players.length;
+      if (plan.id !== id || !['CASUAL', 'RANKED'].includes(plan.mode) || !Array.isArray(plan.players) || !plan.players.length || plan.players.length + plan.bots > RULES.maxPlayers || !Number.isInteger(plan.bots) || plan.bots < 0 || plan.mode === 'RANKED' && (plan.players.length + plan.bots < 2 || plan.bots !== 0 && plan.rankedAiEnabled !== true) || !MAPS.some((map) => map.id === plan.mapId) || plan.players.some((player) => !validId(player.id)) || new Set(plan.players.map((player) => player.id)).size !== plan.players.length) throw new Error('Invalid authoritative match assignment.');
+      const average = Number.isInteger(plan.botRating) && plan.botRating >= 0 && plan.botRating <= 10_000 ? plan.botRating : plan.players.reduce((sum, player) => sum + player.casualRating, 0) / plan.players.length;
       const room = new OnlineRoom(id.slice(0, 5).toUpperCase(), { mode: plan.mode.toLowerCase(), mapId: plan.mapId, bots: plan.bots, fragLimit: plan.fragLimit, roundSeconds: plan.roundSeconds, botDifficulty: average >= 1500 ? 'advanced' : average >= 1100 ? 'intermediate' : 'beginner', clock });
       for (const profile of plan.players) room.addPlayer(profile.id, profile.callsign, false, { ownedWeapons: plan.mode === 'RANKED' ? WEAPONS.map((weapon) => weapon.id) : profile.ownedWeapons, weaponKills: profile.weaponKills, outfitId: profile.outfitId, characterId: profile.characterId });
       room.phase = 'waiting'; room.roundId = id; room.hostId = null;
@@ -106,7 +106,7 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
       if (match.room.phase === 'waiting' && now > match.deadline || now - match.lastHealthy > 60_000) { void cancel(match); continue; }
       if (match.room.phase === 'active') for (const [id, until] of match.disconnected) if (now >= until) { const player = match.room.players.get(id); player.hp = 0; player.respawnAt = Infinity; player.abandoned = true; match.disconnected.delete(id); match.abandoned.add(id); if (client.abandon) void client.abandon(match.id, id).catch(() => {}); }
       const remaining = match.plan.players.length - match.abandoned.size;
-      if (match.room.phase === 'active' && (remaining === 0 || match.plan.mode === 'RANKED' && remaining <= 1)) match.room.finish();
+      if (match.room.phase === 'active' && (remaining === 0 || match.plan.mode === 'RANKED' && match.plan.bots === 0 && remaining <= 1)) match.room.finish();
       match.room.tick(dt);
       if (match.room.phase === 'ended') void settle(match);
       if (match.retireAt && now >= match.retireAt) { for (const socket of match.sockets.values()) socket.close(1000, 'Round complete'); matches.delete(match.id); }

@@ -5,7 +5,7 @@ import { PLAY_MODES, recordsLocalProgress } from '../public/play-modes.js';
 test('five modes separate browser-local lessons/practice, LAN and future online services', () => {
   assert.deepEqual(PLAY_MODES.map((mode) => mode.id), ['tutorial', 'practice', 'lan', 'casual', 'ranked']);
   assert.deepEqual(PLAY_MODES.map((mode) => mode.transport), ['local', 'local', 'lan', 'online', 'online']);
-  assert.match(PLAY_MODES.at(-1).description, /AI 보충 없음/);
+  assert.match(PLAY_MODES.at(-1).description, /실력 기반 4인 개인전/);
 });
 
 test('tutorial and online snapshots cannot write local kill, mastery, point or round-award ledgers', () => {

@@ -36,6 +36,8 @@ public class MatchmakingService {
     public boolean available() { return configured() && engines.online(); }
     public int players() { return required; }
     public int waitSeconds() { return waitSeconds; }
+    public boolean rankedAiEnabled() { return matches.rankedAiEnabled(); }
+    private boolean fillsWithAi(MatchService.Mode mode) { return mode == MatchService.Mode.CASUAL || rankedAiEnabled(); }
     private long waited(Entry entry) { return Math.max(0, Duration.between(entry.queuedAt(), Instant.now()).toSeconds()); }
     private int gap(Entry entry) { return (int) Math.min(600L, 150 + waited(entry) / 15 * 50); }
     private List<Entry> entries() { return db.query("SELECT * FROM match_queue ORDER BY queued_at, account_id", (row, index) -> new Entry(row.getObject("account_id", UUID.class), MatchService.Mode.valueOf(row.getString("mode")), row.getInt("rating"), row.getTimestamp("queued_at").toInstant())); }
@@ -63,7 +65,7 @@ public class MatchmakingService {
         if (entry.isEmpty()) return new Status("IDLE", null, 0, 0, required, null, 0, null, available() ? "" : "온라인 전투 노드 연결을 기다리는 중입니다.");
         Entry own = entry.get(); int elapsed = (int) Math.min(Integer.MAX_VALUE, waited(own)), gap = gap(own);
         int found = (int) Math.min(required, all.stream().filter(item -> item.mode() == own.mode() && Math.abs(item.rating() - own.rating()) <= gap).count());
-        return new Status("QUEUED", own.mode(), elapsed, found, required, own.mode() == MatchService.Mode.CASUAL ? Math.max(0, waitSeconds - elapsed) : null, gap, null, available() ? engines.freeSlots() > 0 ? "" : "전투 서버 정원을 기다리는 중입니다." : "전투 노드 재연결을 기다리는 중입니다.");
+        return new Status("QUEUED", own.mode(), elapsed, found, required, fillsWithAi(own.mode()) ? Math.max(0, waitSeconds - elapsed) : null, gap, null, available() ? engines.freeSlots() > 0 ? "" : "전투 서버 정원을 기다리는 중입니다." : "전투 노드 재연결을 기다리는 중입니다.");
     }
     @Transactional public Status cancel(UUID account) {
         db.queryForObject("SELECT id FROM matchmaking_lock WHERE id = 1 FOR UPDATE", Integer.class);
@@ -85,9 +87,9 @@ public class MatchmakingService {
             if (slots <= 0) break; if (used.contains(anchor.account())) continue;
             int gap = gap(anchor); var group = new ArrayList<Entry>();
             for (Entry candidate : all) if (!used.contains(candidate.account()) && candidate.mode() == anchor.mode() && Math.abs(candidate.rating() - anchor.rating()) <= gap && group.size() < required) group.add(candidate);
-            boolean ready = group.size() == required || anchor.mode() == MatchService.Mode.CASUAL && waited(anchor) >= waitSeconds;
+            boolean ready = group.size() == required || fillsWithAi(anchor.mode()) && waited(anchor) >= waitSeconds;
             if (!ready) continue;
-            int bots = anchor.mode() == MatchService.Mode.RANKED ? 0 : required - group.size();
+            int bots = required - group.size();
             matches.create(anchor.mode(), group.stream().map(Entry::account).toList(), bots, catalog.maps().get(random.nextInt(catalog.maps().size())), fragLimit, roundSeconds); slots--;
             for (Entry item : group) { used.add(item.account()); db.update("DELETE FROM match_queue WHERE account_id = ?", item.account()); }
         }

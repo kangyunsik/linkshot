@@ -300,6 +300,7 @@ function handleTutorialState(data) {
 }
 
 function renderOnlineAccount() {
+  renderOnlineProfileStats();
   $('online-server-state').textContent = onlineAvailable ? 'SPRING ONLINE SERVICES · 연결됨' : '온라인 서버에 연결되어 있지 않습니다';
   $('online-auth-form').hidden = !!onlineUser; $('online-profile-summary').hidden = !onlineUser; $('online-logout').hidden = !onlineUser;
   if (onlineUser) $('online-profile-summary').textContent = `${onlineUser.callsign} · 온라인 ${onlineUser.points} LP · ${onlineUser.kills} K / ${onlineUser.deaths} D · 일반 ${onlineUser.casualRating} · ${rankText(onlineUser.rankTier, onlineUser.rankDivision, onlineUser.rankPoints, onlineUser.placementsPlayed)}`;
@@ -312,6 +313,14 @@ function renderOnlineAccount() {
   updateDeployButton();
 }
 function rankText(tier, division = 5, points = 0, placements = 0) { return tier === 'UNRANKED' ? `배치 ${placements || 0}/10` : tier === 'CHALLENGER' ? 'CHALLENGER' : `${tier} ${['', 'I', 'II', 'III', 'IV', 'V'][division]} · ${points} 승급점수`; }
+function renderOnlineProfileStats() {
+  const user = onlineUser, tierNames = { BRONZE: '브론즈', SILVER: '실버', GOLD: '골드', PLATINUM: '플래티넘', DIAMOND: '다이아', CHALLENGER: '챌린저' };
+  $('profile-casual-rating').textContent = user ? user.casualRating.toLocaleString('ko-KR') : '—';
+  $('profile-casual-status').textContent = user ? `${user.callsign} · 온라인 일반 점수` : onlineApi ? '일반 점수 · 온라인 로그인 필요' : '일반 점수 · 온라인 서버 미연결';
+  $('profile-rank-tier').textContent = !user ? '—' : user.rankTier === 'UNRANKED' ? '배치 중' : user.rankTier === 'CHALLENGER' ? tierNames.CHALLENGER : `${tierNames[user.rankTier] || user.rankTier} ${['', 'I', 'II', 'III', 'IV', 'V'][user.rankDivision] || ''}`;
+  $('profile-rank-progress').textContent = !user ? '랭크 티어 · 온라인 로그인 필요' : user.rankTier === 'UNRANKED' ? `온라인 · 배치 ${user.placementsPlayed || 0}/10` : `온라인 · ${user.rankPoints} 승급점수`;
+  $('profile-rank-tier').title = user ? rankText(user.rankTier, user.rankDivision, user.rankPoints, user.placementsPlayed) : '온라인 계정의 랭크 티어';
+}
 async function connectOnlineServices() {
   if (!onlineApi || onlineServicePolling) return;
   onlineServicePolling = true; const generation = onlineAuthGeneration;
@@ -334,7 +343,7 @@ function renderOnlineQueue() {
   if (!visible) { updateDeployButton(); return; }
   const queued = state.state === 'QUEUED', ready = state.state === 'READY';
   $('online-queue-title').textContent = queued ? `${state.mode === 'RANKED' ? '랭크' : '일반'} 매칭 대기 · ${state.elapsedSeconds}초` : ready ? '배정된 경기 · 입장 / 재접속 가능' : state.state === 'ABANDONED' ? '탈주 처리 · 경기 정산 대기' : '경기 배정 완료 · 전투 노드 준비 중';
-  $('online-queue-detail').textContent = queued ? `사람 ${state.playersFound}/${state.requiredPlayers} · 허용 점수 차이 ±${state.ratingGap} · ${state.aiInSeconds == null ? 'AI 추가 없음' : `${state.aiInSeconds}초 후 AI로 빈자리 보충`}` : state.matchId ? `경기 ${state.matchId.slice(0, 8)} · ${state.mode === 'RANKED' ? '사람 전용 / 동일 장비' : '사람 + 명시된 AI'}` : '';
+  $('online-queue-detail').textContent = queued ? `매칭 인원 ${state.playersFound}/${state.requiredPlayers}` : state.matchId ? `경기 ${state.matchId.slice(0, 8)} · 입장 준비` : '';
   $('online-queue-reason').textContent = state.reason || (queued ? '매칭 대기 화면을 유지해 주세요. 다른 모드로 바꾸면 대기를 취소합니다.' : '연결 종료 후 30초 안에는 같은 생명·탄약으로 재접속할 수 있습니다.');
   $('online-cancel-queue').hidden = !queued; $('online-cancel-queue').disabled = onlineBusy; $('online-reconnect').hidden = !ready; $('online-reconnect').disabled = busy || onlineBusy;
   updateDeployButton();
@@ -434,7 +443,7 @@ function renderProfile() {
   $('profile-full-id').textContent = profile.id;
   $('profile-storage-detail').textContent = profileStore.scope === 'host' ? '운영체제 사용자 설정 폴더의 LINKSHOT/profile.json' : '현재 사이트 주소의 이 브라우저 로컬 저장소';
   $('profile-rounds').textContent = `${profile.roundsPlayed} / ${profile.wins}`; $('profile-earned').textContent = `${format(profile.totalEarned)} LP`;
-  renderRoundReward(); renderShop(); renderWeaponOwnership();
+  renderRoundReward(); renderShop(); renderWeaponOwnership(); renderOnlineProfileStats();
 }
 
 function syncProgress(data) {
@@ -453,7 +462,7 @@ function renderRoundReward() {
     if (!onlineReceipt) return;
     const receipt = onlineReceipt; $('round-points').textContent = receipt.points; $('reward-completion').textContent = receipt.completion; $('reward-kills').textContent = receipt.killBonus; $('reward-win').textContent = receipt.winBonus;
     $('round-reward-status').textContent = receipt.abandoned ? '온라인 서버 저장 · 탈주 보상 없음' : '온라인 서버에 저장됨 · 기기 LP와 별도'; onlineResultSummary.hidden = false;
-    onlineResultSummary.textContent = receipt.mode === 'CASUAL' ? `일반 레이팅 ${receipt.casualRatingDelta >= 0 ? '+' : ''}${receipt.casualRatingDelta} → ${receipt.casualRatingAfter} · AI만 상대하면 레이팅 변화 없음` : `승급점수 ${receipt.rankPointsDelta >= 0 ? '+' : ''}${receipt.rankPointsDelta} · ${rankText(receipt.rankTier, receipt.rankDivision, receipt.rankPointsAfter, receipt.placementsPlayed)}`;
+    onlineResultSummary.textContent = receipt.mode === 'CASUAL' ? `일반 레이팅 ${receipt.casualRatingDelta >= 0 ? '+' : ''}${receipt.casualRatingDelta} → ${receipt.casualRatingAfter}` : `승급점수 ${receipt.rankPointsDelta >= 0 ? '+' : ''}${receipt.rankPointsDelta} · ${rankText(receipt.rankTier, receipt.rankDivision, receipt.rankPointsAfter, receipt.placementsPlayed)}`;
     return;
   }
   onlineResultSummary.hidden = true;
@@ -723,7 +732,7 @@ $('tutorial-advance').addEventListener('click', () => { if (game?.requestTutoria
 $('tutorial-retry').addEventListener('click', () => { send({ type: 'restart' }); game?.lock(); });
 $('tutorial-skip').addEventListener('click', () => { store('linkshot-tutorial-v1', stored('linkshot-tutorial-v1', 'dismissed')); leaveGame(); setMode('practice'); $('tutorial-recommendation').hidden = true; });
 $('tutorial-recommendation').hidden = !!stored('linkshot-tutorial-v1', '');
-const extraControls = document.createElement('p'); extraControls.className = 'controls-addition'; extraControls.textContent = `G: 가까운 바닥 총과 교체합니다. 들고 있던 총은 남은 탄약 그대로 바닥에 남습니다. 교체할 총이 없으면 아무 일도 일어나지 않으며, 총만 버리는 기능은 없습니다. 사망 시에도 사용하던 총을 떨어뜨립니다. 주운 총은 영구 해금이나 다음 부활 장비를 바꾸지 않습니다. 사망 후 E: ${WEAPONS.length}종 목록에서 다음 부활 무기 선택 (처음 10종은 숫자 1–9, 0). 숫자·휠로 생존 중 교체는 불가 · C / Ctrl: 앉기 (달리기·공중에서는 불가). 달리거나 공중에서 쏘면 탄이 크게 퍼집니다. 벽·바닥 탄흔은 약 1분 유지되며 무기·탄약은 우측 하단에만 표시합니다. 온라인 일반은 4인·30초 후 AI 보충, 랭크는 4명 모두 사람·20종 무기 임시 허용입니다. 온라인 계정과 기기 LP/구매 내역은 별개이며 연결 종료 후 재접속 유예는 30초입니다.`; $('help-dialog').append(extraControls);
+const extraControls = document.createElement('p'); extraControls.className = 'controls-addition'; extraControls.textContent = `G: 가까운 바닥 총과 교체합니다. 들고 있던 총은 남은 탄약 그대로 바닥에 남습니다. 교체할 총이 없으면 아무 일도 일어나지 않으며, 총만 버리는 기능은 없습니다. 사망 시에도 사용하던 총을 떨어뜨립니다. 주운 총은 영구 해금이나 다음 부활 장비를 바꾸지 않습니다. 사망 후 E: ${WEAPONS.length}종 목록에서 다음 부활 무기 선택 (처음 10종은 숫자 1–9, 0). 숫자·휠로 생존 중 교체는 불가 · C / Ctrl: 앉기 (달리기·공중에서는 불가). 달리거나 공중에서 쏘면 탄이 크게 퍼집니다. 벽·바닥 탄흔은 약 1분 유지되며 무기·탄약은 우측 하단에만 표시합니다. 온라인은 4인 개인전이며 일반은 AI 상대 성적도 레이팅에 반영합니다. 랭크는 현재 임시로 AI 보충을 허용하며 20종 무기를 경기 안에서만 허용합니다. 온라인 계정과 기기 LP/구매 내역은 별개이며 연결 종료 후 재접속 유예는 30초입니다.`; $('help-dialog').append(extraControls);
 if (SOLO) {
   document.body.classList.add('solo-edition'); document.title = 'LINKSHOT · 링크샷 — Solo combat';
   document.querySelector('.page-heading h1').textContent = '서버 없이 훈련하고, 함께 교전하세요.';

@@ -116,13 +116,11 @@ class OnlineServerTest {
         var response = client.http.send(allowed, HttpResponse.BodyHandlers.ofString()); assertEquals(200, response.statusCode()); assertEquals("http://127.0.0.1:4174", response.headers().firstValue("Access-Control-Allow-Origin").orElseThrow()); assertEquals("true", response.headers().firstValue("Access-Control-Allow-Credentials").orElseThrow());
     }
 
-    @Test void rankedAssignmentsNeverContainBotsAndAnAccountCannotJoinTwoActiveMatches() {
+    @Test void temporaryRankedAiAssignmentsAreServerOwnedAndAnAccountCannotJoinTwoActiveMatches() {
         var a = account(); var b = account();
-        assertThrows(IllegalArgumentException.class, () -> matches.create(MatchService.Mode.RANKED, List.of(a.id()), 1, "foundry", 5, 60));
-        assertNull(matches.active(a.id()));
-        var plan = matches.create(MatchService.Mode.RANKED, List.of(a.id(), b.id()), 0, "foundry", 5, 60);
+        var plan = matches.create(MatchService.Mode.RANKED, List.of(a.id(), b.id()), 1, "foundry", 5, 60); assertTrue(plan.rankedAiEnabled());
         assertThrows(IllegalArgumentException.class, () -> matches.create(MatchService.Mode.CASUAL, List.of(a.id()), 1, "longrail", 5, 60));
-        assertEquals(plan.id(), matches.active(a.id()).id()); assertEquals(0, matches.claim(plan.id(), "test-engine-ranked").bots());
+        assertEquals(plan.id(), matches.active(a.id()).id()); assertEquals(1, matches.claim(plan.id(), "test-engine-ranked").bots());
         assertThrows(IllegalArgumentException.class, () -> matches.claim(plan.id(), "different-engine"));
     }
 

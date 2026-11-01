@@ -11,7 +11,7 @@ test('all five modes explain their execution paths; unconfigured online modes ne
   for (const name of ['일반', '랭크']) {
     await page.getByRole('tab', { name, exact: true }).click(); await expect(page.locator('#mode-unavailable')).toContainText('Java/Spring Boot'); await expect(page.locator('#create-button')).toBeDisabled();
   }
-  await expect(page.locator('#mode-description')).toContainText('AI 보충 없음');
+  await expect(page.locator('#mode-description')).toContainText('실력 기반 4인 개인전');
   await page.getByRole('tab', { name: 'LAN 대전', exact: true }).click(); await expect(page.locator('#lan-connect-guide')).toBeVisible(); await expect(page.locator('#mode-unavailable')).toContainText('LAN 서버'); await expect(page.locator('#join-section')).toBeHidden();
   await page.getByRole('tab', { name: '혼자 연습', exact: true }).click(); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible(); await expect(page.locator('#create-button')).toBeEnabled();
   await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/five-play-modes.png', fullPage: true }); expect(sockets).toEqual([]); expect(apis).toEqual([]); expect(errors).toEqual([]);

@@ -7,7 +7,7 @@ import net from 'node:net';
 import { createProfile } from '../../shared/progression.js';
 import { networkSettings } from '../../scripts/create-online-env.mjs';
 
-async function services(origin, { engine = false, wait = 1, lanHost = '' } = {}) {
+async function services(origin, { engine = false, wait = 1, lanHost = '', rankedAi = true } = {}) {
   await mkdir('artifacts/online-browser', { recursive: true }); const data = await mkdtemp(path.resolve('artifacts/online-browser/match-')), secret = randomBytes(48).toString('base64url'), children = [];
   const start = async (args, env, expression) => {
     const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } }); children.push(child); let output = '';
@@ -16,7 +16,7 @@ async function services(origin, { engine = false, wait = 1, lanHost = '' } = {})
   };
   const close = async () => { for (const child of children.toReversed()) { const stopped = new Promise((resolve) => { if (child.exitCode !== null || child.signalCode !== null) resolve(); else child.once('exit', resolve); }); child.kill('SIGTERM'); await stopped; } };
   try {
-    const apiUrl = await start(['scripts/run-online-dev.mjs'], { ONLINE_BIND: lanHost ? '0.0.0.0' : '127.0.0.1', ONLINE_PORT: '0', ONLINE_DATA_DIR: data, FRONTEND_ORIGINS: origin, ENGINE_SECRET: secret, CASUAL_WAIT_SECONDS: String(wait), MATCH_ROUND_SECONDS: '60', MATCH_FRAG_LIMIT: '1' }, /LINKSHOT LOCAL API (http:\/\/127\.0\.0\.1:\d+)/);
+    const apiUrl = await start(['scripts/run-online-dev.mjs'], { ONLINE_BIND: lanHost ? '0.0.0.0' : '127.0.0.1', ONLINE_PORT: '0', ONLINE_DATA_DIR: data, FRONTEND_ORIGINS: origin, ENGINE_SECRET: secret, RANKED_AI_ENABLED: String(rankedAi), CASUAL_WAIT_SECONDS: String(wait), MATCH_ROUND_SECONDS: '60', MATCH_FRAG_LIMIT: '1' }, /LINKSHOT LOCAL API (http:\/\/127\.0\.0\.1:\d+)/);
     if (engine) {
       let port = 0;
       if (lanHost) { const probe = net.createServer(); await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve)); port = probe.address().port; await new Promise((resolve) => probe.close(resolve)); }
@@ -57,11 +57,13 @@ test('real Spring/PostgreSQL browser authentication is separate from device LP, 
     await page.goto(origin); await page.getByRole('tab', { name: '일반', exact: true }).click(); await expect(page.locator('#online-server-state')).toContainText('연결됨');
     const username = 'ui_' + randomBytes(7).toString('hex'); await page.locator('#online-username').fill(username); await page.locator('#online-password').fill('test-only-long-passphrase'); await page.locator('#online-callsign').fill('ONLINE TESTER');
     await page.getByRole('button', { name: '온라인 계정 만들기', exact: true }).click(); await expect(page.locator('#online-profile-summary')).toContainText('ONLINE TESTER · 온라인 0 LP'); await expect(page.locator('#profile-points')).toHaveText('1,234'); await expect(page.locator('#online-password')).toHaveValue('');
+    await expect(page.locator('#profile-casual-rating')).toHaveText('1,000'); await expect(page.locator('#profile-rank-tier')).toHaveText('배치 중'); await expect(page.locator('#profile-rank-progress')).toContainText('배치 0/10');
     const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1'))); expect(stored.points).toBe(1234); expect(stored.ownedWeapons).toContain('m82');
     const cookie = (await context.cookies(apiUrl + '/api')).find((cookie) => cookie.name === 'LINKSHOTSESSION'); expect(cookie?.httpOnly).toBe(true); expect(cookie?.path).toBe('/api');
     expect(await page.evaluate(() => Object.keys(localStorage).some((key) => /token|password|session/i.test(key)))).toBe(false);
     await page.screenshot({ path: 'artifacts/spring-online-account.png', fullPage: true });
     await page.getByRole('button', { name: '온라인 로그아웃', exact: true }).click(); await expect(page.locator('#online-auth-form')).toBeVisible();
+    await expect(page.locator('#profile-casual-rating')).toHaveText('—'); await expect(page.locator('#profile-rank-tier')).toHaveText('—');
     await page.locator('#online-password').fill('test-only-long-passphrase'); await page.getByRole('button', { name: '온라인 로그인', exact: true }).click(); await expect(page.locator('#online-profile-summary')).toContainText('ONLINE TESTER · 온라인 0 LP'); await expect(page.locator('#create-button')).toBeDisabled(); expect(errors).toEqual([]);
   } finally {
     const stopped = new Promise((resolve) => { if (child.exitCode !== null || child.signalCode !== null) resolve(); else child.once('exit', resolve); }); child.kill('SIGTERM'); await stopped;
@@ -77,23 +79,23 @@ test('casual matchmaking fills three empty slots with labelled AI and enters the
     await expect.poll(() => state.latest?.room.phase).toBe('active'); expect(state.latest.players).toHaveLength(4); expect(state.latest.players.filter((player) => player.isBot)).toHaveLength(3); expect(state.latest.room.mode).toBe('casual'); expect(state.latest.room.mapId).not.toBe('training');
     await expect(page.locator('#profile-points')).toHaveText('1,234'); expect(state.errors).toEqual([]);
     await page.screenshot({ path: 'artifacts/casual-online-ai-fill.png' });
-    await expect(page.locator('#round-overlay')).toBeVisible({ timeout: 75_000 }); await expect(page.locator('#round-reward-status')).toContainText('온라인 서버에 저장됨', { timeout: 15_000 }); await expect(page.locator('#online-rating-summary')).toContainText('일반 레이팅 +0 → 1000');
+    await expect(page.locator('#round-overlay')).toBeVisible({ timeout: 75_000 }); await expect(page.locator('#round-reward-status')).toContainText('온라인 서버에 저장됨', { timeout: 15_000 }); await expect(page.locator('#online-rating-summary')).toContainText('일반 레이팅');
     const saved = await page.evaluate(async (base) => { const account = await (await fetch(base + '/api/account', { credentials: 'include' })).json(), history = await (await fetch(base + '/api/results', { credentials: 'include' })).json(); return { account, history, local: JSON.parse(localStorage.getItem('linkshot-profile-v1')) }; }, backend.apiUrl);
-    expect(saved.account.points).toBeGreaterThanOrEqual(50); expect(saved.account.casualRating).toBe(1000); expect(saved.history).toHaveLength(1); expect(saved.history[0].points).toBe(saved.account.points); expect(saved.local.points).toBe(1234); expect(saved.local.kills).toBe(0); expect(saved.local.roundsPlayed).toBe(0); expect(state.errors).toEqual([]);
+    expect(saved.account.points).toBeGreaterThanOrEqual(50); expect(saved.history).toHaveLength(1); expect(saved.account.casualRating).toBe(1000 + saved.history[0].casualRatingDelta); expect(saved.history[0].points).toBe(saved.account.points); expect(saved.local.points).toBe(1234); expect(saved.local.kills).toBe(0); expect(saved.local.roundsPlayed).toBe(0); await expect(page.locator('#profile-casual-rating')).toHaveText(saved.account.casualRating.toLocaleString('ko-KR')); expect(state.errors).toEqual([]);
   } finally { await context.close(); await backend.close(); }
 });
 
-test('ranked waits for four humans, grants only temporary weapons and reconnects without resetting the player', async ({ browser }) => {
+test('ranked can still be switched to human-only queues while temporary weapon access and reconnect state remain intact', async ({ browser }) => {
   test.skip(process.env.ONLINE_BROWSER_TEST !== '1', 'Optional online integration.'); test.setTimeout(210_000);
-  const origin = `http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}`, backend = await services(origin, { engine: true }), contexts = [], entrants = [];
+  const origin = `http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}`, backend = await services(origin, { engine: true, rankedAi: false }), contexts = [], entrants = [];
   try {
     for (let i = 0; i < 4; i++) { const context = await browser.newContext({ viewport: { width: 1280, height: 800 } }); contexts.push(context); entrants.push(await onlinePage(context, backend.apiUrl, origin, '랭크', i)); }
     await entrants[0].page.locator('#online-weapon-choice').selectOption('m82');
     await entrants[0].page.getByRole('button', { name: '랭크 매칭', exact: true }).click(); await expect(entrants[0].page.locator('#online-cancel-queue')).toBeVisible(); await entrants[0].page.locator('#online-cancel-queue').click(); await expect(entrants[0].page.locator('#online-queue-panel')).toBeHidden();
     for (const entrant of entrants.slice(0, 3)) await entrant.page.getByRole('button', { name: '랭크 매칭', exact: true }).click();
-    await expect(entrants[0].page.locator('#online-queue-detail')).toContainText('사람 3/4'); const started = Date.now();
+    await expect(entrants[0].page.locator('#online-queue-detail')).toContainText('매칭 인원 3/4'); const started = Date.now();
     await expect.poll(async () => { expect(entrants.slice(0, 3).every((entry) => entry.state.latest === null)).toBe(true); return Date.now() - started; }).toBeGreaterThan(2500);
-    await expect(entrants[0].page.locator('#online-queue-detail')).toContainText('AI 추가 없음');
+    await expect(entrants[0].page.locator('#online-queue-panel')).not.toContainText(/허용 점수 차이|AI 추가 없음|AI로 빈자리/);
     await entrants[3].page.getByRole('button', { name: '랭크 매칭', exact: true }).click();
     for (const entrant of entrants) { await expect(entrant.page.locator('#pause-overlay')).toBeVisible({ timeout: 25_000 }); await expect.poll(() => entrant.state.latest?.room.phase).toBe('active'); expect(entrant.state.latest.players).toHaveLength(4); expect(entrant.state.latest.players.some((player) => player.isBot)).toBe(false); }
     const first = entrants[0], self = first.state.latest.players.find((player) => player.name === 'PLAYER 0'), matchId = first.state.latest.room.roundId;
@@ -105,6 +107,17 @@ test('ranked waits for four humans, grants only temporary weapons and reconnects
     for (const entrant of entrants) expect(entrant.state.errors).toEqual([]);
     await first.page.screenshot({ path: 'artifacts/ranked-online-human-match.png' });
   } finally { for (const context of contexts) await context.close(); await backend.close(); }
+});
+
+test('temporary ranked matchmaking fills a solo account with labelled AI and saves its placement without granting weapon ownership', async ({ browser }) => {
+  test.skip(process.env.ONLINE_BROWSER_TEST !== '1', 'Optional online integration.'); test.setTimeout(150_000);
+  const origin = `http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}`, backend = await services(origin, { engine: true }), context = await browser.newContext();
+  try {
+    const { page, state } = await onlinePage(context, backend.apiUrl, origin, '랭크', 8); await page.locator('#online-weapon-choice').selectOption('m82'); await page.getByRole('button', { name: '랭크 매칭', exact: true }).click();
+    await expect(page.locator('#pause-overlay')).toBeVisible({ timeout: 25_000 }); await expect.poll(() => state.latest?.room.phase).toBe('active'); expect(state.latest.room.mode).toBe('ranked'); expect(state.latest.players).toHaveLength(4); expect(state.latest.players.filter((player) => player.isBot)).toHaveLength(3); expect(state.latest.players.find((player) => !player.isBot).weaponId).toBe('m82');
+    await expect(page.locator('#round-overlay')).toBeVisible({ timeout: 75_000 }); await expect(page.locator('#round-reward-status')).toContainText('온라인 서버에 저장됨', { timeout: 15_000 });
+    const account = await page.evaluate(async (base) => (await fetch(base + '/api/account', { credentials: 'include' })).json(), backend.apiUrl); expect(account.placementsPlayed).toBe(1); expect(account.casualRating).toBe(1000); expect(account.ownedWeapons).toHaveLength(4); expect(account.ownedWeapons).not.toContain('m82'); await expect(page.locator('#profile-rank-progress')).toContainText('배치 1/10'); expect(state.errors).toEqual([]);
+  } finally { await context.close(); await backend.close(); }
 });
 
 test('a private LAN frontend authenticates with same-site cookies and joins the advertised LAN WebSocket, not client loopback', async ({ browser }) => {

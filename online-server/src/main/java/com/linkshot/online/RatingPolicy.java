@@ -15,9 +15,9 @@ public final class RatingPolicy {
 
     public static Map<String, Change> settle(boolean ranked, List<Player> players) {
         Map<String, Integer> deltas = new LinkedHashMap<>(); for (Player player : players) deltas.put(player.id(), 0);
-        boolean contested = players.size() >= 2 && (players.stream().anyMatch(Player::abandoned) && ranked || players.stream().mapToInt(Player::humanKills).sum() > 0);
+        boolean contested = players.size() >= 2 && (players.stream().anyMatch(Player::abandoned) && ranked || players.stream().mapToInt(Player::kills).sum() > 0);
         if (contested) for (int i = 0; i < players.size(); i++) for (int j = i + 1; j < players.size(); j++) {
-            Player a = players.get(i), b = players.get(j); int comparison = compare(a, b, ranked);
+            Player a = players.get(i), b = players.get(j); int comparison = compare(a, b);
             double actual = comparison < 0 ? 1 : comparison > 0 ? 0 : .5, expected = 1 / (1 + Math.pow(10, (b.rating() - a.rating()) / 400.0));
             int delta = (int) Math.round((ranked ? 32 : 24) / (double) (players.size() - 1) * (actual - expected));
             deltas.merge(a.id(), delta, Integer::sum); deltas.merge(b.id(), -delta, Integer::sum);
@@ -25,7 +25,7 @@ public final class RatingPolicy {
         Map<String, Change> result = new LinkedHashMap<>();
         for (Player player : players) {
             int better = 0, equal = 0;
-            for (Player other : players) { int comparison = compare(other, player, ranked); if (comparison < 0) better++; else if (comparison == 0) equal++; }
+            for (Player other : players) { int comparison = compare(other, player); if (comparison < 0) better++; else if (comparison == 0) equal++; }
             int outcome = !contested ? 0 : player.abandoned() ? -1 : better + equal <= players.size() / 2 ? 1 : better + 1 > players.size() / 2 ? -1 : 0;
             int delta = deltas.get(player.id()); if (ranked && player.abandoned()) delta = Math.min(-16, delta);
             result.put(player.id(), new Change(delta, outcome));
@@ -33,11 +33,11 @@ public final class RatingPolicy {
         return result;
     }
 
-    private static int compare(Player a, Player b, boolean ranked) {
+    private static int compare(Player a, Player b) {
         if (a.abandoned() != b.abandoned()) return a.abandoned() ? 1 : -1;
         if (a.abandoned()) return 0;
-        int kills = Integer.compare(ranked ? b.kills() : b.humanKills(), ranked ? a.kills() : a.humanKills());
-        return kills != 0 ? kills : Integer.compare(ranked ? a.deaths() : a.humanDeaths(), ranked ? b.deaths() : b.humanDeaths());
+        int kills = Integer.compare(b.kills(), a.kills());
+        return kills != 0 ? kills : Integer.compare(a.deaths(), b.deaths());
     }
 
     public static Promotion advance(RankProgress before, int rating, int outcome) {
