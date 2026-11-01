@@ -46,7 +46,21 @@ Node 22 이상, `npm install`, Java 21, Maven 3.6.3 이상이 필요합니다. �
 
 브라우저는 **http://127.0.0.1:4173**으로 접속합니다. 각 터미널에서 `Ctrl+C`로 종료합니다. 다른 디렉터리에서 스크립트의 전체 경로로 실행해도 프로젝트 루트를 찾아갑니다. Spring/전투 스크립트는 비밀 설정이 없으면 생성하고 기존 `online-server/.env`는 보존합니다. macOS에서는 Java 21을 자동 선택하며, 다른 환경에서는 Java 21이 PATH에 있거나 `JAVA_HOME`으로 지정되어 있어야 합니다.
 
-`fe.sh`는 명시한 `ONLINE_SERVER_URL`, `.env`/환경의 `ONLINE_API_URL`, 기본 `http://127.0.0.1:8080` 순으로 API 주소를 사용합니다. 포트를 바꾸면 `FRONTEND_ORIGINS`도 FE origin에 맞춰 설정하세요. 스크립트는 LAN용 `npm run dev`를 변경하거나 기존 서버를 종료하지 않습니다.
+`fe.sh`는 명시한 `ONLINE_SERVER_URL`, `.env`의 `ONLINE_SERVER_URL`, `.env`/환경의 `ONLINE_API_URL`, 기본 `http://127.0.0.1:8080` 순으로 API 주소를 사용합니다. 포트를 바꾸면 `FRONTEND_ORIGINS`도 FE origin에 맞춰 설정하세요. 스크립트는 LAN용 `npm run dev`를 변경하거나 기존 서버를 종료하지 않습니다.
+
+### 같은 LAN의 다른 PC에서 온라인 모드 접속
+
+위 기본 설정은 **서버 PC 한 대 안에서만** 사용할 때의 설정입니다. 다른 PC의 `127.0.0.1`은 그 PC 자신이므로 서버 주소로 사용할 수 없습니다. 실행 중인 세 스크립트를 `Ctrl+C`로 종료한 뒤, 서버 PC에서 다음과 같이 실행합니다.
+
+```sh
+./spring.sh --lan  # 터미널 1: 사설 IPv4 자동 선택 + LAN 설정 저장
+./online.sh        # 터미널 2: 저장한 LAN 설정으로 실행
+./fe.sh            # 터미널 3: LAN API 주소로 다시 빌드
+```
+
+서버 PC와 다른 PC **모두 `fe.sh`가 출력한 같은 LAN 주소**로 접속하세요. 자동 선택이 다른 인터페이스를 골랐다면 `./spring.sh --lan <서버의-사설-IPv4>`로 지정할 수 있습니다. 설정은 비공개 `online-server/.env`에만 남으며 비밀번호·엔진 비밀키·기존 DB/계정은 유지됩니다. 다음 실행부터는 옵션 없이 세 스크립트를 실행해도 저장한 설정을 사용합니다. `npm run online:config -- --lan`으로 설정만 저장하거나 `--local`로 PC 한 대 전용 설정으로 되돌릴 수도 있습니다.
+
+LAN 모드는 Spring HTTP API와 전투 WebSocket만 모든 인터페이스에 바인딩하고, **DB와 엔진→Spring 내부 주소는 루프백에 유지**합니다. CORS/전투 접속 출처는 선택한 FE origin 하나만 허용하며 `*`로 풀지 않습니다. 방화벽에서 **4173·8080·8090 TCP**를 신뢰하는 사설망에만 허용하세요. 개발용 HTTP이므로 신뢰할 수 있는 LAN에서만 사용하고 공유기 포트포워딩/인터넷 공개에는 사용하지 마세요. 기본 Compose의 루프백 포트 공개 설정은 이 옵션으로 바뀌지 않습니다.
 
 ### 개별 npm 명령
 
@@ -68,9 +82,9 @@ ONLINE_SERVER_URL=http://127.0.0.1:8080 npm run build
 npm run preview
 ```
 
-`http://127.0.0.1:4173`에서 일반/랭크 탭의 온라인 계정 패널을 이용합니다. 로그인 후 매칭 버튼을 누르면 대기 인원/시간/AI 여부가 표시되고 배정 시 자동 입장합니다. 대기 취소와 배정된 경기 재접속 버튼도 제공됩니다. 개발에서는 FE/API 호스트를 모두 `127.0.0.1`로 맞추세요. 다른 포트를 쓰면 `.env`의 `FRONTEND_ORIGINS`를 해당 origin으로 바꿉니다. Java 선택이 필요하면 `JAVA_HOME`을 설치된 Java 21에 맞춥니다.
+PC 한 대에서는 `http://127.0.0.1:4173`, 여러 PC에서는 위 LAN 모드가 출력한 주소에서 일반/랭크 탭의 계정 패널을 이용합니다. 로그인 후 매칭 버튼을 누르면 대기 인원/시간/AI 여부가 표시되고 배정 시 자동 입장합니다. 대기 취소와 배정된 경기 재접속 버튼도 제공됩니다. FE/API는 같은 호스트명을 사용해야 쿠키가 정상 동작합니다. 다른 포트를 쓰면 `.env`의 `FRONTEND_ORIGINS`를 해당 origin으로 바꿉니다. Java 선택이 필요하면 `JAVA_HOME`을 설치된 Java 21에 맞춥니다.
 
-`online:config`는 무작위 비밀값을 `online-server/.env`에 0600 권한으로 생성하고 값은 출력하지 않습니다. 기존 파일은 덮어쓰지 않습니다. 개발 DB는 `data/online-dev/`에 남아 재시작 후에도 계정을 유지하며, 테스트 DB는 `online-server/target/` 아래에 격리합니다. 두 경로와 `.env`는 Git/배포 대상이 아닙니다. **테스트용 DB는 로컬 전용이며 인터넷에 노출하면 안 됩니다.**
+`online:config`는 무작위 비밀값을 `online-server/.env`에 0600 권한으로 생성하고 값은 출력하지 않습니다. 옵션이 없으면 기존 파일을 보존하며, `--lan`/`--local`은 네트워크 설정만 원자적으로 갱신합니다. 개발 DB는 `data/online-dev/`에 남아 재시작 후에도 계정을 유지하며, 테스트 DB는 `online-server/target/` 아래에 격리합니다. 두 경로와 `.env`는 Git/배포 대상이 아닙니다. **DB는 로컬 전용이며 인터넷에 노출하면 안 됩니다.**
 
 ## Docker Compose 대안
 

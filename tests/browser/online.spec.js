@@ -3,9 +3,11 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
+import net from 'node:net';
 import { createProfile } from '../../shared/progression.js';
+import { networkSettings } from '../../scripts/create-online-env.mjs';
 
-async function services(origin, { engine = false, wait = 1 } = {}) {
+async function services(origin, { engine = false, wait = 1, lanHost = '' } = {}) {
   await mkdir('artifacts/online-browser', { recursive: true }); const data = await mkdtemp(path.resolve('artifacts/online-browser/match-')), secret = randomBytes(48).toString('base64url'), children = [];
   const start = async (args, env, expression) => {
     const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...env } }); children.push(child); let output = '';
@@ -14,12 +16,14 @@ async function services(origin, { engine = false, wait = 1 } = {}) {
   };
   const close = async () => { for (const child of children.toReversed()) { const stopped = new Promise((resolve) => { if (child.exitCode !== null || child.signalCode !== null) resolve(); else child.once('exit', resolve); }); child.kill('SIGTERM'); await stopped; } };
   try {
-    const apiUrl = await start(['scripts/run-online-dev.mjs'], { ONLINE_PORT: '0', ONLINE_DATA_DIR: data, FRONTEND_ORIGINS: origin, ENGINE_SECRET: secret, CASUAL_WAIT_SECONDS: String(wait), MATCH_ROUND_SECONDS: '60', MATCH_FRAG_LIMIT: '1' }, /LINKSHOT LOCAL API (http:\/\/127\.0\.0\.1:\d+)/);
+    const apiUrl = await start(['scripts/run-online-dev.mjs'], { ONLINE_BIND: lanHost ? '0.0.0.0' : '127.0.0.1', ONLINE_PORT: '0', ONLINE_DATA_DIR: data, FRONTEND_ORIGINS: origin, ENGINE_SECRET: secret, CASUAL_WAIT_SECONDS: String(wait), MATCH_ROUND_SECONDS: '60', MATCH_FRAG_LIMIT: '1' }, /LINKSHOT LOCAL API (http:\/\/127\.0\.0\.1:\d+)/);
     if (engine) {
-      await start(['server/online-engine.js'], { ENGINE_PORT: '0', ENGINE_PUBLIC_URL: '', FRONTEND_ORIGINS: origin, ONLINE_API_URL: apiUrl, ENGINE_SECRET: secret }, /combat engine listening on port (\d+)/);
+      let port = 0;
+      if (lanHost) { const probe = net.createServer(); await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve)); port = probe.address().port; await new Promise((resolve) => probe.close(resolve)); }
+      await start(['server/online-engine.js'], { ENGINE_BIND: lanHost ? '0.0.0.0' : '127.0.0.1', ENGINE_PORT: String(port), ENGINE_PUBLIC_URL: lanHost ? `ws://${lanHost}:${port}/play` : '', FRONTEND_ORIGINS: origin, ONLINE_API_URL: apiUrl, ENGINE_SECRET: secret }, /combat engine listening on port (\d+)/);
       await expect.poll(async () => (await (await fetch(apiUrl + '/api/health')).json()).matchmaking).toBe(true);
     }
-    return { apiUrl, close };
+    return { apiUrl: lanHost ? apiUrl.replace('127.0.0.1', lanHost) : apiUrl, close };
   } catch (error) { await close(); throw error; }
 }
 
@@ -101,4 +105,16 @@ test('ranked waits for four humans, grants only temporary weapons and reconnects
     for (const entrant of entrants) expect(entrant.state.errors).toEqual([]);
     await first.page.screenshot({ path: 'artifacts/ranked-online-human-match.png' });
   } finally { for (const context of contexts) await context.close(); await backend.close(); }
+});
+
+test('a private LAN frontend authenticates with same-site cookies and joins the advertised LAN WebSocket, not client loopback', async ({ browser }) => {
+  test.skip(process.env.ONLINE_BROWSER_TEST !== '1', 'Optional online integration.'); test.setTimeout(150_000);
+  let settings; try { settings = networkSettings('--lan'); } catch { test.skip(true, 'No private LAN interface is available.'); }
+  const host = new URL(settings.FRONTEND_URL).hostname, origin = `http://${host}:${Number(process.env.PREVIEW_PORT) || 4173}`, backend = await services(origin, { engine: true, lanHost: host }), context = await browser.newContext();
+  try {
+    const { page, state } = await onlinePage(context, backend.apiUrl, origin, '일반', 9), sockets = []; page.on('websocket', (socket) => sockets.push(socket.url()));
+    const cookies = await context.cookies(backend.apiUrl + '/api'); expect(cookies.some((cookie) => cookie.name === 'LINKSHOTSESSION' && cookie.httpOnly && cookie.path === '/api')).toBe(true);
+    await page.getByRole('button', { name: '일반 매칭', exact: true }).click(); await expect(page.locator('#pause-overlay')).toBeVisible({ timeout: 25_000 }); await expect.poll(() => state.latest?.room.phase).toBe('active');
+    expect(sockets.some((url) => new URL(url).hostname === host)).toBe(true); expect(sockets.some((url) => ['localhost', '127.0.0.1'].includes(new URL(url).hostname))).toBe(false); expect(state.latest.players).toHaveLength(4); expect(state.errors).toEqual([]);
+  } finally { await context.close(); await backend.close(); }
 });

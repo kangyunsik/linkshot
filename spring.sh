@@ -5,6 +5,6 @@ LINKSHOT_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 linkshot_prepare
 linkshot_java_21
-npm run online:config
+linkshot_configure "$@"
 printf '%s\n' 'Spring + 개발용 PostgreSQL 실행 · 종료: Ctrl+C'
 exec npm run online:dev

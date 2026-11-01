@@ -1,6 +1,10 @@
 # Shared by the three root launchers. Never source the private .env as shell code.
 linkshot_error() { printf '오류: %s\n' "$*" >&2; exit 1; }
 
+linkshot_configure() {
+  if [ "$#" -eq 0 ]; then npm run online:config; else npm run online:config -- "$@"; fi
+}
+
 linkshot_prepare() {
   cd "$LINKSHOT_ROOT"
   command -v node >/dev/null 2>&1 || linkshot_error 'Node.js 22 이상을 설치해 주세요.'
