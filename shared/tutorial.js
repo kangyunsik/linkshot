@@ -4,6 +4,8 @@ import { getWeapon } from './catalog.js';
 import { playerPose, RULES } from './world.js';
 import { TRAINING_WORLD } from './training-world.js';
 
+const TARGET_SPAWN = Object.freeze({ x: 0, y: 0, z: -8, yaw: Math.PI, pitch: 0 });
+
 export const TUTORIAL_STEPS = Object.freeze([
   { id: 'movement', title: '시점과 이동', description: '마우스로 둘러보고 WASD로 이동하세요. W + Shift로 달리기도 해보세요.', marker: { x: 0, y: 0, z: 9 } },
   { id: 'terrain', title: '지형과 엄폐', description: 'Space로 점프하고 C / Ctrl로 앉아보세요. 오른쪽 계단을 걸어 올라 표시된 발판에 서세요.', marker: { x: 6, y: 1.2, z: 3 } },
@@ -11,11 +13,22 @@ export const TUTORIAL_STEPS = Object.freeze([
   { id: 'equipment', title: '바닥 총기와 교체', description: '가까이 제공된 MP5가 바닥에 내려오면 G로 교체하세요. 들고 있던 총이 바닥에 남는 것을 확인하고 G로 원래 총과 다시 교체하세요.' },
   { id: 'combat', title: '짧은 실전', description: '초급 AI 한 명과 교전합니다. 엄폐하고 멈춰서 조준해 상대를 한 번 처치하세요.', marker: { x: 0, y: 0, z: -3 } },
   { id: 'respawn', title: '사망·리스폰 체험', description: '훈련 교관이 나타났습니다. 준비되면 Enter로 사망·리스폰 시범을 시작하세요. 자동으로 죽거나 완료되지 않습니다.' },
+  { id: 'target-practice', title: '마무리 표적 연습', description: '이 AI는 이동하거나 공격하지 않습니다. 처치하면 3초 뒤 같은 자리에 다시 나타납니다. 원하는 만큼 사격을 연습하고 Enter로 훈련을 마치세요.', marker: { x: TARGET_SPAWN.x, y: TARGET_SPAWN.y, z: TARGET_SPAWN.z } },
 ]);
 
 class TrainingRoom extends Room {
+  placeTarget(player) {
+    Object.assign(player, player.trainingSpawn, { weaponId: 'rifle', nextWeaponId: 'rifle', ammo: getWeapon('rifle').magazine, protectedUntil: 0, spawnExitPath: [], botPath: [], vx: 0, vy: 0, vz: 0, moveSpeed: 0 });
+    player.input = { ...EMPTY_INPUT, yaw: player.yaw, pitch: player.pitch, weaponId: player.weaponId };
+    player.pendingShot = null; player.burstLeft = 0; player.history = []; this.recordPlayerHistory(player, this.clock());
+  }
+  spawn(player) { super.spawn(player); if (player.trainingSpawn) this.placeTarget(player); }
   botInput(player, now, dt) { return player.trainingDummy ? { ...EMPTY_INPUT, yaw: player.yaw, pitch: player.pitch, weaponId: player.weaponId } : super.botInput(player, now, dt); }
+  // Lessons end only on their explicit goals, never a normal FFA kill/time cap.
+  finish() {}
+  tick(dt) { this.endsAt = this.clock() + this.roundSeconds * 1000; super.tick(dt); }
   shoot(player, now, ads, shot) {
+    if (player?.trainingSpawn) return false;
     const fired = super.shoot(player, now, ads, shot);
     if (fired && !player.isBot) this.trainingAttacks.push({ ads: !!ads, melee: getWeapon(player.weaponId).melee === true });
     return fired;
@@ -38,11 +51,14 @@ export class TutorialSession {
     this.room.trainingAttacks.length = 0;
     for (const player of [...this.room.players.values()]) if (player.isBot) this.room.removePlayer(player.id);
     this.opponent = null;
-    if (stage === 2 || stage === 4) {
+    if (stage === 2 || stage === 4 || stage === 6) {
       if (stage === 4) { this.room.spawn(this.player); this.room.droppedWeapons.clear(); }
+      if (stage === 6) this.room.droppedWeapons.clear();
       Object.assign(this.player, { weaponId: 'rifle', nextWeaponId: 'rifle', weaponSkinId: this.player.skinId, ammo: 30, reloadUntil: 0, switchUntil: 0, nextFireAt: 0, input: { ...EMPTY_INPUT, yaw: this.player.yaw, pitch: this.player.pitch } }); this.player.equipmentSeq++;
-      this.opponent = this.room.addPlayer('training-opponent', stage === 2 ? '정지 표적' : '초급 AI', true, { weaponId: 'rifle' });
-      Object.assign(this.opponent, { x: 0, y: 0, z: stage === 2 ? -8 : -3, yaw: Math.PI, pitch: 0, protectedUntil: 0, trainingDummy: stage === 2, spawnExitPath: [] });
+      this.opponent = this.room.addPlayer('training-opponent', stage === 4 ? '초급 AI' : '정지 표적', true, { weaponId: 'rifle' });
+      Object.assign(this.opponent, { x: 0, y: 0, z: stage === 4 ? -3 : TARGET_SPAWN.z, yaw: Math.PI, pitch: 0, protectedUntil: 0, trainingDummy: stage !== 4, trainingSpawn: stage === 4 ? null : TARGET_SPAWN, spawnExitPath: [] });
+      if (this.opponent.trainingSpawn) this.room.placeTarget(this.opponent);
+      if (stage === 6) this.metrics.targetLife = this.opponent.spawnCount;
     }
     if (stage === 3) {
       this.room.droppedWeapons.clear();
@@ -76,11 +92,12 @@ export class TutorialSession {
 
   command(data) {
     const p = this.player, now = this.room.clock(), m = this.metrics;
-    if (this.completed || this.stage !== 5 || p.hp <= 0 || this.room.phase !== 'active' || data.roundId !== this.room.roundId || data.spawnCount !== p.spawnCount) return false;
-    if (data.action === 'start-respawn' && !m.demoRequested && p.spawnCount === this.startLife) {
+    if (this.completed || p.hp <= 0 || this.room.phase !== 'active' || data.roundId !== this.room.roundId || data.spawnCount !== p.spawnCount) return false;
+    if (this.stage === 5 && data.action === 'start-respawn' && !m.demoRequested && p.spawnCount === this.startLife) {
       m.demoRequested = true; m.demoAt = now + 1500; p.input = { ...EMPTY_INPUT, yaw: p.yaw, pitch: p.pitch, weaponId: p.weaponId }; p.pendingShot = null; p.burstLeft = 0; return true;
     }
-    if (data.action === 'confirm-respawn' && !m.confirmed && m.respawnAt != null && now - m.respawnAt >= 2000 && p.spawnCount > this.startLife) { m.confirmed = true; return true; }
+    if (this.stage === 5 && data.action === 'confirm-respawn' && !m.confirmed && m.respawnAt != null && now - m.respawnAt >= 2000 && p.spawnCount > this.startLife) { m.confirmed = true; return true; }
+    if (this.stage === 6 && data.action === 'finish-training' && !m.finished && m.targetRespawned && p.kills > this.startKills) { m.finished = true; return true; }
     return false;
   }
 
@@ -92,7 +109,8 @@ export class TutorialSession {
       [['정지 표적 처치', this.player.kills > this.startKills], ['우클릭 정조준 사격', m.ads], ['R 재장전 완료', m.reloaded]],
       [['G로 바닥 MP5와 교체', m.swaps >= 1], ['기존 총이 바닥에 남는 것 확인', m.originalOnGround], ['G로 원래 총과 다시 교체', m.swappedBack]],
       [['초급 AI 한 번 처치', this.player.kills > this.startKills]],
-      [['Enter로 시범 시작', m.demoRequested], ['사망 후 새 생명으로 복귀', m.respawnAt != null], ['복귀 화면을 확인하고 Enter로 완료', m.confirmed]],
+      [['Enter로 시범 시작', m.demoRequested], ['사망 후 새 생명으로 복귀', m.respawnAt != null], ['복귀 화면을 확인하고 Enter로 다음 연습', m.confirmed]],
+      [['고정 AI 처치 · 반복 연습 가능', this.player.kills > this.startKills], ['같은 자리에서 AI 재등장 확인', m.targetRespawned], ['원할 때 Enter로 훈련 마무리', m.finished]],
     ][this.stage].map(([label, done]) => ({ label, done: !!done }));
   }
 
@@ -110,6 +128,7 @@ export class TutorialSession {
     if (m.reload && beforeReload && !p.reloadUntil && p.ammo === getWeapon(p.weaponId).magazine) m.reloaded = true;
     for (const attack of this.room.trainingAttacks.splice(0)) { m.ads ||= attack.ads; m.knife ||= attack.melee; }
     if (this.stage === 3 && this.room.droppedWeapons.get(m.originalDropId)?.grounded) m.originalOnGround = true;
+    if (this.stage === 6 && this.opponent?.spawnCount > m.targetLife) m.targetRespawned = true;
     if (this.stage === 5 && m.demoRequested && p.hp > 0 && p.spawnCount > this.startLife && m.respawnAt == null) {
       m.respawnAt = this.room.clock();
       if (this.opponent) { this.room.removePlayer(this.opponent.id); this.opponent = null; }
@@ -133,9 +152,10 @@ export class TutorialSession {
     if (this.stage === 5 && !this.completed) {
       if (!this.metrics.demoRequested) action = { id: 'start-respawn', label: 'Enter · 리스폰 시범 시작', enabled: this.player.hp > 0 };
       else if (this.player.hp <= 0) description = '리스폰 시범 중입니다. 3초 후 복귀하는 모습을 확인하세요. 돌아와도 훈련은 자동 종료되지 않습니다.';
-      else if (this.metrics.respawnAt != null) { action = { id: 'confirm-respawn', label: 'Enter · 복귀 확인하고 완료', enabled: this.room.clock() - this.metrics.respawnAt >= 2000 }; description = '전장으로 복귀했습니다. 회복된 체력·총과 화면을 직접 확인해 보세요. 확인을 마쳤다면 Enter로 훈련을 완료하세요.'; }
+      else if (this.metrics.respawnAt != null) { action = { id: 'confirm-respawn', label: 'Enter · 복귀 확인하고 마무리 연습', enabled: this.room.clock() - this.metrics.respawnAt >= 2000 }; description = '전장으로 복귀했습니다. 회복된 체력·총과 화면을 직접 확인해 보세요. 확인을 마쳤다면 Enter로 마지막 고정 표적 연습을 시작하세요.'; }
       else description = '1.5초 후 교관의 사망 시범이 시작됩니다. 이후 3초 리스폰과 복귀 모습을 직접 확인하게 됩니다.';
     }
+    if (this.stage === 6 && !this.completed) action = { id: 'finish-training', label: 'Enter · 표적 연습 마치고 훈련 완료', enabled: this.player.hp > 0 && this.player.kills > this.startKills && !!this.metrics.targetRespawned, pendingLabel: '고정 AI를 처치하고 같은 자리에서 다시 나타나는 모습을 확인하세요.' };
     return { ...snapshot, tutorial: { stage: this.stage, total: TUTORIAL_STEPS.length, id: step.id, title: this.completed ? '기초 훈련 완료' : step.title, description: this.completed ? '이제 혼자 연습이나 LAN대전에서 실력을 쌓아보세요. 훈련 결과는 전적·LP·경쟁 점수에 반영하지 않습니다.' : description, goals: this.goals(), marker: this.completed ? null : step.marker || null, action, completed: this.completed } };
   }
 }

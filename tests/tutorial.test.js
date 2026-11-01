@@ -15,6 +15,11 @@ function fixture() {
   return { tutorial, advance, now: () => now };
 }
 
+function aimAtTarget(tutorial) {
+  const p = tutorial.player, target = tutorial.opponent, horizontal = Math.hypot(target.x - p.x, target.z - p.z);
+  return { yaw: Math.atan2(-(target.x - p.x), -(target.z - p.z)), pitch: Math.atan2(target.y + playerPose(target).headHeight - p.y - playerPose(p).eyeHeight, horizontal) };
+}
+
 test('the dedicated tutorial is local-only, excluded from multiplayer maps and uses ordinary combat/equipment rules', () => {
   const { tutorial } = fixture(), data = tutorial.snapshot();
   assert.equal(data.room.mode, 'tutorial'); assert.equal(data.room.mapId, 'training'); assert.equal(MAPS.some((map) => map.id === 'training'), false);
@@ -22,13 +27,13 @@ test('the dedicated tutorial is local-only, excluded from multiplayer maps and u
   assert.equal(data.room.result, null); assert.equal(data.tutorial.completed, false); assert.equal(data.tutorial.goals.every((goal) => !goal.done), true);
 });
 
-test('real movement, shots, ground-gun swaps and an explicitly confirmed respawn complete training', () => {
+test('real movement, shots, swaps and a confirmed player respawn lead to manually completed target practice', () => {
   const f = fixture(), { tutorial: t, advance } = f, p = t.player;
   advance(1500, { forward: 1, sprint: true, yaw: .5 }); assert.equal(t.stage, 1);
   advance(100, { jump: true }); advance(1200); advance(200, { crouch: true });
   Object.assign(p, { x: 6, y: 0, z: 7.2, vy: 0, grounded: true, yaw: 0 }); advance(2000, { forward: .65, yaw: 0 });
   assert.equal(t.stage, 2); assert.equal(p.y, 1.2);
-  const aim = () => { const target = t.opponent, horizontal = Math.hypot(target.x - p.x, target.z - p.z); return { yaw: Math.atan2(-(target.x - p.x), -(target.z - p.z)), pitch: Math.atan2(target.y + playerPose(target).headHeight - p.y - playerPose(p).eyeHeight, horizontal) }; };
+  const aim = () => aimAtTarget(t);
   advance(1500, { ...aim(), fire: true, ads: true }); advance(2000, { reload: true }); assert.equal(t.stage, 3);
   let action = 0;
   const interact = () => t.interactEquipment({ roundId: t.room.roundId, spawnCount: p.spawnCount, equipmentSeq: p.equipmentSeq, actionSeq: ++action });
@@ -39,7 +44,35 @@ test('real movement, shots, ground-gun swaps and an explicitly confirmed respawn
   const life = p.spawnCount; assert.equal(p.respawnAt - p.diedAt, RULES.respawnSeconds * 1000); advance(3200);
   assert.equal(p.spawnCount, life + 1); assert.equal(p.hp, 100); assert.equal(t.completed, false); assert.equal(t.room.phase, 'active'); assert.equal(command('confirm-respawn'), false);
   advance(2100); assert.equal(t.completed, false); assert.equal(command('confirm-respawn'), true); advance(50);
+  assert.equal(t.stage, 6); assert.equal(t.snapshot(false).tutorial.id, 'target-practice'); assert.equal(t.completed, false); assert.equal(command('finish-training'), false);
+  advance(900, { ...aim(), fire: true, ads: true }); advance(3100); assert.equal(t.completed, false); assert.equal(command('finish-training'), true); advance(50);
   assert.equal(t.completed, true); assert.equal(t.room.phase, 'training-complete'); assert.equal(t.snapshot().room.result, null);
+});
+
+test('the final dummy never moves or attacks and repeatedly respawns at its exact position with ordinary health and death timing', () => {
+  const { tutorial: t, advance } = fixture(); t.setStage(6); const p = t.player, bot = t.opponent;
+  const position = () => ({ x: bot.x, y: bot.y, z: bot.z, yaw: bot.yaw, pitch: bot.pitch }), initial = position(), life = p.spawnCount;
+  t.room.fragLimit = 1; t.room.endsAt = t.room.clock() - 1;
+  advance(5000); assert.deepEqual(position(), initial); assert.equal(p.hp, 100); assert.equal(p.deaths, 0); assert.equal(bot.shotSerial, 0); assert.equal(bot.stepDistance, 0); assert.equal(t.room.phase, 'active');
+  assert.equal(t.room.shoot(bot, t.room.clock(), true), false);
+  for (let i = 0; i < 3; i++) {
+    const spawn = bot.spawnCount, kills = p.kills; advance(900, { ...aimAtTarget(t), fire: true, ads: true }); assert.equal(bot.hp, 0); assert.equal(p.kills, kills + 1); assert.equal(bot.respawnAt - bot.diedAt, RULES.respawnSeconds * 1000);
+    advance(3100); assert.equal(bot.spawnCount, spawn + 1); assert.equal(bot.hp, 100); assert.equal(bot.weaponId, 'rifle'); assert.equal(bot.protectedUntil, 0); assert.deepEqual(position(), initial); assert.equal(bot.history.every((sample) => sample.x === initial.x && sample.z === initial.z), true); assert.equal(bot.shotSerial, 0); assert.equal(p.hp, 100); assert.equal(p.spawnCount, life); assert.equal(t.completed, false); assert.equal(t.room.phase, 'active'); assert.equal(t.room.result, null);
+  }
+  const command = { action: 'finish-training', roundId: t.room.roundId, spawnCount: p.spawnCount };
+  assert.equal(t.command({ ...command, roundId: 'old-round' }), false); assert.equal(t.command({ ...command, spawnCount: p.spawnCount - 1 }), false); assert.equal(t.command({ ...command, action: 'start-respawn' }), false);
+  assert.equal(t.command(command), true); assert.equal(t.command(command), false); advance(50); assert.equal(t.completed, true); assert.equal(t.room.players.size, 1); assert.equal(t.room.result, null);
+});
+
+test('the earlier shooting dummy also returns to its target position while the student is still learning to reload', () => {
+  const { tutorial: t, advance } = fixture(); t.setStage(2); const bot = t.opponent, initial = { x: bot.x, y: bot.y, z: bot.z };
+  advance(900, { ...aimAtTarget(t), fire: true, ads: true }); assert.equal(bot.hp, 0); assert.equal(t.stage, 2);
+  advance(3100); assert.equal(bot.hp, 100); assert.deepEqual({ x: bot.x, y: bot.y, z: bot.z }, initial); assert.equal(bot.trainingDummy, true); assert.equal(bot.shotSerial, 0); assert.equal(t.player.hp, 100);
+});
+
+test('restarting from repeated final target practice clears its objective state, NPCs and drops', () => {
+  const { tutorial: t, advance } = fixture(); t.setStage(6); advance(900, { ...aimAtTarget(t), fire: true, ads: true }); advance(3100); assert.equal(t.metrics.targetRespawned, true); assert.ok(t.room.droppedWeapons.size > 0);
+  const round = t.room.roundId; t.restart(); assert.notEqual(t.room.roundId, round); assert.equal(t.stage, 0); assert.equal(t.room.phase, 'active'); assert.equal(t.player.kills, 0); assert.equal(t.room.players.size, 1); assert.equal(t.room.droppedWeapons.size, 0); assert.equal(t.completed, false); assert.deepEqual(t.metrics, {});
 });
 
 test('dying keeps the lesson checkpoint; restarting clears objectives, enemies, drops and the previous round', () => {

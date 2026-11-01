@@ -548,7 +548,7 @@ export class FPSGame {
     const waiting = this.room.phase === 'waiting';
     this.hud['hud-timer'].textContent = training ? 'TRAINING' : waiting ? 'WAITING' : clockText(this.room.timeLeft); this.hud['hud-timer'].style.fontSize = training || waiting ? '22px' : '';
     document.querySelector('.match-clock>span').textContent = training ? 'LOCAL LESSONS' : 'DEATHMATCH'; document.querySelector('.hud-location small').hidden = training;
-    $('hud-frag-limit').textContent = training ? `${this.tutorial?.total || 6} STEPS · NO RATING / LP` : waiting ? `HUMANS ${this.online?.connected || 0}/${this.online?.expected || 0}` : `FIRST TO ${this.room.fragLimit}`;
+    $('hud-frag-limit').textContent = training ? `${this.tutorial?.total || 7} STEPS · NO RATING / LP` : waiting ? `HUMANS ${this.online?.connected || 0}/${this.online?.expected || 0}` : `FIRST TO ${this.room.fragLimit}`;
     this.hud['hud-timer'].style.color = this.room.timeLeft < 30 ? '#ff876a' : '';
     this.hud['hud-kd'].textContent = `${local.kills} K  /  ${local.deaths} D`;
     const reloading = local.hp > 0 && this.room.phase === 'active' && local.reloadUntil > this.serverNow;

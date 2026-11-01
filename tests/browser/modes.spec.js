@@ -38,11 +38,12 @@ test('practice uses the browser worker even on the LAN edition and remains avail
 });
 
 test('the real tutorial worker completes all lessons using only ordinary input/equipment messages', async ({ page }) => {
+  test.setTimeout(60_000);
   await page.goto(`http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}`);
   const result = await page.evaluate(() => new Promise((resolve, reject) => {
     const worker = new Worker('/solo-worker.js', { type: 'module' }), seen = new Set(); let state, phase = '', phaseAt = 0, action = 0, lastAction = -Infinity;
     const start = performance.now(), cleanup = () => { clearInterval(timer); clearTimeout(timeout); worker.terminate(); };
-    const timeout = setTimeout(() => { cleanup(); reject(new Error(`Training stalled: ${JSON.stringify({ phase, lesson: state?.tutorial, player: state?.players.find((p) => p.id === 'local-operator') })}`)); }, 25_000);
+    const timeout = setTimeout(() => { cleanup(); reject(new Error(`Training stalled: ${JSON.stringify({ phase, lesson: state?.tutorial, player: state?.players.find((p) => p.id === 'local-operator') })}`)); }, 35_000);
     worker.onmessage = ({ data }) => {
       if (data.type === 'hello') worker.postMessage({ type: 'create', mode: 'tutorial', name: 'WORKER STUDENT' });
       if (!data.tutorial) return; state = data; seen.add(data.tutorial.id);
@@ -60,7 +61,7 @@ test('the real tutorial worker completes all lessons using only ordinary input/e
         else if (phase === 'approach') { if (moveTo(6, 7.2) < .18) phase = 'stairs'; }
         else { input.yaw = 0; input.forward = .6; }
       }
-      if (lesson.id === 'shooting' || lesson.id === 'combat') {
+      if (['shooting', 'combat', 'target-practice'].includes(lesson.id)) {
         const target = state.players.find((player) => player.isBot && player.hp > 0);
         if (target) { input.yaw = Math.atan2(-(target.x - p.x), -(target.z - p.z)); input.pitch = Math.atan2(target.y + 1.58 - p.y - 1.62, Math.hypot(target.x - p.x, target.z - p.z)); input.ads = true; }
         if (lesson.id === 'shooting' && lesson.goals[0].done) input.reload = true; else input.fire = true;
@@ -69,9 +70,9 @@ test('the real tutorial worker completes all lessons using only ordinary input/e
         const needsAction = !lesson.goals[0].done || lesson.goals[1].done && !lesson.goals[2].done;
         if (needsAction && now - lastAction > 500) { worker.postMessage({ type: 'equipment', roundId: state.room.roundId, spawnCount: p.spawnCount, equipmentSeq: p.equipmentSeq, actionSeq: ++action }); lastAction = now; }
       }
-      if (lesson.id === 'respawn' && lesson.action?.enabled && now - lastAction > 500) { worker.postMessage({ type: 'tutorial-action', action: lesson.action.id, roundId: state.room.roundId, spawnCount: p.spawnCount }); lastAction = now; }
+      if (['respawn', 'target-practice'].includes(lesson.id) && lesson.action?.enabled && now - lastAction > 500) { worker.postMessage({ type: 'tutorial-action', action: lesson.action.id, roundId: state.room.roundId, spawnCount: p.spawnCount }); lastAction = now; }
       worker.postMessage(input);
     }, 1000 / 30);
   }));
-  expect(result.lessons).toEqual(['movement', 'terrain', 'shooting', 'equipment', 'combat', 'respawn']); expect(result.phase).toBe('training-complete'); expect(result.deaths).toBeGreaterThanOrEqual(1); expect(result.result).toBeNull();
+  expect(result.lessons).toEqual(['movement', 'terrain', 'shooting', 'equipment', 'combat', 'respawn', 'target-practice']); expect(result.phase).toBe('training-complete'); expect(result.deaths).toBeGreaterThanOrEqual(1); expect(result.result).toBeNull();
 });
