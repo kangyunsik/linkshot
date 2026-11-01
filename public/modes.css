@@ -16,6 +16,7 @@
 .tutorial-hud ul { list-style: none; padding: 0; margin: 0 0 10px; font-size: 12px; line-height: 1.9; color: #9aafa6; }
 .tutorial-hud li.done { color: #b4f0cf; }
 .tutorial-hud > small { color: #8aa99a; font-size: 9px; }
+#tutorial-action-hint { display: block; color: #d2ffe8; font-size: 12px; margin: 9px 0; }
 .tutorial-actions { display: grid; gap: 8px; margin-top: 12px; }
 .online-account-panel { padding: 13px; border: 1px solid #516e7b; border-radius: 3px; margin-bottom: 17px; font-size: 11px; line-height: 1.8; }
 .online-account-panel > strong { font: 9px var(--mono); color: #add9ca; }

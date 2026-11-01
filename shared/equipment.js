@@ -8,7 +8,7 @@ export function nearestDroppedWeapon(player, drops, world, now) {
   const origin = { x: player.x, y: player.y + .55, z: player.z };
   let nearest = null, distance = Infinity;
   for (const drop of drops) {
-    if (now < drop.pickupAt || now >= drop.expiresAt || Math.abs(drop.y - player.y) > EQUIPMENT_RULES.pickupHeight) continue;
+    if (!drop.grounded || now < drop.pickupAt || now >= drop.expiresAt || Math.abs(drop.y - player.y) > EQUIPMENT_RULES.pickupHeight) continue;
     const horizontal = Math.hypot(drop.x - player.x, drop.z - player.z), range = Math.hypot(horizontal, drop.y - player.y);
     if (horizontal > EQUIPMENT_RULES.pickupRange || range >= distance) continue;
     if (!hasLineOfSight(origin, { x: drop.x, y: drop.y + .12, z: drop.z }, world)) continue;

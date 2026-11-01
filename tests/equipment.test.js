@@ -18,22 +18,20 @@ function fixture() {
   return { room, player, other, request, advance, now: () => now };
 }
 
-test('G drops exactly one gun with its ammunition, cancels reload/bursts and equips an unlimited fallback knife', () => {
+test('G without a reachable ground gun cannot discard equipment, cancel a reload or equip a knife', () => {
   const f = fixture(), { room, player } = f; player.ammo = 7; player.reloadUntil = f.now() + 1000; player.burstLeft = 2;
-  const request = f.request(); assert.equal(room.interactEquipment(player.id, request), true);
-  assert.equal(player.weaponId, 'knife'); assert.equal(player.ammo, 0); assert.equal(player.reloadUntil, 0); assert.equal(player.burstLeft, 0);
-  assert.equal(room.startReload(player), false); assert.equal(room.droppedWeapons.size, 1);
-  const drop = [...room.droppedWeapons.values()][0]; assert.equal(drop.weaponId, 'rifle'); assert.equal(drop.ammo, 7);
-  assert.equal(room.interactEquipment(player.id, request), false); assert.equal(room.droppedWeapons.size, 1);
-  f.advance(400); assert.equal(drop.y, 0); assert.equal(drop.grounded, true);
-  assert.equal(room.interactEquipment(player.id, f.request()), true); assert.equal(player.weaponId, 'rifle'); assert.equal(player.ammo, 7); assert.equal(room.droppedWeapons.size, 0);
+  const request = f.request(), revision = player.equipmentSeq; assert.equal(room.interactEquipment(player.id, request), false);
+  assert.equal(player.weaponId, 'rifle'); assert.equal(player.ammo, 7); assert.equal(player.reloadUntil, f.now() + 1000); assert.equal(player.burstLeft, 2);
+  assert.equal(player.equipmentSeq, revision); assert.equal(room.droppedWeapons.size, 0);
 });
 
 test('nearby pickups atomically swap guns without granting permanent ownership or changing next-spawn equipment/cosmetics', () => {
-  const f = fixture(), { room, player, other } = f; other.ammo = 12; room.dropWeapon(other); f.advance(400);
+  const f = fixture(), { room, player, other } = f; player.ammo = 7; other.ammo = 12; room.dropWeapon(other); f.advance(400); player.reloadUntil = f.now() + 1000; player.burstLeft = 2;
   assert.equal(room.interactEquipment(player.id, f.request()), true); assert.equal(player.weaponId, 'mp5'); assert.equal(player.ammo, 12);
   assert.equal(player.weaponSkinId, 'circuit'); assert.equal(player.skinId, 'standard'); assert.equal(player.nextWeaponId, 'rifle'); assert.equal(ownsWeapon(player, 'mp5'), false);
-  assert.equal(room.droppedWeapons.size, 1); assert.equal([...room.droppedWeapons.values()][0].weaponId, 'rifle');
+  assert.equal(room.droppedWeapons.size, 1); assert.equal([...room.droppedWeapons.values()][0].weaponId, 'rifle'); assert.equal([...room.droppedWeapons.values()][0].ammo, 7);
+  assert.equal(player.reloadUntil, 0); assert.equal(player.burstLeft, 0);
+  f.advance(400); assert.equal(room.interactEquipment(player.id, f.request()), true); assert.equal(player.weaponId, 'rifle'); assert.equal(player.ammo, 7); assert.equal([...room.droppedWeapons.values()][0].weaponId, 'mp5'); assert.equal([...room.droppedWeapons.values()][0].ammo, 12);
   player.hp = 0; assert.equal(room.selectLoadout(player.id, { weaponId: 'mp5' }), false); room.spawn(player);
   assert.equal(player.weaponId, 'rifle'); assert.equal(player.weaponSkinId, 'standard'); assert.equal(player.ammo, 30);
 });
@@ -45,11 +43,11 @@ test('only the server selects a reachable nearby pickup; walls, floors, height a
   assert.equal(nearestDroppedWeapon(player, room.droppedWeapons.values(), room.world, f.now()), null);
   room.world.obstacles = []; drop.y = 3; assert.equal(nearestDroppedWeapon(player, [drop], room.world, f.now()), null);
   drop.y = 0; drop.z = -20; assert.equal(nearestDroppedWeapon(player, [drop], room.world, f.now()), null);
-  room.interactEquipment(player.id, { ...f.request(), itemId: drop.id, weaponId: 'm82' }); assert.equal(player.weaponId, 'knife');
+  room.interactEquipment(player.id, { ...f.request(), itemId: drop.id, weaponId: 'm82' }); assert.equal(player.weaponId, 'rifle');
 });
 
 test('duplicate, rapid, old-life, old-round and old-equipment actions or shots cannot duplicate items or fire a replacement gun', () => {
-  const f = fixture(), { room, player } = f; const old = f.request(); room.interactEquipment(player.id, old);
+  const f = fixture(), { room, player, other } = f; room.dropWeapon(other); f.advance(400); const old = f.request(); room.interactEquipment(player.id, old);
   room.setInput(player.id, { ...old, fire: true, yaw: 1 }); assert.equal(player.input.fire, false);
   assert.equal(room.interactEquipment(player.id, f.request()), false);
   f.advance(400); const prior = f.request(); room.spawn(player); assert.equal(room.interactEquipment(player.id, prior), false);
@@ -77,7 +75,7 @@ test('dropped weapons fall onto elevated floors, expire and remain bounded; rest
 });
 
 test('knife attacks damage only in melee range, respect cover/protection/cooldown and award kills without ammunition or headshot bonuses', () => {
-  const f = fixture(), { room, player, other } = f; room.interactEquipment(player.id, f.request()); f.advance(400);
+  const f = fixture(), { room, player, other } = f; Object.assign(player, { weaponId: 'knife', ammo: 0 }); room.setInput(player.id, { yaw: 0, pitch: 0 }); f.advance(400);
   assert.equal(room.shoot(player, f.now()), true); assert.equal(other.hp, 55); assert.equal(player.ammo, 0);
   assert.equal(room.shoot(player, f.now()), false); assert.equal(other.hp, 55);
   f.advance(600); other.protectedUntil = f.now() + 500; room.shoot(player, f.now()); assert.equal(other.hp, 55);

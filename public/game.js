@@ -388,7 +388,9 @@ export class FPSGame {
       }
       if (event.code === 'Tab' && this.room?.phase === 'active') { event.preventDefault(); $('scoreboard-overlay').hidden = false; renderScoreboard($('scoreboard-table'), this.players, this.selfId); }
       if (!this.locked) return;
+      if (event.code === 'Enter' && !event.repeat && this.local?.hp > 0 && this.room?.mode === 'tutorial') { event.preventDefault(); this.requestTutorialAction(); return; }
       if (event.code === 'KeyG' && !event.repeat && !this.keys.has('KeyG') && this.local?.hp > 0 && this.room?.phase === 'active') {
+        if (!nearestDroppedWeapon({ ...this.predicted, hp: this.local.hp }, this.droppedWeapons, this.world, this.serverNow)) return;
         event.preventDefault(); this.cancelAttack(); this.keys.add('KeyG'); this.send(this.input());
         this.send({ type: 'equipment', roundId: this.room.roundId, spawnCount: this.local.spawnCount, equipmentSeq: this.local.equipmentSeq, actionSeq: ++this.equipmentActionSeq }); return;
       }
@@ -425,6 +427,12 @@ export class FPSGame {
   cancelAttack() {
     this.fireHeld = false; this.fireLatched = false; this.localFirePending = false; this.firePressedUntil = 0; this.ads = false; this.reloadPressedUntil = 0; this.localBurstLeft = 0;
     $('scope-overlay').hidden = true; $('ads-reticle').hidden = true;
+  }
+
+  requestTutorialAction() {
+    const action = this.tutorial?.action;
+    if (!action?.enabled || this.local?.hp <= 0 || this.room?.mode !== 'tutorial') return false;
+    this.clearInput(); this.send({ type: 'tutorial-action', action: action.id, roundId: this.room.roundId, spawnCount: this.local.spawnCount }); return true;
   }
 
   clearInput(spawnCount = this.local?.spawnCount) {
@@ -597,7 +605,8 @@ export class FPSGame {
     prompt.hidden = !active; if (!active || !this.predicted) return;
     if (this.local.switchUntil > this.serverNow) { prompt.textContent = '장비 준비 중…'; return; }
     const pickup = nearestDroppedWeapon({ ...this.predicted, hp: this.local.hp }, this.droppedWeapons, this.world, this.serverNow);
-    prompt.textContent = pickup ? `[ G ] ${getWeapon(pickup.weaponId).name} ${getWeapon(this.local.weaponId).melee ? '줍기' : '교체'} · ${pickup.ammo}발` : getWeapon(this.local.weaponId).melee ? '좌클릭: 나이프 공격 · 가까운 총에 G: 줍기' : '[ G ] 총 버리기 → 기본 나이프';
+    prompt.hidden = !pickup;
+    if (pickup) prompt.textContent = `[ G ] ${getWeapon(pickup.weaponId).name}와 교체 · ${pickup.ammo}발 · 현재 총은 바닥에 남음`;
     for (const [id, item] of this.groundItems) item.marker.visible = pickup?.id === id;
   }
 

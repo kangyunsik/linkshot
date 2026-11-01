@@ -310,11 +310,11 @@ export class Room {
     player.lastEquipmentAction = data.actionSeq;
     if (now < player.equipmentCooldownUntil) return false;
     const pickup = nearestDroppedWeapon(player, this.droppedWeapons.values(), this.world, now);
-    if (!pickup && !isWeaponId(player.weaponId)) return false;
-    if (pickup) this.droppedWeapons.delete(pickup.id);
+    if (!pickup) return false;
+    this.droppedWeapons.delete(pickup.id);
     this.dropWeapon(player, now);
-    player.weaponId = pickup?.weaponId || 'knife'; player.weaponSkinId = pickup?.skinId || player.skinId;
-    player.ammo = pickup?.ammo || 0; player.magazines[player.weaponId] = player.ammo;
+    player.weaponId = pickup.weaponId; player.weaponSkinId = pickup.skinId;
+    player.ammo = pickup.ammo; player.magazines[player.weaponId] = player.ammo;
     player.equipmentSeq++; player.equipmentCooldownUntil = now + EQUIPMENT_RULES.actionMs;
     player.switchUntil = now + EQUIPMENT_RULES.equipMs; player.nextFireAt = Math.max(player.nextFireAt, pickup?.nextFireAt || 0, player.switchUntil);
     player.reloadUntil = 0; player.burstLeft = 0; player.pendingShot = null; player.shotHeat = 0;

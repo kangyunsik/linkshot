@@ -68,8 +68,8 @@ test('the real tutorial worker completes all lessons using only ordinary input/e
       if (lesson.id === 'equipment') {
         const needsAction = !lesson.goals[0].done || lesson.goals[1].done && !lesson.goals[2].done;
         if (needsAction && now - lastAction > 500) { worker.postMessage({ type: 'equipment', roundId: state.room.roundId, spawnCount: p.spawnCount, equipmentSeq: p.equipmentSeq, actionSeq: ++action }); lastAction = now; }
-        else if (p.weaponId === 'knife' && !lesson.goals[1].done && state.serverTime >= p.switchUntil) input.fire = true;
       }
+      if (lesson.id === 'respawn' && lesson.action?.enabled && now - lastAction > 500) { worker.postMessage({ type: 'tutorial-action', action: lesson.action.id, roundId: state.room.roundId, spawnCount: p.spawnCount }); lastAction = now; }
       worker.postMessage(input);
     }, 1000 / 30);
   }));

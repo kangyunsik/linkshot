@@ -21,41 +21,43 @@ async function fixture(page) {
 }
 async function dispose(page) { await page.evaluate(async () => { const f = window.__equipment; if (!f) return; clearInterval(f.timer); document.getElementById('resume-button').removeEventListener('click', f.start); await f.game.dispose(); delete window.__equipment; }); }
 
-test('G drops a rendered gun, equips a knife, ignores repeats and picks up the same remaining ammunition', async ({ page }) => {
+test('G only swaps with a ground gun, leaves the old gun/ammunition on the floor and ignores repeats', async ({ page }) => {
   const errors = []; page.on('pageerror', (error) => errors.push(error.message)); await fixture(page);
   try {
-    await page.keyboard.down('KeyG'); await expect(page.locator('#hud-weapon-name')).toHaveText('FIELD KNIFE'); await page.keyboard.down('KeyG');
-    expect(await page.evaluate(() => window.__equipment.room.droppedWeapons.size)).toBe(1); await page.keyboard.up('KeyG');
-    await expect(page.locator('#hud-ammo')).toHaveText('—'); await expect(page.locator('#equipment-hint')).toContainText('줍기');
-    await page.keyboard.press('KeyR'); await page.mouse.down({ button: 'right' }); await expect(page.locator('#scope-overlay')).toBeHidden(); await expect(page.locator('#reload-indicator')).toBeHidden(); await page.mouse.up({ button: 'right' });
-    await page.mouse.click(600, 450); await expect.poll(() => page.evaluate(() => window.__equipment.sounds.length)).toBe(1);
+    await page.keyboard.press('KeyG'); await expect(page.locator('#hud-weapon-name')).toHaveText('VX–7'); expect(await page.evaluate(() => window.__equipment.room.droppedWeapons.size)).toBe(0);
+    await page.evaluate(() => { const f = window.__equipment; f.room.dropWeapon({ ...f.player, weaponId: 'mp5', weaponSkinId: 'circuit', ammo: 12 }); });
+    await expect(page.locator('#equipment-hint')).toContainText('MP5와 교체');
+    await page.keyboard.down('KeyG'); await expect(page.locator('#hud-weapon-name')).toHaveText('MP5'); await expect(page.locator('#hud-ammo')).toHaveText('12'); await page.keyboard.down('KeyG'); await page.keyboard.up('KeyG');
     await expect.poll(() => page.evaluate(() => { const item = [...window.__equipment.game.groundItems.values()][0]; return item.target.grounded && item.group.position.y < .002; })).toBe(true);
-    const visual = await page.evaluate(async () => { const f = window.__equipment, { Box3 } = await import('/vendor/three.module.js'); f.game.scene.updateMatrixWorld(true); const item = [...f.game.groundItems.values()][0], bounds = new Box3().setFromObject(item.group.children[0]); return { items: f.game.groundItems.size, bottom: bounds.min.y, knife: f.game.activeModel.getObjectByName('knife-body')?.children.length, flash: f.game.muzzleFlash.visible, tracers: f.game.effects.length }; });
-    expect(visual.items).toBe(1); expect(visual.bottom).toBeCloseTo(.025, 2); expect(visual.knife).toBeGreaterThan(0); expect(visual.flash).toBe(false); expect(visual.tracers).toBe(0);
-    await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/knife-and-dropped-gun.png' });
+    const visual = await page.evaluate(async () => { const f = window.__equipment, { Box3 } = await import('/vendor/three.module.js'); f.game.scene.updateMatrixWorld(true); const item = [...f.game.groundItems.values()][0], bounds = new Box3().setFromObject(item.group.children[0]); return { items: f.game.groundItems.size, bottom: bounds.min.y, gun: item.target.weaponId, ammo: item.target.ammo }; });
+    expect(visual.items).toBe(1); expect(visual.bottom).toBeCloseTo(.025, 2); expect(visual.gun).toBe('rifle'); expect(visual.ammo).toBe(7);
+    await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/ground-gun-swap.png' });
+    await page.keyboard.press('KeyR'); await expect(page.locator('#reload-indicator')).toBeVisible();
     await page.keyboard.press('KeyG'); await expect(page.locator('#hud-weapon-name')).toHaveText('VX–7'); await expect(page.locator('#hud-ammo')).toHaveText('07');
-    expect(await page.evaluate(() => window.__equipment.game.groundItems.size)).toBe(0); expect(errors).toEqual([]);
+    expect(await page.evaluate(() => ({ size: window.__equipment.game.groundItems.size, gun: [...window.__equipment.room.droppedWeapons.values()][0].weaponId, ammo: [...window.__equipment.room.droppedWeapons.values()][0].ammo }))).toEqual({ size: 1, gun: 'mp5', ammo: 12 }); expect(errors).toEqual([]);
   } finally { await dispose(page); }
 });
 
-test('a real knife click kills at arm’s length, drops the victim’s gun and keeps the next respawn loadout', async ({ page }) => {
+test('a legacy fallback knife still works, but is never equipped by pressing G without a ground gun', async ({ page }) => {
   await fixture(page);
   try {
-    await page.keyboard.press('KeyG'); await expect(page.locator('#hud-weapon-name')).toHaveText('FIELD KNIFE');
+    await page.keyboard.press('KeyG'); await expect(page.locator('#hud-weapon-name')).toHaveText('VX–7');
+    await page.evaluate(() => { const f = window.__equipment; Object.assign(f.player, { weaponId: 'knife', ammo: 0, equipmentSeq: f.player.equipmentSeq + 1 }); f.game.applySnapshot(f.room.snapshot()); });
+    await expect(page.locator('#hud-weapon-name')).toHaveText('FIELD KNIFE');
     await page.evaluate(() => { const f = window.__equipment; Object.assign(f.other, { x: 24, y: 0, z: 8.8, hp: 45, protectedUntil: 0 }); f.game.applySnapshot(f.room.snapshot()); });
     await expect(page.locator('#reload-hint')).toContainText('근접'); await page.mouse.click(600, 450);
     await expect.poll(() => page.evaluate(() => window.__equipment.other.hp)).toBe(0);
     await expect(page.locator('#killfeed')).toContainText('FIELD KNIFE');
-    expect(await page.evaluate(() => ({ drops: window.__equipment.room.droppedWeapons.size, saved: window.__equipment.player.nextWeaponId, knifeKills: window.__equipment.player.weaponKills.knife }))).toEqual({ drops: 2, saved: 'rifle', knifeKills: 1 });
+    expect(await page.evaluate(() => ({ drops: window.__equipment.room.droppedWeapons.size, saved: window.__equipment.player.nextWeaponId, knifeKills: window.__equipment.player.weaponKills.knife }))).toEqual({ drops: 1, saved: 'rifle', knifeKills: 1 });
   } finally { await dispose(page); }
 });
 
-test('the static solo worker handles G dropping/pickup and knife attacks without WebSocket or API traffic', async ({ page }) => {
+test('the static solo worker keeps the current gun when G has nothing to swap with, without WebSocket or API traffic', async ({ page }) => {
   const sockets = [], apis = [], errors = []; page.on('websocket', (socket) => sockets.push(socket.url())); page.on('pageerror', (error) => errors.push(error.message)); page.on('request', (request) => { if (new URL(request.url()).pathname.startsWith('/api/')) apis.push(request.url()); });
   await page.goto(`http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}`); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
   await page.getByRole('button', { name: '연습전 시작', exact: true }).click(); await expect(page.locator('#pause-overlay')).toBeVisible(); await page.getByRole('button', { name: '교전 시작', exact: true }).click();
-  await page.keyboard.press('KeyG'); await expect(page.locator('#hud-weapon-name')).toHaveText('FIELD KNIFE'); await expect(page.locator('#equipment-hint')).toContainText('줍기');
-  await page.mouse.click(600, 450); await page.keyboard.press('KeyG'); await expect(page.locator('#hud-weapon-name')).toHaveText('VX–7'); await expect(page.locator('#hud-ammo')).toHaveText('30');
+  await page.keyboard.press('KeyG'); await expect(page.locator('#hud-weapon-name')).toHaveText('VX–7'); await expect(page.locator('#hud-ammo')).toHaveText('30');
+  await page.mouse.click(600, 450); await expect(page.locator('#hud-ammo')).toHaveText('29');
   await page.evaluate(() => document.exitPointerLock()); await expect(page.locator('#pause-overlay')).toBeVisible(); await page.getByRole('button', { name: '로비로 나가기', exact: true }).click(); expect(sockets).toEqual([]); expect(apis).toEqual([]); expect(errors).toEqual([]);
 });
 

@@ -1,6 +1,6 @@
 import { expandBuildings } from './buildings.js';
 import { addSpawnZones } from './spawns.js';
-export const NETWORK_PROTOCOL = 13;
+export const NETWORK_PROTOCOL = 14;
 
 export const RULES = Object.freeze({
   tickRate: 60, snapshotRate: 20, maxPlayers: 8, roundSeconds: 300,

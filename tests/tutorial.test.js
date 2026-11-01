@@ -22,7 +22,7 @@ test('the dedicated tutorial is local-only, excluded from multiplayer maps and u
   assert.equal(data.room.result, null); assert.equal(data.tutorial.completed, false); assert.equal(data.tutorial.goals.every((goal) => !goal.done), true);
 });
 
-test('real movement, terrain, shots, reload, G/knife, AI combat and the ordinary three-second respawn complete training', () => {
+test('real movement, shots, ground-gun swaps and an explicitly confirmed respawn complete training', () => {
   const f = fixture(), { tutorial: t, advance } = f, p = t.player;
   advance(1500, { forward: 1, sprint: true, yaw: .5 }); assert.equal(t.stage, 1);
   advance(100, { jump: true }); advance(1200); advance(200, { crouch: true });
@@ -32,10 +32,14 @@ test('real movement, terrain, shots, reload, G/knife, AI combat and the ordinary
   advance(1500, { ...aim(), fire: true, ads: true }); advance(2000, { reload: true }); assert.equal(t.stage, 3);
   let action = 0;
   const interact = () => t.interactEquipment({ roundId: t.room.roundId, spawnCount: p.spawnCount, equipmentSeq: p.equipmentSeq, actionSeq: ++action });
-  assert.equal(interact(), true); assert.equal(p.weaponId, 'knife'); advance(400); advance(50, { fire: true }); advance(100); assert.equal(interact(), true); advance(50); assert.equal(t.stage, 4);
-  advance(1500, { ...aim(), fire: true, ads: true }); assert.equal(t.stage, 5); assert.equal(p.hp, 0);
+  advance(500); assert.equal(interact(), true); assert.equal(p.weaponId, 'mp5'); advance(500); assert.equal(interact(), true); advance(50); assert.equal(t.stage, 4);
+  advance(1500, { ...aim(), fire: true, ads: true }); assert.equal(t.stage, 5); assert.ok(p.hp > 0);
+  const command = (action) => t.command({ action, roundId: t.room.roundId, spawnCount: p.spawnCount });
+  advance(500); assert.ok(p.hp > 0); assert.equal(command('confirm-respawn'), false); assert.equal(command('start-respawn'), true); advance(1700); assert.equal(p.hp, 0);
   const life = p.spawnCount; assert.equal(p.respawnAt - p.diedAt, RULES.respawnSeconds * 1000); advance(3200);
-  assert.equal(p.spawnCount, life + 1); assert.equal(p.hp, 100); assert.equal(t.completed, true); assert.equal(t.room.phase, 'training-complete'); assert.equal(t.snapshot().room.result, null);
+  assert.equal(p.spawnCount, life + 1); assert.equal(p.hp, 100); assert.equal(t.completed, false); assert.equal(t.room.phase, 'active'); assert.equal(command('confirm-respawn'), false);
+  advance(2100); assert.equal(t.completed, false); assert.equal(command('confirm-respawn'), true); advance(50);
+  assert.equal(t.completed, true); assert.equal(t.room.phase, 'training-complete'); assert.equal(t.snapshot().room.result, null);
 });
 
 test('dying keeps the lesson checkpoint; restarting clears objectives, enemies, drops and the previous round', () => {

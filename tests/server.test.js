@@ -167,10 +167,13 @@ test('real LAN equipment commands synchronize drops, late joins and atomic picku
   let now = Date.now(); room.clock = () => now; room.world = { ...room.world, width: 100, depth: 100, obstacles: [] }; Object.assign(player, { x: 0, y: 0, z: 0, yaw: 0, ammo: 7 });
   const request = { type: 'equipment', roundId: room.roundId, spawnCount: player.spawnCount, equipmentSeq: player.equipmentSeq, actionSeq: 1 };
   const barrier = async (c) => { const wait = message(c.socket, 'pong'); c.send({ type: 'ping' }); await wait; };
-  a.send(request); a.send(request); await barrier(a); assert.equal(player.weaponId, 'knife'); assert.equal(room.droppedWeapons.size, 1);
+  a.send(request); a.send(request); await barrier(a); assert.equal(player.weaponId, 'rifle'); assert.equal(room.droppedWeapons.size, 0);
+  room.dropWeapon({ ...player, weaponId: 'mp5', weaponSkinId: 'circuit', ammo: 12 });
+  for (let i = 0; i < 30; i++) { now += 1000 / 60; room.tick(1 / 60); }
+  a.send({ ...request, actionSeq: 2 }); await barrier(a); assert.equal(player.weaponId, 'mp5');
   for (let i = 0; i < 30; i++) { now += 1000 / 60; room.tick(1 / 60); }
   pending = message(b.socket, 'joined'); b.send({ type: 'join', code: room.code }); const second = await pending;
-  assert.equal(second.droppedWeapons.length, 1); assert.equal(second.droppedWeapons[0].ammo, 7); assert.equal(second.players.find((p) => p.id === player.id).weaponId, 'knife');
+  assert.equal(second.droppedWeapons.length, 1); assert.equal(second.droppedWeapons[0].ammo, 7); assert.equal(second.players.find((p) => p.id === player.id).weaponId, 'mp5');
   const guest = room.players.get(second.id); Object.assign(guest, { x: 0, y: 0, z: -.65, yaw: Math.PI });
   b.send({ ...request, spawnCount: guest.spawnCount, equipmentSeq: guest.equipmentSeq }); await barrier(b);
   assert.equal(guest.weaponId, 'rifle'); assert.equal(guest.ammo, 7); assert.equal(room.droppedWeapons.size, 1);

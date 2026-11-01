@@ -260,6 +260,7 @@ function setMode(value) {
 
 function handleTutorialState(data) {
   if (data.room?.mode !== 'tutorial' || !game) return;
+  const action = data.tutorial?.action; $('tutorial-advance').hidden = !action; $('tutorial-advance').disabled = !action?.enabled; $('tutorial-advance').textContent = action?.label || '';
   if (!data.tutorial?.completed) { tutorialCompletedRound = null; return; }
   if (tutorialCompletedRound === data.room.roundId) return;
   tutorialCompletedRound = data.room.roundId; store('linkshot-tutorial-v1', 'completed'); $('tutorial-recommendation').hidden = true;
@@ -596,12 +597,13 @@ profileStore.addEventListener('award', (event) => toast(`라운드 정산 완료
 window.addEventListener('storage', (event) => { if (event.key === PROFILE_KEY && !game) { profileStore.refreshLocal(); renderProfile(); } });
 if (profileStore.warning) toast(profileStore.warning, true);
 const tutorialActions = document.createElement('div'); tutorialActions.id = 'tutorial-actions'; tutorialActions.className = 'tutorial-actions'; tutorialActions.hidden = true;
-for (const [id, text] of [['tutorial-retry', '튜토리얼 다시 시작'], ['tutorial-skip', '건너뛰기 · 혼자 연습으로']]) { const button = document.createElement('button'); button.id = id; button.className = 'secondary-button'; button.textContent = text; tutorialActions.append(button); }
+for (const [id, text] of [['tutorial-advance', '리스폰 시범 시작'], ['tutorial-retry', '튜토리얼 다시 시작'], ['tutorial-skip', '건너뛰기 · 혼자 연습으로']]) { const button = document.createElement('button'); button.id = id; button.className = 'secondary-button'; button.textContent = text; button.hidden = id === 'tutorial-advance'; tutorialActions.append(button); }
 document.querySelector('.pause-bottom').before(tutorialActions);
+$('tutorial-advance').addEventListener('click', () => { if (game?.requestTutorialAction()) game.lock(); });
 $('tutorial-retry').addEventListener('click', () => { send({ type: 'restart' }); game?.lock(); });
 $('tutorial-skip').addEventListener('click', () => { store('linkshot-tutorial-v1', stored('linkshot-tutorial-v1', 'dismissed')); leaveGame(); setMode('practice'); $('tutorial-recommendation').hidden = true; });
 $('tutorial-recommendation').hidden = !!stored('linkshot-tutorial-v1', '');
-const extraControls = document.createElement('p'); extraControls.className = 'controls-addition'; extraControls.textContent = `G: 가까운 총 줍기·교체 / 총이 없으면 현재 총 버리기 → 기본 나이프 (좌클릭 공격). 사망 시 사용하던 총을 떨어뜨립니다. 주운 총은 영구 해금이나 다음 부활 장비를 바꾸지 않습니다. 사망 후 E: ${WEAPONS.length}종 목록에서 다음 부활 무기 선택 (처음 10종은 숫자 1–9, 0). 숫자·휠로 생존 중 교체는 불가 · C / Ctrl: 앉기 (달리기·공중에서는 불가). 달리거나 공중에서 쏘면 탄이 크게 퍼집니다.`; $('help-dialog').append(extraControls);
+const extraControls = document.createElement('p'); extraControls.className = 'controls-addition'; extraControls.textContent = `G: 가까운 바닥 총과 교체합니다. 들고 있던 총은 남은 탄약 그대로 바닥에 남습니다. 교체할 총이 없으면 아무 일도 일어나지 않으며, 총만 버리는 기능은 없습니다. 사망 시에도 사용하던 총을 떨어뜨립니다. 주운 총은 영구 해금이나 다음 부활 장비를 바꾸지 않습니다. 사망 후 E: ${WEAPONS.length}종 목록에서 다음 부활 무기 선택 (처음 10종은 숫자 1–9, 0). 숫자·휠로 생존 중 교체는 불가 · C / Ctrl: 앉기 (달리기·공중에서는 불가). 달리거나 공중에서 쏘면 탄이 크게 퍼집니다.`; $('help-dialog').append(extraControls);
 if (SOLO) {
   document.body.classList.add('solo-edition'); document.title = 'LINKSHOT · 링크샷 — Solo combat';
   document.querySelector('.page-heading h1').textContent = '서버 없이 훈련하고, 함께 교전하세요.';
