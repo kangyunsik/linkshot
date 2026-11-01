@@ -34,6 +34,22 @@
 
 Node 22 이상, `npm install`, Java 21, Maven 3.6.3 이상이 필요합니다. 개발용 PostgreSQL 바이너리는 Maven의 테스트 의존성으로 내려받으며 시스템 DB를 설치하거나 기존 DB를 변경하지 않습니다. 일반 사용자로 실행하세요.
 
+### 간편 실행 (macOS/Linux)
+
+프로젝트 루트에서 터미널 세 개를 열어 순서대로 실행합니다.
+
+```sh
+./spring.sh  # 터미널 1: Spring + 개발용 PostgreSQL (기본 8080)
+./online.sh  # 터미널 2: Node.js 온라인 전투 서버 (기본 8090)
+./fe.sh      # 터미널 3: 온라인 FE 빌드 + 미리보기 (기본 4173)
+```
+
+브라우저는 **http://127.0.0.1:4173**으로 접속합니다. 각 터미널에서 `Ctrl+C`로 종료합니다. 다른 디렉터리에서 스크립트의 전체 경로로 실행해도 프로젝트 루트를 찾아갑니다. Spring/전투 스크립트는 비밀 설정이 없으면 생성하고 기존 `online-server/.env`는 보존합니다. macOS에서는 Java 21을 자동 선택하며, 다른 환경에서는 Java 21이 PATH에 있거나 `JAVA_HOME`으로 지정되어 있어야 합니다.
+
+`fe.sh`는 명시한 `ONLINE_SERVER_URL`, `.env`/환경의 `ONLINE_API_URL`, 기본 `http://127.0.0.1:8080` 순으로 API 주소를 사용합니다. 포트를 바꾸면 `FRONTEND_ORIGINS`도 FE origin에 맞춰 설정하세요. 스크립트는 LAN용 `npm run dev`를 변경하거나 기존 서버를 종료하지 않습니다.
+
+### 개별 npm 명령
+
 ```sh
 npm run online:config
 npm run online:dev
