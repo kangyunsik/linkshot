@@ -1,6 +1,7 @@
 import { WORLD } from '/shared/world.js';
+import { TEAM_COLORS, teamSpawnZones } from '/shared/teams.js';
 
-export function drawTacticalMap(canvas, { world = WORLD, players = [], self = null, spawns = false, detailed = false } = {}) {
+export function drawTacticalMap(canvas, { world = WORLD, players = [], self = null, spawns = false, detailed = false, gameType = 'ffa' } = {}) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const w = canvas.width, h = canvas.height, pad = detailed ? 45 : 15;
@@ -10,6 +11,10 @@ export function drawTacticalMap(canvas, { world = WORLD, players = [], self = nu
   const z = (v) => oz + (v + world.depth / 2) * scale;
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = detailed ? '#111c23' : '#0d1920d9'; ctx.fillRect(0, 0, w, h);
+  if (gameType === 'teams') for (const team of ['blue', 'red']) {
+    const points = teamSpawnZones(world)[team]; ctx.fillStyle = TEAM_COLORS[team] + '28';
+    const minX = Math.min(...points.map((p) => p.x)) - 1.5, maxX = Math.max(...points.map((p) => p.x)) + 1.5, minZ = Math.min(...points.map((p) => p.z)) - 1.5, maxZ = Math.max(...points.map((p) => p.z)) + 1.5; ctx.fillRect(x(minX), z(minZ), (maxX - minX) * scale, (maxZ - minZ) * scale);
+  }
   ctx.strokeStyle = '#6b9ab311'; ctx.lineWidth = 1;
   for (let i = -world.width / 2; i <= world.width / 2; i += 4) { ctx.beginPath(); ctx.moveTo(x(i), z(-world.depth / 2)); ctx.lineTo(x(i), z(world.depth / 2)); ctx.stroke(); }
   for (let i = -world.depth / 2; i <= world.depth / 2; i += 4) { ctx.beginPath(); ctx.moveTo(x(-world.width / 2), z(i)); ctx.lineTo(x(world.width / 2), z(i)); ctx.stroke(); }
@@ -26,11 +31,11 @@ export function drawTacticalMap(canvas, { world = WORLD, players = [], self = nu
   }
   for (const p of players) {
     if (p.id === self?.id || p.hp <= 0) continue;
-    ctx.fillStyle = '#ff785e'; ctx.beginPath(); ctx.arc(x(p.x), z(p.z), detailed ? 4 : 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = TEAM_COLORS[p.teamId] || '#ff785e'; ctx.beginPath(); ctx.arc(x(p.x), z(p.z), detailed ? 4 : 3, 0, Math.PI * 2); ctx.fill();
   }
   if (self && self.hp > 0) {
     ctx.save(); ctx.translate(x(self.x), z(self.z)); ctx.rotate(-self.yaw);
-    ctx.fillStyle = '#b2f6dc'; ctx.strokeStyle = '#132c29'; ctx.lineWidth = 2;
+    ctx.fillStyle = TEAM_COLORS[self.teamId] || '#b2f6dc'; ctx.strokeStyle = '#132c29'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(5, 5); ctx.lineTo(0, 2); ctx.lineTo(-5, 5); ctx.closePath(); ctx.stroke(); ctx.fill(); ctx.restore();
   }
   ctx.fillStyle = '#9ab7c5'; ctx.font = `${detailed ? 12 : 8}px monospace`; ctx.textAlign = 'right';

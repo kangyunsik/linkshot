@@ -29,6 +29,8 @@ test('the main stats show online casual rating and tier separately, refresh corr
   await page.setViewportSize({ width: 1440, height: 1000 }); await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/lobby-online-rating-tier.png', fullPage: true });
   await page.reload(); await expect(page.locator('#profile-casual-rating')).toHaveText('1,432'); await expect(page.locator('#profile-rank-tier')).toHaveText('실버 III');
   for (const mode of ['일반', '랭크']) { await page.getByRole('tab', { name: mode, exact: true }).click(); await page.getByRole('button', { name: `${mode} 매칭`, exact: true }).click(); await expect(page.locator('#online-queue-detail')).toHaveText('매칭 인원 1/4'); await expect(page.locator('#online-queue-panel')).not.toContainText(/허용 점수|AI 추가|AI로 빈자리/); await page.locator('#online-cancel-queue').click(); await expect(page.locator('#online-queue-panel')).toBeHidden(); }
+  Object.assign(profile, { rankTier: 'UNRANKED', placementsPlayed: 3, placementWins: 2 }); await page.reload(); await expect(page.locator('#profile-rank-tier')).toHaveText('배치 중'); await expect(page.locator('#profile-rank-progress')).toHaveText('배치 3/10판 · 2승');
+  await page.getByRole('tab', { name: '랭크', exact: true }).click();
   await page.locator('#online-logout').click(); await expect(page.locator('#profile-casual-rating')).toHaveText('—'); await expect(page.locator('#profile-rank-tier')).toHaveText('—');
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1'))); expect(stored.kills).toBe(12); expect(stored.points).toBe(600); expect(stored.casualRating).toBeUndefined(); expect(errors).toEqual([]);
 });

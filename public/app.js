@@ -8,6 +8,8 @@ import { SoloConnection } from './solo-connection.js';
 import * as runtime from './runtime-config.js';
 import { OnlineApi } from './online-api.js';
 import { OnlineConnection } from './online-connection.js';
+import { CustomConnection } from './custom-connection.js';
+import { MatchIntro } from './match-intro.js';
 import { ProfileStore, PROFILE_KEY } from './profile.js';
 import { profileStats, POINT_RULES, weaponMastery } from '/shared/progression.js';
 import { OUTFITS, getOutfit, CHARACTERS, getCharacter } from '/shared/outfits.js';
@@ -48,6 +50,8 @@ let onlineApi = null, onlineUser = null, onlineAvailable = false, onlineBusy = f
 let onlineCapabilities = { matchmaking: false }, onlineQueueState = null, onlineAutoJoin = false, onlinePolling = false, onlineQueueTimer = null, onlineHeartbeatAt = 0, onlineSelectedWeapon = 'rifle';
 let onlineReceipt = null, onlineResultPending = null, onlineResultNextAt = 0, onlineActiveMatch = null, onlineReconnectUntil = 0;
 let onlineServicePolling = false, onlineAuthGeneration = 0;
+let pendingJoinCode = null, onlineEntering = false;
+const matchIntro = new MatchIntro(() => { const previous = socket; socket = null; previous?.close(); onlineReconnectUntil = 0; clearTimeout(reconnectTimeout); leaveGame(false); matchIntro.hide(); });
 const onlineResultSummary = document.createElement('p'); onlineResultSummary.id = 'online-rating-summary'; onlineResultSummary.hidden = true; $('round-reward').append(onlineResultSummary);
 const onlineWeaponWrap = document.createElement('div'); onlineWeaponWrap.id = 'online-weapon-wrap'; onlineWeaponWrap.hidden = true;
 const onlineWeaponLabel = document.createElement('label'); onlineWeaponLabel.htmlFor = 'online-weapon-choice'; onlineWeaponLabel.textContent = '온라인 출격 무기';
@@ -71,6 +75,9 @@ let busy = false, requestTimeout, reconnectTimeout, reconnectDelay = 1000, hasDe
 let invitedCode = new URL(location.href).searchParams.get('room')?.toUpperCase();
 if (!/^[A-Z2-9]{5}$/.test(invitedCode || '')) invitedCode = null;
 if (SOLO) invitedCode = null;
+let invitedCustomCode = new URL(location.href).searchParams.get('custom')?.toUpperCase();
+if (!/^[A-Z2-9]{5}$/.test(invitedCustomCode || '')) invitedCustomCode = null;
+if (invitedCustomCode) mode = 'custom';
 
 $('player-name').value = profileStore.profile.callsign;
 if (invitedCode) $('room-code').value = invitedCode;
@@ -101,25 +108,28 @@ function setBusy(value) {
 
 function updateConnection(value) {
   connected = value;
-  const serviceReady = value || transportKind === 'online' && onlineAvailable;
+  const serviceReady = value || ['online', 'custom'].includes(transportKind) && onlineAvailable;
   $('connection-status').classList.toggle('offline', !serviceReady);
-  $('connection-status').lastElementChild.textContent = value ? transportKind === 'local' ? 'SOLO READY · LOCAL SIMULATION' : transportKind === 'online' ? 'ONLINE BATTLE CONNECTED' : 'LAN SERVER ONLINE' : transportKind === 'online' ? onlineAvailable ? 'ONLINE SERVICES READY' : onlineApi ? 'ONLINE SERVER OFFLINE' : 'ONLINE SERVER NOT CONFIGURED' : transportKind === 'local' ? '시뮬레이션 준비 중' : SOLO ? 'LAN 서버 페이지로 접속하세요' : '서버 연결 대기 중';
+  $('connection-status').lastElementChild.textContent = value ? transportKind === 'local' ? 'SOLO READY · LOCAL SIMULATION' : transportKind === 'custom' ? 'CUSTOM ROOMS CONNECTED' : transportKind === 'online' ? 'ONLINE BATTLE CONNECTED' : 'LAN SERVER ONLINE' : ['online', 'custom'].includes(transportKind) ? onlineAvailable ? 'ONLINE SERVICES READY' : onlineApi ? 'ONLINE SERVER OFFLINE' : 'ONLINE SERVER NOT CONFIGURED' : transportKind === 'local' ? '시뮬레이션 준비 중' : SOLO ? 'LAN 서버 페이지로 접속하세요' : '서버 연결 대기 중';
   document.querySelector('.connection-dot').style.background = serviceReady ? '#a3dbc9' : '#ff6249';
   updateDeployButton();
   $('join-form').querySelector('button').disabled = !value || busy;
+  $('room-browser-button').disabled = !value || busy;
 }
 
 function isOnlineRoom(room = game?.room) { return ['casual', 'ranked'].includes(room?.mode); }
+function usesOnlineServices(value = mode) { return ['online', 'custom'].includes(getPlayMode(value).transport); }
 function updateDeployButton() {
   const online = getPlayMode(mode).transport === 'online', ready = onlineQueueState?.state === 'READY', blocked = ['QUEUED', 'ASSIGNED', 'ABANDONED'].includes(onlineQueueState?.state);
   $('create-button').disabled = busy || (online ? onlineBusy || !onlineAvailable || !onlineUser || blocked || !ready && !onlineCapabilities.matchmaking : !connected);
+  if (mode === 'custom') $('create-button').disabled = busy || onlineBusy || !onlineUser || !onlineAvailable || !onlineCapabilities.customRooms || !connected;
   if (online) $('create-button').querySelector('span').textContent = ready ? '배정된 경기 입장' : blocked ? '매칭 대기 중…' : getPlayMode(mode).action;
 }
 
 function updateRooms(list) {
   rooms = list;
   const players = rooms.reduce((sum, room) => sum + room.players, 0);
-  $('room-summary').textContent = transportKind === 'local' ? `${MAPS.length}개 전장 · ${WEAPONS.length}종 무기 · 튜토리얼/연습은 별도 서버 없이 플레이` : transportKind === 'online' ? '일반·랭크: 중앙 온라인 서버와 계정 연결이 필요합니다' : !connected ? '로컬 LAN 서버에 연결되어 있지 않습니다 · 튜토리얼/혼자 연습은 이용 가능' : rooms.length ? `${rooms.length}개의 열린 방 · ${players}명 교전 중` : '네트워크 준비 완료 · 첫 번째 방을 만들어 보세요';
+  $('room-summary').textContent = transportKind === 'local' ? `${MAPS.length}개 전장 · ${WEAPONS.length}종 무기 · 튜토리얼/연습은 별도 서버 없이 플레이` : transportKind === 'online' ? '일반·랭크: 중앙 온라인 서버와 계정 연결이 필요합니다' : transportKind === 'custom' ? connected ? `${rooms.length}개의 사용자 방 · ${players}명 참가 중` : '사용자 대전 서버 연결을 기다리고 있습니다' : !connected ? '로컬 LAN 서버에 연결되어 있지 않습니다 · 튜토리얼/혼자 연습은 이용 가능' : rooms.length ? `${rooms.length}개의 열린 방 · ${players}명 교전 중` : '네트워크 준비 완료 · 첫 번째 방을 만들어 보세요';
   const container = $('room-list'); container.replaceChildren();
   if (!rooms.length) {
     const empty = document.createElement('div'); empty.className = 'empty-rooms';
@@ -131,11 +141,11 @@ function updateRooms(list) {
     const row = document.createElement('div'); row.className = 'room-row';
     const details = document.createElement('div'); details.className = 'room-details';
     const code = document.createElement('strong'); code.textContent = room.code;
-    const name = document.createElement('small'); name.textContent = `${getMap(room.mapId).name} · ${room.name} · 봇 ${room.bots}명 · ${room.fragLimit || RULES.fragLimit}킬/${Math.round((room.roundSeconds || RULES.roundSeconds) / 60)}분 · ${room.phase === 'ended' ? '종료' : '교전 중'}`;
+    const name = document.createElement('small'); name.textContent = `${room.passwordProtected ? '🔒 비밀번호 · ' : ''}${getMap(room.mapId).name} · ${room.name} · ${room.gameType === 'teams' ? '팀전' : '개인전'} · 봇 ${room.bots}명 · ${room.fragLimit || RULES.fragLimit}킬/${Math.round((room.roundSeconds || RULES.roundSeconds) / 60)}분 · ${room.phase === 'ended' ? '종료' : '교전 중'}`;
     details.append(code, name);
     const count = document.createElement('span'); count.textContent = `${room.players}/${room.capacity}`;
     const button = document.createElement('button'); button.textContent = '참가'; button.disabled = room.players >= room.capacity;
-    button.addEventListener('click', () => { $('rooms-dialog').close(); requestJoin(room.code); });
+    button.addEventListener('click', () => { $('rooms-dialog').close(); if (room.passwordProtected) askRoomPassword(room.code); else requestJoin(room.code); });
     row.append(details, count, button); container.append(row);
   }
 }
@@ -153,21 +163,23 @@ function connect(kind = getPlayMode(mode).transport) {
   clearTimeout(reconnectTimeout);
   const previous = socket; socket = null; previous?.close(); selfSessionId = null; transportKind = kind;
   updateConnection(false); updateRooms([]);
-  if (kind === 'online' || kind === 'lan' && SOLO) return;
+  if (kind === 'online' || kind === 'custom' && (!onlineUser || !onlineApi || !onlineCapabilities.customRooms) || kind === 'lan' && SOLO) return;
   const url = new URL('/play', location.href); url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const connection = kind === 'local' ? new SoloConnection() : new WebSocket(url); socket = connection;
+  const connection = kind === 'custom' ? new CustomConnection(onlineApi) : kind === 'local' ? new SoloConnection() : new WebSocket(url); socket = connection;
   bindConnection(connection, kind);
 }
 function bindConnection(connection, kind) {
-  const expectedOnlineAccount = kind === 'online' ? onlineUser?.id : null;
+  const expectedOnlineAccount = ['online', 'custom'].includes(kind) ? onlineUser?.id : null;
   connection.addEventListener('message', (event) => {
     if (socket !== connection) return;
     let data; try { data = JSON.parse(event.data); } catch { return; }
     if (!data || typeof data !== 'object') return;
     if (kind === 'online' && ['joined', 'state'].includes(data.type) && (!isOnlineRoom(data.room) || data.online?.matchId !== connection.matchId || !Array.isArray(data.players) || !data.players.some((player) => player?.id === expectedOnlineAccount) || data.type === 'joined' && data.id !== expectedOnlineAccount)) { connection.close(); setBusy(false); toast('온라인 경기 배정 정보가 일치하지 않습니다.', true); return; }
+    if (kind === 'custom' && ['joined', 'state'].includes(data.type) && (data.room?.mode !== 'custom' || !data.players?.some((player) => player.id === expectedOnlineAccount) || data.type === 'joined' && data.id !== expectedOnlineAccount)) { connection.close(); setBusy(false); toast('사용자 대전 계정 정보를 확인하세요.', true); return; }
     if (data.type === 'hello') {
-      reconnectDelay = 1000; updateConnection(true); updateServerInfo(data); send({ type: 'ping', sent: Date.now() });
+      reconnectDelay = 1000; updateConnection(true); if (kind === 'custom') updateRooms(data.rooms || []); else updateServerInfo(data); send({ type: 'ping', sent: Date.now() });
       if (kind === 'lan' && invitedCode) { const code = invitedCode; invitedCode = null; requestJoin(code); }
+      if (kind === 'custom' && invitedCustomCode) { const code = invitedCustomCode; invitedCustomCode = null; const room = data.rooms?.find((item) => item.code === code); if (room?.passwordProtected) askRoomPassword(code); else requestJoin(code); }
     }
     if (data.type === 'rooms') updateRooms(data.rooms);
     if (data.type === 'pong') {
@@ -175,19 +187,26 @@ function bindConnection(connection, kind) {
       $('hud-ping').textContent = `${latency} MS`;
       $('connection-status').title = kind === 'local' ? `브라우저 시뮬레이션 응답: ${latency}ms` : `서버 왕복 지연: ${latency}ms`;
     }
-    if (data.type === 'joined') { selfSessionId = data.id; if (kind === 'online') { onlineActiveMatch = data.online?.matchId; onlineReconnectUntil = 0; } syncProgress(data); enterGame(data); }
+    if (data.type === 'joined') { clearTimeout(requestTimeout); pendingJoinCode = null; $('room-join-password').value = ''; if ($('room-password-dialog').open) $('room-password-dialog').close(); selfSessionId = data.id; if (kind === 'online') { onlineActiveMatch = data.online?.matchId; onlineReconnectUntil = 0; } syncProgress(data); enterGame(data); }
     if (data.type === 'state') { syncProgress(data); game?.applySnapshot(data); handleTutorialState(data); handleOnlineState(data); }
     if (data.type === 'left') { selfSessionId = null; if (game) leaveGame(false); }
-    if (data.type === 'error') { setBusy(false); toast(data.message, true); }
+    if (data.type === 'error') { setBusy(false); if (data.code === 'ROOM_PASSWORD' && pendingJoinCode) { askRoomPassword(pendingJoinCode); $('room-password-error').textContent = data.message; } else toast(data.message, true); }
   });
   connection.addEventListener('close', (event) => {
     if (socket !== connection) return;
-    const wasPlaying = !!game, ended = game?.room?.phase === 'ended';
+    const wasPlaying = !!game, phase = game?.room?.phase, ended = phase === 'ended';
     updateConnection(false); setBusy(false); updateRooms([]);
     if (kind === 'online') {
-      if (wasPlaying && !ended) { leaveGame(false); toast('온라인 전투 연결이 끊겼습니다. 30초 안에는 같은 생명·탄약으로 재접속할 수 있습니다.', true); }
+      matchIntro.hide(); onlineEntering = false;
+      if (wasPlaying && !ended) { leaveGame(false); toast(phase === 'active' ? '온라인 전투 연결이 끊겼습니다. 30초 안에는 같은 생명·탄약으로 재접속할 수 있습니다.' : '경기 준비 연결이 끊겼습니다. 연결을 복구하면 카운트다운을 다시 시작합니다.', true); }
       selfSessionId = null; void refreshOnlineQueue();
       if (!ended && ![1000, 1008].includes(event.code) && (wasPlaying || onlineReconnectUntil > Date.now())) { onlineReconnectUntil ||= Date.now() + 30_000; reconnectTimeout = setTimeout(tryOnlineReconnect, 1000); }
+      return;
+    }
+    if (kind === 'custom') {
+      if (wasPlaying) { leaveGame(false); toast('사용자 대전 연결이 끊겼습니다. 방 목록에서 다시 참가해 주세요.', true); }
+      socket = null;
+      if (![1000, 1008, 4001].includes(event.code) && mode === 'custom' && onlineUser) reconnectTimeout = setTimeout(() => connect('custom'), reconnectDelay);
       return;
     }
     if (wasPlaying) { leaveGame(false); toast(kind === 'local' ? '브라우저 시뮬레이션이 중단되었습니다. 다시 시작해 주세요.' : '서버 연결이 끊겼습니다. 튜토리얼/혼자 연습은 서버 없이 이용할 수 있습니다.', true); }
@@ -208,11 +227,15 @@ function profileLoadout() {
   return { ...loadout, outfitId: profile.equippedOutfitId, characterId: profile.characterId, ownedWeapons: profile.ownedWeapons, weaponKills: profile.weaponKills };
 }
 
-function requestJoin(code) {
+function askRoomPassword(code) {
+  pendingJoinCode = code; $('room-password-code').textContent = `방 코드 ${code}`; $('room-password-error').textContent = ''; $('room-join-password').value = ''; openDialog('room-password-dialog'); $('room-join-password').focus();
+}
+function requestJoin(code, password = '') {
   if (busy || game) return;
   if (!connected) { toast('먼저 로컬 서버에 연결되어야 합니다.', true); return; }
   if (!/^[A-Z2-9]{5}$/.test(code)) { toast('5자리 방 코드를 입력해 주세요.', true); return; }
-  setBusy(true); send({ type: 'join', code, name: callsign(), ...profileLoadout() });
+  pendingJoinCode = code; setBusy(true);
+  send(transportKind === 'custom' ? { type: 'join', code, password, weaponId: onlineSelectedWeapon, skinId: loadout.skinId } : { type: 'join', code, password, name: callsign(), ...profileLoadout() });
 }
 
 function showMenu(visible) {
@@ -228,9 +251,11 @@ function showMenu(visible) {
 }
 
 async function enterGame(data) {
-  if (data.room?.protocolVersion !== NETWORK_PROTOCOL) { send({ type: 'leave' }); setBusy(false); toast('게임 서버가 이전 버전입니다. 진행 중인 방을 종료한 뒤 서버를 재시작하고 브라우저를 새로고침해 주세요.', true); return; }
+  if (data.room?.protocolVersion !== NETWORK_PROTOCOL) { send({ type: 'leave' }); matchIntro.hide(); onlineEntering = false; setBusy(false); toast('게임 서버가 이전 버전입니다. 진행 중인 방을 종료한 뒤 서버를 재시작하고 브라우저를 새로고침해 주세요.', true); return; }
   if (game) game.dispose();
-  $('lobby').hidden = true; $('game-shell').hidden = false; hasDeployed = false;
+  onlineEntering = isOnlineRoom(data.room) && ['waiting', 'countdown'].includes(data.room.phase);
+  $('lobby').hidden = !onlineEntering; $('game-shell').hidden = onlineEntering; hasDeployed = false;
+  if (onlineEntering) matchIntro.update(data); else matchIntro.hide();
   try {
     game = new FPSGame({
       canvas: $('game-canvas'), minimap: $('minimap'), settings, audio, send,
@@ -245,9 +270,9 @@ async function enterGame(data) {
     $('loading-overlay').querySelector('h2').textContent = '그래픽을 준비하는 중'; $('loading-overlay').querySelector('.eyebrow').textContent = 'PREPARING GRAPHICS';
     const created = game; await created.prepareGraphics(); if (game !== created || created.disposed) return;
     $('pause-room-code').textContent = data.room.code;
-    $('copy-invite').hidden = data.room.mode !== 'lan'; $('hud-connection-kind').textContent = transportKind === 'local' ? 'LOCAL' : transportKind === 'online' ? 'ONLINE' : 'ROOM';
-    if (data.room.phase !== 'ended') showMenu(true);
-    const address = new URL(location.href); address.searchParams.delete('room'); history.replaceState(null, '', address);
+    $('copy-invite').hidden = !['lan', 'custom'].includes(data.room.mode); $('hud-connection-kind').textContent = transportKind === 'local' ? 'LOCAL' : transportKind === 'custom' ? 'CUSTOM' : transportKind === 'online' ? 'ONLINE' : 'ROOM';
+    if (onlineEntering) send({ type: 'ready' }); else if (data.room.phase !== 'ended') showMenu(true);
+    const address = new URL(location.href); address.searchParams.delete('room'); address.searchParams.delete('custom'); history.replaceState(null, '', address);
   } catch (error) {
     console.error('Failed to create the 3D arena:', error);
     leaveGame(); toast('3D 그래픽을 시작할 수 없습니다. WebGL을 지원하는 데스크톱 브라우저와 하드웨어 가속을 확인해 주세요.', true);
@@ -255,6 +280,7 @@ async function enterGame(data) {
 }
 
 function leaveGame(notify = true) {
+  matchIntro.hide(); onlineEntering = false;
   const online = isOnlineRoom(); if (notify && online) { onlineReconnectUntil = 0; clearTimeout(reconnectTimeout); }
   if (notify) send({ type: 'leave' });
   game?.dispose(); game = null;
@@ -270,21 +296,26 @@ function setMode(value) {
   if (game || busy || onlineBusy) return;
   if (onlineQueueState?.state === 'QUEUED' && getPlayMode(value).id !== onlineQueueState.mode.toLowerCase()) { void cancelOnlineQueue().then((cancelled) => { if (cancelled) setMode(value); }); return; }
   const selected = getPlayMode(value); mode = selected.id;
+  const roomBrowserLabel = mode === 'custom' ? '사용자 대전 방 목록' : 'LAN 방 목록'; $('nav-rooms').title = roomBrowserLabel; $('nav-rooms').setAttribute('aria-label', roomBrowserLabel); $('nav-rooms').querySelector('span').textContent = mode === 'custom' ? '사용자 방' : 'LAN 방';
+  if (mode === 'custom' && !onlineUser && transportKind === 'custom' && socket) connect('custom');
   for (const item of PLAY_MODES) { $(`mode-${item.id}`).classList.toggle('selected', mode === item.id); $(`mode-${item.id}`).setAttribute('aria-selected', String(mode === item.id)); $(`mode-${item.id}`).tabIndex = mode === item.id ? 0 : -1; }
   $('create-button').querySelector('span').textContent = selected.action; $('mode-description').textContent = selected.description;
-  const unavailable = selected.transport === 'online' && (!onlineAvailable || !onlineCapabilities.matchmaking) || SOLO && mode === 'lan';
+  const unavailable = usesOnlineServices() && (!onlineAvailable || !(mode === 'custom' ? onlineCapabilities.customRooms : onlineCapabilities.matchmaking)) || SOLO && mode === 'lan';
   $('mode-unavailable').hidden = !unavailable;
-  $('mode-unavailable').textContent = selected.transport === 'online' ? onlineAvailable ? 'Java/Spring Boot 계정 서비스에 연결되었습니다. 전투 노드가 준비되면 매칭할 수 있습니다. 계정 기능과 로컬 연습은 계속 이용할 수 있습니다.' : onlineReason || '중앙 온라인 서버가 아직 구성되지 않았습니다. Java/Spring Boot 서버 주소와 전투 노드 연결 후 이용할 수 있습니다.' : '이 페이지에는 LAN 서버가 없습니다. 아래 주소로 로컬 서버 페이지를 열어 주세요.';
-  $('online-account-panel').hidden = selected.transport !== 'online' || !onlineApi; renderOnlineAccount(); renderOnlineQueue();
+  $('mode-unavailable').textContent = usesOnlineServices() ? onlineAvailable ? 'Java/Spring Boot 계정 서비스에 연결되었습니다. 전투 노드가 준비되면 온라인 교전을 이용할 수 있습니다.' : onlineReason || '중앙 온라인 서버가 아직 구성되지 않았습니다. Java/Spring Boot 서버 주소와 전투 노드 연결 후 이용할 수 있습니다.' : '이 페이지에는 LAN 서버가 없습니다. 아래 주소로 로컬 서버 페이지를 열어 주세요.';
+  $('online-account-panel').hidden = !usesOnlineServices() || !onlineApi; renderOnlineAccount(); renderOnlineQueue();
   $('lan-connect-guide').hidden = !(SOLO && mode === 'lan');
   $('deploy-note').lastChild.textContent = mode === 'lan' ? ' 방 코드로 친구를 초대할 수 있어요' : mode === 'tutorial' ? ' 약 3–5분 · 언제든 건너뛰기 / 다시 시작' : ' 튜토리얼·혼자 연습은 서버 없이 이용할 수 있어요';
   $('bot-description').textContent = mode === 'lan' ? '친구를 기다리는 동안 가볍게' : '함께 실력을 쌓아갈 연습 상대';
-  $('join-section').hidden = mode !== 'lan' || SOLO; $('practice-note').hidden = mode !== 'practice';
-  const settingsVisible = mode === 'practice' || mode === 'lan' && !SOLO;
+  const roomMode = mode === 'custom' || mode === 'lan' && !SOLO;
+  $('join-section').hidden = !roomMode; $('room-settings').hidden = !roomMode; $('room-browser-button').hidden = !roomMode; $('practice-note').hidden = mode !== 'practice';
+  const settingsVisible = mode === 'practice' || roomMode;
   for (const selector of ['.bot-row', '.bot-level-row', '.match-options']) document.querySelector(selector).hidden = !settingsVisible;
   $('choose-map').disabled = mode === 'tutorial' || selected.transport === 'online';
+  $('map-card').disabled = $('choose-map').disabled;
+  document.querySelector('label[for="frag-limit"]').firstChild.textContent = roomMode && $('room-game-type').value === 'teams' ? '팀 합산 목표 킬' : '목표 킬 수';
   if (mode === 'practice' && botCount === 0) botCount = 1;
-  if (socket && transportKind !== selected.transport || !socket && (selected.transport === 'local' || selected.transport === 'lan' && !SOLO)) connect(selected.transport);
+  if (socket && transportKind !== selected.transport || !socket && (selected.transport === 'local' || selected.transport === 'custom' && onlineUser && onlineCapabilities.customRooms || selected.transport === 'lan' && !SOLO)) connect(selected.transport);
   else if (unavailable && transportKind !== selected.transport) connect(selected.transport);
   updateConnection(connected && !unavailable);
   updateBots();
@@ -318,7 +349,7 @@ function renderOnlineProfileStats() {
   $('profile-casual-rating').textContent = user ? user.casualRating.toLocaleString('ko-KR') : '—';
   $('profile-casual-status').textContent = user ? `${user.callsign} · 온라인 일반 점수` : onlineApi ? '일반 점수 · 온라인 로그인 필요' : '일반 점수 · 온라인 서버 미연결';
   $('profile-rank-tier').textContent = !user ? '—' : user.rankTier === 'UNRANKED' ? '배치 중' : user.rankTier === 'CHALLENGER' ? tierNames.CHALLENGER : `${tierNames[user.rankTier] || user.rankTier} ${['', 'I', 'II', 'III', 'IV', 'V'][user.rankDivision] || ''}`;
-  $('profile-rank-progress').textContent = !user ? '랭크 티어 · 온라인 로그인 필요' : user.rankTier === 'UNRANKED' ? `온라인 · 배치 ${user.placementsPlayed || 0}/10` : `온라인 · ${user.rankPoints} 승급점수`;
+  $('profile-rank-progress').textContent = !user ? '랭크 티어 · 온라인 로그인 필요' : user.rankTier === 'UNRANKED' ? `배치 ${user.placementsPlayed || 0}/10판 · ${user.placementWins || 0}승` : `온라인 · ${user.rankPoints} 승급점수`;
   $('profile-rank-tier').title = user ? rankText(user.rankTier, user.rankDivision, user.rankPoints, user.placementsPlayed) : '온라인 계정의 랭크 티어';
 }
 async function connectOnlineServices() {
@@ -327,7 +358,7 @@ async function connectOnlineServices() {
   try { const health = await onlineApi.health(); if (health.service !== 'linkshot-online') throw new Error('온라인 서버 종류를 확인하세요.'); onlineAvailable = true; onlineCapabilities = health; onlineReason = ''; try { const user = await onlineApi.profile(); if (generation === onlineAuthGeneration) onlineUser = user; } catch (error) { if (error.status !== 401) throw error; if (generation === onlineAuthGeneration) onlineUser = null; } }
   catch { onlineAvailable = false; onlineReason = '온라인 서버에 연결할 수 없습니다. Java/Spring Boot 서버 주소를 확인하세요. 튜토리얼과 혼자 연습은 계속 이용할 수 있습니다.'; }
   finally { onlineServicePolling = false; }
-  renderOnlineAccount(); if (getPlayMode(mode).transport === 'online') { setMode(mode); void refreshOnlineQueue(); }
+  renderOnlineAccount(); if (usesOnlineServices()) { setMode(mode); if (mode !== 'custom') void refreshOnlineQueue(); }
 }
 async function onlineAuthenticate(register = false) {
   if (!onlineApi || onlineBusy || !onlineAvailable || !$('online-auth-form').reportValidity()) return;
@@ -335,7 +366,7 @@ async function onlineAuthenticate(register = false) {
   const username = $('online-username').value, password = $('online-password').value;
   try { if (register) await onlineApi.register(username, password, $('online-callsign').value || 'OPERATOR'); onlineUser = await onlineApi.login(username, password); $('online-auth-status').textContent = '온라인 로그인 완료 · 기기 기록은 변경하지 않았습니다.'; }
   catch (error) { $('online-auth-status').textContent = error.message; }
-  finally { $('online-password').value = ''; onlineBusy = false; renderOnlineAccount(); void refreshOnlineQueue(); }
+  finally { $('online-password').value = ''; onlineBusy = false; renderOnlineAccount(); if (mode === 'custom') setMode(mode); else void refreshOnlineQueue(); }
 }
 
 function renderOnlineQueue() {
@@ -379,7 +410,7 @@ async function cancelOnlineQueue() {
 }
 function startOnlineMatch() {
   if (!onlineApi || !onlineUser || onlineQueueState?.state !== 'READY' || game || busy) return false;
-  stopQueuePolling(); onlineAutoJoin = false; onlineReceipt = null; onlineResultPending = null; onlineResultNextAt = 0; setBusy(true);
+  stopQueuePolling(); onlineAutoJoin = false; onlineReceipt = null; onlineResultPending = null; onlineResultNextAt = 0; matchIntro.show(); setBusy(true);
   const previous = socket; socket = null; previous?.close(); transportKind = 'online'; selfSessionId = null;
   const connection = new OnlineConnection(onlineApi, onlineSelectedWeapon); socket = connection; bindConnection(connection, 'online'); return true;
 }
@@ -392,6 +423,10 @@ async function tryOnlineReconnect() {
 }
 function handleOnlineState(data) {
   if (!isOnlineRoom(data.room)) return;
+  if (onlineEntering) {
+    matchIntro.update(data);
+    if (['active', 'ended'].includes(data.room.phase) && game?.graphicsReady) { onlineEntering = false; $('lobby').hidden = true; $('game-shell').hidden = false; if (data.room.phase === 'active') { matchIntro.finish(); showMenu(true); } else matchIntro.hide(); }
+  }
   if (data.room.phase === 'ended' && data.online?.settlement === 'saved') void fetchOnlineReceipt(data.online.matchId);
 }
 async function fetchOnlineReceipt(id) {
@@ -413,7 +448,7 @@ function openDialog(id) {
   if (dialog.open) return;
   if (id === 'briefing-dialog') {
     const world = getMap(loadout.mapId);
-    drawTacticalMap($('briefing-map'), { world, spawns: true, detailed: true });
+    drawTacticalMap($('briefing-map'), { world, spawns: true, detailed: true, gameType: ['lan', 'custom'].includes(mode) ? $('room-game-type').value : 'ffa' });
     $('briefing-map-title').textContent = world.name; $('briefing-map-size').textContent = `${world.width} × ${world.depth} M`;
     $('briefing-map-description').textContent = `${world.description} 건물 ${world.buildings.length}개·추가 엄폐벽 ${world.coverWalls.length}개와 계단식 발판을 활용하세요. 지상·2/3층·옥상 ${world.spawns.length}개 스폰은 건물·화물·설비의 자연 엄폐를 사용합니다. ${roundOptions.roundSeconds / 60}분 또는 먼저 ${roundOptions.fragLimit}킬을 달성하면 라운드가 끝납니다.`;
   }
@@ -620,9 +655,12 @@ $('create-button').addEventListener('click', () => {
   if (busy) return;
   if (getPlayMode(mode).transport === 'online') { void joinOnlineQueue(); return; }
   if (!connected) return;
-  setBusy(true); send({ type: 'create', mode, bots: botCount, botDifficulty, ...roundOptions, name: callsign(), ...profileLoadout() });
+  const roomOptions = { roomName: $('room-title').value, password: $('room-password').value, gameType: $('room-game-type').value };
+  setBusy(true); send(transportKind === 'custom' ? { type: 'create', ...roomOptions, bots: botCount, botDifficulty, ...roundOptions, mapId: loadout.mapId, weaponId: onlineSelectedWeapon, skinId: loadout.skinId } : { type: 'create', mode, bots: botCount, botDifficulty, ...roundOptions, ...(mode === 'lan' ? roomOptions : {}), name: callsign(), ...profileLoadout() }); $('room-password').value = '';
 });
 $('join-form').addEventListener('submit', (event) => { event.preventDefault(); requestJoin($('room-code').value.trim().toUpperCase()); });
+$('room-password-form').addEventListener('submit', (event) => { event.preventDefault(); if (!$('room-password-form').reportValidity() || !pendingJoinCode) return; const password = $('room-join-password').value; $('room-join-password').value = ''; requestJoin(pendingJoinCode, password); });
+$('room-game-type').addEventListener('change', () => { document.querySelector('label[for="frag-limit"]').firstChild.textContent = $('room-game-type').value === 'teams' ? '팀 합산 목표 킬' : '목표 킬 수'; });
 $('room-code').addEventListener('input', () => { $('room-code').value = $('room-code').value.toUpperCase().replace(/[^A-Z2-9]/g, ''); });
 $('player-name').addEventListener('change', () => callsign());
 for (const item of PLAY_MODES) $(`mode-${item.id}`).addEventListener('click', () => setMode(item.id));
@@ -641,7 +679,7 @@ $('online-reconnect').addEventListener('click', () => startOnlineMatch());
 $('online-logout').addEventListener('click', async () => {
   if (!onlineApi || onlineBusy) return; onlineBusy = true; onlineAuthGeneration++; onlineAutoJoin = false; stopQueuePolling(); renderOnlineAccount();
   try { if (onlineQueueState?.state === 'QUEUED') await onlineApi.cancelQueue().catch(() => {}); await onlineApi.logout(); onlineUser = null; onlineQueueState = null; onlineReceipt = null; $('online-auth-status').textContent = '온라인 로그아웃 완료'; } catch (error) { $('online-auth-status').textContent = error.message; }
-  finally { onlineBusy = false; renderOnlineAccount(); renderOnlineQueue(); }
+  finally { onlineBusy = false; if (transportKind === 'custom') connect('custom'); renderOnlineAccount(); renderOnlineQueue(); }
 });
 $('dismiss-tutorial').addEventListener('click', () => { store('linkshot-tutorial-v1', 'dismissed'); $('tutorial-recommendation').hidden = true; });
 $('lan-connect-guide').addEventListener('submit', (event) => {
@@ -658,7 +696,7 @@ $('restart-button').addEventListener('click', () => send({ type: 'restart' }));
 $('copy-lan').addEventListener('click', () => copyText(lanUrl, 'LAN 주소를 복사했습니다. 같은 네트워크의 친구에게 공유하세요.'));
 $('copy-invite').addEventListener('click', () => {
   if (!game) return;
-  const url = new URL(lanUrl); url.searchParams.set('room', game.room.code);
+  const url = new URL(game.room.mode === 'custom' ? location.origin : lanUrl); url.searchParams.set(game.room.mode === 'custom' ? 'custom' : 'room', game.room.code);
   copyText(url.toString(), `초대 링크를 복사했습니다. 방 코드: ${game.room.code}`);
 });
 $('sound-button').addEventListener('click', async () => {
@@ -705,8 +743,9 @@ $('nav-play').addEventListener('click', () => {
   setMode(SOLO ? 'practice' : 'lan'); $('create-button').focus({ preventScroll: true });
   document.querySelector('.operation-grid').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'center' });
 });
-function browseRooms() { if (mode !== 'lan') setMode('lan'); if (SOLO) { $('lan-server-address').focus(); return; } send({ type: 'list' }); openDialog('rooms-dialog'); updateRooms(rooms); }
+function browseRooms() { if (!['lan', 'custom'].includes(mode)) setMode('lan'); if (SOLO && mode === 'lan') { $('lan-server-address').focus(); return; } if (mode === 'custom' && !connected) { toast('온라인 로그인 후 사용자 대전 서버에 연결해 주세요.', true); return; } $('room-browser-title').textContent = mode === 'custom' ? '열려 있는 사용자 대전 방' : '열려 있는 LAN 방'; $('room-browser-note').textContent = mode === 'custom' ? '연결된 온라인 서버의 사용자 방입니다. 점수·LP에는 반영하지 않습니다.' : '현재 LAN 서버에서 생성된 방입니다.'; send({ type: 'list' }); openDialog('rooms-dialog'); updateRooms(rooms); }
 $('nav-rooms').addEventListener('click', browseRooms); $('browse-rooms').addEventListener('click', browseRooms);
+$('room-browser-button').addEventListener('click', browseRooms);
 $('refresh-rooms').addEventListener('click', () => { if (send({ type: 'list' })) toast('방 목록을 새로고침했습니다.'); else toast('로컬 서버에 연결되어 있지 않습니다.', true); });
 document.querySelectorAll('[data-open]').forEach((button) => button.addEventListener('click', () => openDialog(button.dataset.open)));
 document.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()));
@@ -719,7 +758,7 @@ setInterval(() => {
   send({ type: 'ping', sent: Date.now() });
   if (!game && !busy && transportKind !== 'online') send({ type: 'list' });
 }, 4000);
-setInterval(() => { if (!onlineApi || getPlayMode(mode).transport !== 'online') return; if (!game) void connectOnlineServices(); else if (game.room.phase === 'ended' && onlineActiveMatch) void fetchOnlineReceipt(onlineActiveMatch); }, 5000);
+setInterval(() => { if (!onlineApi || !usesOnlineServices()) return; if (!game) void connectOnlineServices(); else if (isOnlineRoom() && game.room.phase === 'ended' && onlineActiveMatch) void fetchOnlineReceipt(onlineActiveMatch); }, 5000);
 makeCollections(); updateSelections(); renderProfile();
 profileStore.addEventListener('change', renderProfile);
 profileStore.addEventListener('award', (event) => toast(`라운드 정산 완료 · +${event.award.points} LP`));
@@ -732,7 +771,7 @@ $('tutorial-advance').addEventListener('click', () => { if (game?.requestTutoria
 $('tutorial-retry').addEventListener('click', () => { send({ type: 'restart' }); game?.lock(); });
 $('tutorial-skip').addEventListener('click', () => { store('linkshot-tutorial-v1', stored('linkshot-tutorial-v1', 'dismissed')); leaveGame(); setMode('practice'); $('tutorial-recommendation').hidden = true; });
 $('tutorial-recommendation').hidden = !!stored('linkshot-tutorial-v1', '');
-const extraControls = document.createElement('p'); extraControls.className = 'controls-addition'; extraControls.textContent = `G: 가까운 바닥 총과 교체합니다. 들고 있던 총은 남은 탄약 그대로 바닥에 남습니다. 교체할 총이 없으면 아무 일도 일어나지 않으며, 총만 버리는 기능은 없습니다. 사망 시에도 사용하던 총을 떨어뜨립니다. 주운 총은 영구 해금이나 다음 부활 장비를 바꾸지 않습니다. 사망 후 E: ${WEAPONS.length}종 목록에서 다음 부활 무기 선택 (처음 10종은 숫자 1–9, 0). 숫자·휠로 생존 중 교체는 불가 · C / Ctrl: 앉기 (달리기·공중에서는 불가). 달리거나 공중에서 쏘면 탄이 크게 퍼집니다. 벽·바닥 탄흔은 약 1분 유지되며 무기·탄약은 우측 하단에만 표시합니다. 온라인은 4인 개인전이며 일반은 AI 상대 성적도 레이팅에 반영합니다. 랭크는 현재 임시로 AI 보충을 허용하며 20종 무기를 경기 안에서만 허용합니다. 온라인 계정과 기기 LP/구매 내역은 별개이며 연결 종료 후 재접속 유예는 30초입니다.`; $('help-dialog').append(extraControls);
+const extraControls = document.createElement('p'); extraControls.className = 'controls-addition'; extraControls.textContent = `G: 가까운 바닥 총과 교체합니다. 들고 있던 총은 남은 탄약 그대로 바닥에 남습니다. 교체할 총이 없으면 아무 일도 일어나지 않으며, 총만 버리는 기능은 없습니다. 사망 시에도 사용하던 총을 떨어뜨립니다. 주운 총은 영구 해금이나 다음 부활 장비를 바꾸지 않습니다. 사망 후 E: ${WEAPONS.length}종 목록에서 다음 부활 무기 선택 (처음 10종은 숫자 1–9, 0). 숫자·휠로 생존 중 교체는 불가 · C / Ctrl: 앉기 (달리기·공중에서는 불가). 달리거나 공중에서 쏘면 탄이 크게 퍼집니다. 벽·바닥 탄흔은 약 1분 유지되며 무기·탄약은 우측 하단에만 표시합니다. 일반·랭크는 랜덤 맵 4인 개인전이며 전장 입장 전 5초를 셉니다. 일반은 AI 상대 성적도 레이팅에 반영합니다. 랭크는 현재 임시로 AI 보충을 허용하며 20종 무기를 경기 안에서만 허용합니다. LAN·사용자 방에서는 팀전도 선택할 수 있으며, 양 팀은 맵 반대편에서 부활합니다. 사용자 대전은 점수·전적·LP·영구 숙련도에 반영하지 않습니다. 온라인 계정과 기기 LP/구매 내역은 별개이며 일반·랭크 연결 종료 후 재접속 유예는 30초입니다.`; $('help-dialog').append(extraControls);
 if (SOLO) {
   document.body.classList.add('solo-edition'); document.title = 'LINKSHOT · 링크샷 — Solo combat';
   document.querySelector('.page-heading h1').textContent = '서버 없이 훈련하고, 함께 교전하세요.';

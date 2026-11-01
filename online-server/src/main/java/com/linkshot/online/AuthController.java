@@ -18,9 +18,10 @@ public class AuthController {
     private final AccountService accounts;
     private final OnlineProperties properties;
     private final MatchmakingService matchmaking;
-    public AuthController(AccountService accounts, OnlineProperties properties, MatchmakingService matchmaking) { this.accounts = accounts; this.properties = properties; this.matchmaking = matchmaking; }
+    private final CustomAccessService custom;
+    public AuthController(AccountService accounts, OnlineProperties properties, MatchmakingService matchmaking, CustomAccessService custom) { this.accounts = accounts; this.properties = properties; this.matchmaking = matchmaking; this.custom = custom; }
     public record Registration(@NotBlank @Size(max = 24) String username, @NotBlank @Size(max = 72) String password, @NotBlank @Size(max = 32) String callsign) {}
-    @GetMapping("/api/health") public Map<String, Object> health() { return Map.of("status", "UP", "service", "linkshot-online", "auth", true, "matchmaking", matchmaking.available(), "combatEngine", "shared-js", "engineConfigured", properties.engineEnabled(), "players", matchmaking.players(), "casualWaitSeconds", matchmaking.waitSeconds(), "rankedAiEnabled", matchmaking.rankedAiEnabled()); }
+    @GetMapping("/api/health") public Map<String, Object> health() { return Map.of("status", "UP", "service", "linkshot-online", "auth", true, "matchmaking", matchmaking.available(), "combatEngine", "shared-js", "engineConfigured", properties.engineEnabled(), "players", matchmaking.players(), "casualWaitSeconds", matchmaking.waitSeconds(), "rankedAiEnabled", matchmaking.rankedAiEnabled(), "customRooms", custom.available()); }
     @GetMapping("/api/auth/csrf") public Map<String, String> csrf(CsrfToken token) { return Map.of("token", token.getToken(), "headerName", token.getHeaderName()); }
     @PostMapping("/api/auth/register") @ResponseStatus(HttpStatus.CREATED)
     public AccountService.Profile register(@Valid @RequestBody Registration request) { return accounts.register(request.username(), request.password(), request.callsign()); }

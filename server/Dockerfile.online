@@ -3,7 +3,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
 COPY shared ./shared
-COPY server/online-engine.js ./server/online-engine.js
+COPY server/online-engine.js server/custom-gateway.js server/room-directory.js server/game.js ./server/
 USER node
 EXPOSE 8090
 CMD ["node", "server/online-engine.js"]

@@ -38,6 +38,26 @@
 .profile-online-stat > strong { color: #b4e5d3; }
 .profile-online-stat > small { line-height: 1.6; overflow-wrap: anywhere; }
 .profile-rank > strong { font-size: clamp(14px, 1.1vw, 17px); letter-spacing: 0; }
+.profile-rank > small { font-size: 10px; }
 @media (max-width: 1100px) { .profile-strip { grid-template-columns: repeat(6, minmax(0, 1fr)); } .profile-identity { grid-column: 1 / -1; } }
 @media (max-width: 740px) { .profile-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } .profile-online-stat { grid-column: span 2; } }
 @media (max-width: 450px) { .profile-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .profile-online-stat { grid-column: auto; } }
+
+.room-settings { display: grid; gap: 11px; margin: 0 0 17px; padding: 13px; border: 1px solid #4c68775c; background: #14242b; border-radius: 3px; }
+.room-settings label { display: grid; gap: 6px; font-size: 10px; color: #bfd0d5; }
+.room-settings input,.room-settings select,.room-password-dialog input { width: 100%; min-width: 0; padding: 10px; color: #e5eeee; background: #102029; border: 1px solid #4a626b; border-radius: 3px; }
+.room-settings > small { color: #8ca9b2; font-size: 9px; line-height: 1.7; }
+.room-browser-button { width: 100%; margin-top: 9px; }
+.room-password-dialog { width: min(450px,calc(100vw - 32px)); }
+.room-password-dialog label { display: block; margin: 15px 0 8px; font-size: 12px; }
+#room-password-error { min-height: 20px; color: #ffad93; font-size: 12px; }
+.team-score-hud { position: absolute; left: 50%; top: 110px; transform: translateX(-50%); display: flex; align-items: center; gap: 22px; padding: 9px 20px; background: #0c1c28d9; border: 1px solid #7099ae66; border-radius: 3px; font: 10px var(--mono); white-space: nowrap; }
+.team-score-hud b { font-size: 24px; margin: 0 8px; }.blue-team { color: #79baff; }.red-team { color: #ff817a; }#hud-team-label { color: #c9dfe5; font-size: 9px; }
+.team-badge { display: inline-block; margin-right: 8px; font-size: 9px; padding: 3px 5px; border: 1px solid currentColor; }.team-badge[data-team=blue] { color: #79baff; }.team-badge[data-team=red] { color: #ff817a; }
+.match-intro { position: fixed; inset: 0; z-index: 5000; display: grid; place-items: center; overflow: hidden; background: radial-gradient(ellipse at 50% 43%,#23474bea,#08131cf5 65%); color: #e1f5ed; text-align: center; }
+.match-intro-card { position: relative; padding: 35px; }.match-intro-card h2 { margin: 15px 0 12px; font-size: clamp(30px,5vw,56px); letter-spacing: 3px; }.match-intro-card .eyebrow { color: #a7efd5; }#match-intro-map { color: #b7d7dd; letter-spacing: 3px; font: 13px var(--mono); }#match-intro-status { font-size: 13px; line-height: 1.8; color: #a9c8d1; }
+.match-countdown-ring { position: relative; display: grid; place-items: center; width: 220px; height: 220px; margin: 30px auto; border-radius: 50%; background: conic-gradient(#b6ffe6 calc(var(--count-progress,0)*360deg),#6f9c9b35 0); padding: 3px; box-shadow: 0 0 65px #9bfbdc24; }.match-countdown-ring:before { content: ''; position: absolute; inset: 4px; border-radius: 50%; background: #102a32; }.match-countdown-ring strong { position: relative; font: 700 105px var(--mono); text-shadow: 0 0 35px #99ffdb66; }
+.match-intro-rays { position: absolute; width: 90vmax; height: 90vmax; background: repeating-conic-gradient(from 0deg,#8fe3d80b 0 1deg,transparent 1deg 15deg); animation: match-rotate 30s linear infinite; border-radius: 50%; }.match-intro[data-phase=countdown] .match-countdown-ring { animation: match-pulse 1s ease-out infinite; }.match-intro[data-phase=go] { animation: match-go .45s ease-out both; }.match-intro[data-phase=go] #match-intro-cancel { display: none; }
+@keyframes match-rotate { to { transform: rotate(360deg); } }@keyframes match-pulse { from { box-shadow: 0 0 0 0 #b6ffe63d,0 0 65px #9bfbdc24; } to { box-shadow: 0 0 0 28px #b6ffe600,0 0 65px #9bfbdc24; } }@keyframes match-go { 0% { background: #ddfff0; opacity: 1; } 100% { opacity: 0; } }
+@media(prefers-reduced-motion:reduce) { .match-intro-rays,.match-intro[data-phase=countdown] .match-countdown-ring { animation: none; }.match-intro[data-phase=go] { animation: none; opacity: 0; } }
+@media(max-width:600px) { .team-score-hud { gap: 7px; padding: 8px 10px; top: 105px; }#hud-team-label { max-width: 105px; white-space: normal; }.match-countdown-ring { width: 180px; height: 180px; }.match-countdown-ring strong { font-size: 82px; } }

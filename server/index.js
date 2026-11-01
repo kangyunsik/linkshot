@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { networkInterfaces } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
-import { Room, createRoomCode } from './game.js';
+import { RoomDirectory } from './room-directory.js';
 import { RULES, NETWORK_PROTOCOL } from '../shared/world.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,8 +19,9 @@ export function lanUrls(port) {
 
 export function createGameServer({ port = Number(process.env.PORT) || 3000, host = process.env.HOST || '0.0.0.0', loop = true } = {}) {
   const rooms = new Map(), clients = new Map();
+  const directory = new RoomDirectory({ rooms });
   let actualPort = port;
-  const roomList = () => [...rooms.values()].filter((r) => r.mode === 'lan' && r.hostId).map((r) => r.summary());
+  const roomList = () => directory.list();
   const info = () => ({ name: 'LINKSHOT', version: '0.1.0', protocolVersion: NETWORK_PROTOCOL, port: actualPort, urls: lanUrls(actualPort), rooms: roomList(), totalPlayers: [...clients.values()].filter((c) => c.room).length });
   const server = http.createServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
@@ -32,7 +33,7 @@ export function createGameServer({ port = Number(process.env.PORT) || 3000, host
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       response.end(request.method === 'HEAD' ? undefined : JSON.stringify(info())); return;
     }
-    const allowedShared = new Set(['/shared/world.js', '/shared/buildings.js', '/shared/spawns.js', '/shared/movement.js', '/shared/catalog.js', '/shared/simulation.js', '/shared/progression.js', '/shared/outfits.js', '/shared/equipment.js', '/shared/tutorial.js', '/shared/training-world.js']);
+    const allowedShared = new Set(['/shared/world.js', '/shared/buildings.js', '/shared/spawns.js', '/shared/movement.js', '/shared/catalog.js', '/shared/simulation.js', '/shared/progression.js', '/shared/outfits.js', '/shared/equipment.js', '/shared/tutorial.js', '/shared/training-world.js', '/shared/teams.js']);
     const vendor = { '/vendor/three.module.js': 'three.module.js', '/vendor/three.core.js': 'three.core.js' };
     const addon = { '/vendor/addons/loaders/GLTFLoader.js': 'loaders/GLTFLoader.js', '/vendor/addons/utils/BufferGeometryUtils.js': 'utils/BufferGeometryUtils.js', '/vendor/addons/utils/SkeletonUtils.js': 'utils/SkeletonUtils.js' };
     let file;
@@ -56,9 +57,7 @@ export function createGameServer({ port = Number(process.env.PORT) || 3000, host
   const send = (socket, data) => { if (socket.readyState === WebSocket.OPEN && socket.bufferedAmount < 512 * 1024) socket.send(JSON.stringify(data)); };
   function leave(client) {
     if (!client.room) return;
-    const room = rooms.get(client.room);
-    room?.removePlayer(client.id);
-    if (room && !room.hostId) rooms.delete(room.code);
+    directory.leave(client.id, client.room);
     client.room = null;
   }
   function enter(client, room, name, loadout = {}) {
@@ -77,7 +76,7 @@ export function createGameServer({ port = Number(process.env.PORT) || 3000, host
     send(socket, { type: 'hello', id: client.id, ...info() });
     socket.on('pong', () => { client.alive = true; });
     socket.on('error', () => {});
-    socket.on('message', (buffer, isBinary) => {
+    socket.on('message', async (buffer, isBinary) => {
       const now = Date.now();
       if (now - client.windowStart > 1000) { client.windowStart = now; client.count = 0; }
       if (++client.count > 120) { socket.close(1008, 'Too many messages'); return; }
@@ -95,19 +94,15 @@ export function createGameServer({ port = Number(process.env.PORT) || 3000, host
         if (data.type === 'restart') { rooms.get(client.room)?.restart(client.id); return; }
         if (data.type === 'create' || data.type === 'join') {
           if (client.room) throw new Error('먼저 현재 방에서 나가 주세요.');
-          if (data.type === 'create') {
-            if (rooms.size >= 24) throw new Error('서버의 방이 모두 사용 중입니다.');
-            const code = createRoomCode(rooms);
-            const room = new Room(code, { mode: data.mode === 'practice' ? 'practice' : 'lan', bots: data.bots, mapId: data.mapId, botDifficulty: data.botDifficulty, fragLimit: data.fragLimit, roundSeconds: data.roundSeconds });
-            rooms.set(code, room); enter(client, room, data.name, data);
-          } else {
-            const code = typeof data.code === 'string' ? data.code.toUpperCase().trim() : '';
-            const room = rooms.get(code);
-            if (!room || room.mode === 'practice') throw new Error('방을 찾을 수 없습니다. 같은 서버 주소와 방 코드를 확인하세요.');
+          if (client.roomAction) throw new Error('이전 방 요청을 처리 중입니다.');
+          client.roomAction = true;
+          try {
+            const room = data.type === 'create' ? await directory.create(data) : await directory.authorize(data.code, data.password, client);
+            if (socket.readyState !== WebSocket.OPEN) { directory.discardEmpty(room); return; }
             enter(client, room, data.name, data);
-          }
+          } finally { client.roomAction = false; }
         }
-      } catch (error) { send(socket, { type: 'error', message: error.message }); }
+      } catch (error) { send(socket, { type: 'error', message: error.message, ...(error.code ? { code: error.code } : {}) }); }
     });
     socket.on('close', () => { leave(client); clients.delete(client.id); });
   });
@@ -132,7 +127,7 @@ export function createGameServer({ port = Number(process.env.PORT) || 3000, host
     }
   }, 15_000));
   return {
-    server, wss, rooms, clients, tick, broadcast,
+    server, wss, rooms, clients, directory, tick, broadcast,
     async listen() {
       await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); });
       actualPort = server.address().port;

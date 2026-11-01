@@ -29,6 +29,7 @@ class MatchmakingTest {
     @Autowired RatingService ratings;
     @Autowired GameCatalog catalog;
     @Autowired OnlineProperties properties;
+    @Autowired CustomAccessService custom;
     @Autowired JdbcTemplate db;
     @BeforeEach void isolateQueues() { db.update("DELETE FROM match_queue"); db.update("DELETE FROM engines"); engines.heartbeat(new EngineRegistry.Heartbeat("test-queue-engine", "ws://127.0.0.1:8090/play", 24, 0)); }
     private AccountService.Profile account() { return accounts.register("q_" + UUID.randomUUID().toString().replace("-", "").substring(0, 18), "test-only-long-passphrase", "TESTER"); }
@@ -75,7 +76,7 @@ class MatchmakingTest {
         var a = account(); db.update("UPDATE profiles SET ranked_rating = 1800, casual_rating = 1200 WHERE account_id = ?", a.id());
         var plan = matches.create(MatchService.Mode.RANKED, List.of(a.id()), 1, "foundry", 5, 60); assertTrue(plan.rankedAiEnabled()); assertEquals(1800, plan.botRating());
         settle(plan, List.of(new MatchService.Performance(a.id().toString(), false, 2, 0, Map.of("rifle", 2), 0, 0, false), new MatchService.Performance("bot-test-0001", true, 0, 2, Map.of(), 0, 0, false)));
-        assertEquals(1816, db.queryForObject("SELECT ranked_rating FROM profiles WHERE account_id = ?", Integer.class, a.id())); assertEquals(1200, accounts.profile(a.id()).casualRating()); assertEquals(1, accounts.profile(a.id()).placementsPlayed()); assertEquals(1800, matches.plan(plan.id()).botRating());
+        assertEquals(1816, db.queryForObject("SELECT ranked_rating FROM profiles WHERE account_id = ?", Integer.class, a.id())); assertEquals(1200, accounts.profile(a.id()).casualRating()); assertEquals(1, accounts.profile(a.id()).placementsPlayed()); assertEquals(1, accounts.profile(a.id()).placementWins()); assertEquals(1800, matches.plan(plan.id()).botRating());
     }
     @Test void disablingTheTemporaryPolicyRejectsRankedAiAndTheDatabaseStillRequiresAnExplicitAssignmentFlag() {
         var strict = new MatchService(db, accounts, catalog, properties, ratings, engines, false); var a = account(); assertFalse(strict.rankedAiEnabled());
@@ -89,7 +90,7 @@ class MatchmakingTest {
             settle(last, List.of(new MatchService.Performance(a.id().toString(), false, 2, 1, Map.of("rifle", 2)), new MatchService.Performance(b.id().toString(), false, 1, 2, Map.of("pistol", 1))));
             if (i < 9) assertEquals("UNRANKED", accounts.profile(a.id()).rankTier());
         }
-        var profile = accounts.profile(a.id()); assertEquals(10, profile.placementsPlayed()); assertNotEquals("UNRANKED", profile.rankTier()); assertTrue(profile.rankPoints() > 0); assertEquals(2090, profile.points()); assertEquals(1000, profile.casualRating()); assertEquals(4, profile.ownedWeapons().size()); assertTrue(matches.receipt(last.id(), a.id()).rankPointsDelta() > 0);
+        var profile = accounts.profile(a.id()); assertEquals(10, profile.placementsPlayed()); assertEquals(10, profile.placementWins()); assertEquals(0, accounts.profile(b.id()).placementWins()); assertNotEquals("UNRANKED", profile.rankTier()); assertTrue(profile.rankPoints() > 0); assertEquals(2090, profile.points()); assertEquals(1000, profile.casualRating()); assertEquals(4, profile.ownedWeapons().size()); assertTrue(matches.receipt(last.id(), a.id()).rankPointsDelta() > 0);
     }
     @Test void rankedAbandonmentIsLastPlaceWithoutCompletionOrKillLpEvenIfTheLeaverHadTheMostKills() {
         var a = account(); var b = account(); for (var person : List.of(a, b)) db.update("UPDATE profiles SET rank_placements = 10, ranked_games = 20, rank_index = 5, rank_points = 20, rank_tier = 'SILVER' WHERE account_id = ?", person.id());
@@ -108,5 +109,26 @@ class MatchmakingTest {
         settle(plan, List.of(new MatchService.Performance(a.id().toString(), false, 1, 0, Map.of("rifle", 1)), new MatchService.Performance(b.id().toString(), false, 0, 1, Map.of())));
         var receipt = matches.receipt(plan.id(), a.id()); db.update("UPDATE profiles SET casual_rating = 1800, rank_tier = 'GOLD', rank_index = 10, rank_points = 99, rank_placements = 10 WHERE account_id = ?", a.id());
         assertEquals(receipt, matches.receipt(plan.id(), a.id())); assertEquals(receipt, matches.history(a.id()).getFirst()); assertThrows(org.springframework.web.server.ResponseStatusException.class, () -> matches.receipt(plan.id(), outsider.id()));
+    }
+    @Test void customTicketsAreHashedSingleUseAndBoundToTheCanonicalGatewayAndAccount() {
+        var a = account(); var ticket = custom.ticket(a.id()); assertEquals("ws://127.0.0.1:8090/play", ticket.engineUrl());
+        assertNotEquals(ticket.ticket(), db.queryForObject("SELECT token_hash FROM custom_tickets WHERE account_id = ?", String.class, a.id()));
+        assertThrows(IllegalArgumentException.class, () -> custom.consume(ticket.ticket(), "different-engine")); assertEquals(a.id(), custom.consume(ticket.ticket(), "test-queue-engine").id()); assertThrows(IllegalArgumentException.class, () -> custom.consume(ticket.ticket(), "test-queue-engine"));
+        var expired = custom.ticket(a.id()); db.update("UPDATE custom_tickets SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE account_id = ?", a.id()); assertThrows(IllegalArgumentException.class, () -> custom.consume(expired.ticket(), "test-queue-engine"));
+    }
+    @Test void customGatewaySelectionRemainsStableAndFailsOverOnlyWhenTheCurrentEngineIsStale() {
+        var a = account(); var first = custom.ticket(a.id()); engines.heartbeat(new EngineRegistry.Heartbeat("another-custom-engine", "ws://127.0.0.1:8190/play", 24, 0)); assertEquals(first.engineUrl(), custom.ticket(a.id()).engineUrl());
+        db.update("UPDATE engines SET heartbeat_at = CURRENT_TIMESTAMP - INTERVAL '16 seconds' WHERE id = 'test-queue-engine'"); assertEquals("ws://127.0.0.1:8190/play", custom.ticket(a.id()).engineUrl());
+    }
+    @Test void customLobbyEntryCancelsOnlyQueuedSearchesAndCannotEscapeAnAssignedCompetitiveMatch() {
+        var a = account(); queue.join(a.id(), MatchService.Mode.RANKED); custom.ticket(a.id()); assertEquals("IDLE", queue.status(a.id()).state());
+        matches.create(MatchService.Mode.CASUAL, List.of(a.id()), 1, "foundry", 5, 60); assertThrows(IllegalArgumentException.class, () -> custom.ticket(a.id()));
+    }
+    @Test void rankedMapsAreSelectedByTheServerFromTheFullRandomPoolNotTheLobbySelection() {
+        var a = account(); var seen = new java.util.HashSet<String>();
+        for (int i = 0; i < 16; i++) {
+            queue.join(a.id(), MatchService.Mode.RANKED); age(a.id(), 31); queue.matchmake(); var plan = matches.active(a.id()); assertTrue(catalog.maps().contains(plan.mapId())); assertNotEquals("training", plan.mapId()); seen.add(plan.mapId()); matches.claim(plan.id(), "test-queue-engine"); matches.cancel(plan.id(), "test-queue-engine");
+        }
+        assertTrue(seen.size() > 1, "Ranked matchmaking must not stick to a fixed map");
     }
 }

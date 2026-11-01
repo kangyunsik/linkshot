@@ -14,15 +14,23 @@ function makeTemplate(weapon, shape) {
     for (let i = 0; i < length / .04; i++) g.block('rail-tooth', [.061, .005, .014], [0, y + .008, z + length / 2 - i * .04], 'steel', 'frame', .0007);
   };
   const irons = (height, rear = .13, front = -.42) => {
-    const compact = ak || famas, base = famas ? .092 : mp5 ? .045 : .055, top = height - .018;
-    g.block('rear-sight-pedestal', [.054, top - base, .034], [0, (top + base) / 2, rear]);
-    const towerBase = ak ? .062 : famas ? .055 : .025, towerTop = height - (compact ? .021 : .026);
-    g.block('front-sight-tower', [compact ? .012 : .028, towerTop - towerBase, compact ? .024 : .036], [0, (towerBase + towerTop) / 2, front], 'black', 'frame', compact ? .0012 : .002);
-    for (const side of [-1, 1]) g.block('rear-sight-ear', [famas ? .006 : .008, famas ? .014 : ak ? .018 : .024, .015], [side * .021, height + (famas ? -.004 : .001), rear], 'black');
-    g.block('rear-sight-notch', [.05, .006, .016], [0, height - .016, rear]);
-    // Include the chamfer in the compact blade tip, keeping it on the ADS axis.
-    g.block('front-sight-post', [compact ? .0035 : .007, compact ? .021 : .025, compact ? .008 : .012], [0, height - (compact ? .0112 : .0125), front], 'steel', 'frame', compact ? .0007 : .002);
-    g.ring('front-sight-hood', compact ? .0165 : .021, compact ? .0023 : .003, [0, height - (compact ? .006 : .012), front - .004]);
+    const base = famas ? .092 : mp5 ? .045 : .055, top = height - .019;
+    // The old MP5/shotgun rear pedestal was a solid tall rectangle right in
+    // front of the eye. An open fork supports the notch without that wall.
+    g.block('rear-sight-pedestal', [.05, .006, .018], [0, base, rear], 'black', 'frame', .0007);
+    for (const side of [-1, 1]) {
+      g.block('rear-sight-open-leg', [.005, top - base, .010], [side * .021, (top + base) / 2, rear], 'black', 'frame', .0007);
+      g.block('rear-sight-ear', [.005, .016, .010], [side * .018, height - .008, rear], 'black', 'frame', .0007);
+    }
+    g.block('rear-sight-notch', [.04, .0035, .010], [0, height - .018, rear], 'black', 'frame', .0007);
+    const supportBase = ak ? .060 : famas ? .053 : mp5 ? .026 : .040;
+    const towerBase = ak ? .084 : famas ? .083 : mp5 ? .079 : .064, towerTop = height - .018;
+    g.block('front-sight-foot', [.04, .006, .022], [0, supportBase, front], 'black', 'frame', .0007);
+    for (const side of [-1, 1]) g.block('front-sight-open-leg', [.005, towerBase - supportBase, .016], [side * .014, (towerBase + supportBase) / 2, front], 'black', 'frame', .0007);
+    g.block('front-sight-bridge', [.033, .0035, .018], [0, towerBase, front], 'black', 'frame', .0007);
+    g.block('front-sight-tower', [.008, towerTop - towerBase, .014], [0, (towerBase + towerTop) / 2, front], 'black', 'frame', .0007);
+    g.block('front-sight-post', [.0035, .018, .007], [0, height - .0097, front], 'steel', 'frame', .0007);
+    g.ring('front-sight-hood', .0165, .0018, [0, height - .006, front - .004]);
   };
   const opticMount = (height, z, frameHeight = .063, base = shape === 'lmg' ? .092 : p90 ? .106 : .079, name = 'optic-foot') => {
     g.block(name, [.054, .008, .055], [0, base, z], 'black', 'frame', .0012);
@@ -30,7 +38,7 @@ function makeTemplate(weapon, shape) {
     if (top > bottom) for (const side of [-1, 1]) g.block('open-optic-riser-leg', [.008, top - bottom, .026], [side * .024, (top + bottom) / 2, z], 'black', 'frame', .001);
   };
   const optic = (height = aimHeight, z = .015) => {
-    g.frame('open-reflex-sight', .077, .063, .014, [0, height, z], 'black', 'frame', { rim: .004 });
+    g.frame('open-reflex-sight', .077, .063, .012, [0, height, z], 'black', 'frame', { rim: .003 });
     opticMount(height, z);
   };
   const barrel = (from, radius = .021) => {

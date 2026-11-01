@@ -4,6 +4,7 @@ import { WEAPONS, SKINS, getWeapon, getSkin, freshMagazines, damageAtDistance, s
 import { getOutfit, getCharacter, CHARACTERS } from './outfits.js';
 import { roundReward, normalizeWeaponKills, weaponMastery } from './progression.js';
 import { EQUIPMENT_RULES, nearestDroppedWeapon, settleDroppedWeapon } from './equipment.js';
+import { sameTeam, normalizeGameType, teamSpawnZones, balancedTeam, TEAM_NAMES } from './teams.js';
 
 const BOT_NAMES = ['GHOST', 'RIVET', 'ECHO', 'CINDER', 'STATIC', 'ONYX', 'NOVA'];
 const botId = () => globalThis.crypto?.randomUUID?.().slice(0, 8) || Math.random().toString(36).slice(2, 10);
@@ -89,7 +90,7 @@ export function tracePlayerBody(origin, direction, target, maxDistance = Infinit
 export function traceShot(shooter, players, now = nowMs(), world = WORLD, direction = aimDirection(shooter.yaw, shooter.pitch), range = getWeapon(shooter.weaponId).range) {
   const origin = { x: shooter.x, y: shooter.y + playerPose(shooter).eyeHeight, z: shooter.z };
   const wall = {}; let distance = wallDistance(origin, direction, range, world, wall);
-  let victim = null, headshot = false, protectedTarget = null, bodyPart = null, damageMultiplier = 1, limbProgress = null;
+  let victim = null, headshot = false, protectedTarget = null, friendlyTarget = null, bodyPart = null, damageMultiplier = 1, limbProgress = null;
   for (const target of players) {
     if (target.id === shooter.id || target.hp <= 0) continue;
     const pose = playerPose(target);
@@ -98,12 +99,12 @@ export function traceShot(shooter, players, now = nowMs(), world = WORLD, direct
     const hitHead = head !== null && head < distance && (body === null || head <= body.distance);
     const hit = hitHead ? head : body?.distance ?? null;
     if (hit !== null && hit < distance) {
-      distance = hit; protectedTarget = target.protectedUntil > now ? target.id : null; victim = protectedTarget ? null : target; headshot = !protectedTarget && hitHead;
-      bodyPart = hitHead ? 'head' : body.bodyPart; damageMultiplier = protectedTarget ? 0 : hitHead ? 1 : body.damageMultiplier; limbProgress = hitHead ? null : body.limbProgress;
+      distance = hit; friendlyTarget = sameTeam(shooter, target) ? target.id : null; protectedTarget = !friendlyTarget && target.protectedUntil > now ? target.id : null; victim = protectedTarget || friendlyTarget ? null : target; headshot = !protectedTarget && !friendlyTarget && hitHead;
+      bodyPart = hitHead ? 'head' : body.bodyPart; damageMultiplier = protectedTarget || friendlyTarget ? 0 : hitHead ? 1 : body.damageMultiplier; limbProgress = hitHead ? null : body.limbProgress;
     }
   }
-  const surface = !victim && !protectedTarget ? impactSurface(origin, direction, distance, wall.box, world) : null;
-  return { victim, headshot, protectedTarget, bodyPart, damageMultiplier, limbProgress, origin, distance, surface, end: surface?.point || { x: origin.x + direction.x * distance, y: origin.y + direction.y * distance, z: origin.z + direction.z * distance } };
+  const surface = !victim && !protectedTarget && !friendlyTarget ? impactSurface(origin, direction, distance, wall.box, world) : null;
+  return { victim, headshot, protectedTarget, friendlyTarget, bodyPart, damageMultiplier, limbProgress, origin, distance, surface, end: surface?.point || { x: origin.x + direction.x * distance, y: origin.y + direction.y * distance, z: origin.z + direction.z * distance } };
 }
 
 const navigation = new WeakMap();
@@ -158,8 +159,9 @@ export function findPath(from, to, world = WORLD) {
 }
 
 export class Room {
-  constructor(code, { mode = 'lan', bots = 2, mapId = WORLD.id, botDifficulty = 'beginner', fragLimit, roundSeconds, clock = nowMs, random = Math.random } = {}) {
+  constructor(code, { mode = 'lan', bots = 2, mapId = WORLD.id, botDifficulty = 'beginner', fragLimit, roundSeconds, gameType = 'ffa', roomName = '', clock = nowMs, random = Math.random } = {}) {
     this.code = code; this.mode = mode; this.clock = clock; this.random = random;
+    this.gameType = normalizeGameType(gameType); this.roomName = typeof roomName === 'string' ? roomName.replace(/[\p{C}<>]/gu, '').trim().slice(0, 32) : ''; this.teamScores = { blue: 0, red: 0 };
     this.world = getMap(mapId);
     const difficulty = getBotDifficulty(botDifficulty); this.botDifficulty = difficulty.id; this.botBehavior = difficulty.behavior;
     Object.assign(this, normalizeRoundOptions({ fragLimit, roundSeconds }));
@@ -174,7 +176,8 @@ export class Room {
   addPlayer(id, name, isBot = false, loadout = {}) {
     if (this.players.has(id)) throw new Error('이미 이 방에 접속해 있습니다.');
     if (this.players.size >= RULES.maxPlayers) {
-      const bot = [...this.players.values()].find((p) => p.isBot);
+      const team = this.gameType === 'teams' ? balancedTeam(this.players.values()) : null;
+      const bot = [...this.players.values()].find((p) => p.isBot && (!team || p.teamId === team)) || [...this.players.values()].find((p) => p.isBot);
       if (bot && !isBot) this.players.delete(bot.id);
       else throw new Error('방이 가득 찼습니다.');
     }
@@ -182,7 +185,7 @@ export class Room {
     const requested = isBot && !isWeaponId(loadout.weaponId) ? WEAPONS[[...this.players.values()].filter((p) => p.isBot).length % WEAPONS.length].id : isWeaponId(loadout.weaponId) ? loadout.weaponId : 'rifle';
     const chosenWeapon = ownsWeapon({ ownedWeapons }, requested) ? requested : 'rifle';
     const player = {
-      id, name: cleanName(name), isBot, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, vy: 0,
+      id, name: cleanName(name), isBot, teamId: this.gameType === 'teams' ? balancedTeam(this.players.values(), !isBot) : null, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, vy: 0,
       hp: 100, ammo: RULES.magazine, kills: 0, deaths: 0, grounded: true, jumpHeld: false,
       reloadUntil: 0, respawnAt: 0, protectedUntil: 0, lastShot: 0, lastInput: this.clock(),
       input: { ...EMPTY_INPUT }, botPath: [], nextPathAt: 0,
@@ -213,8 +216,13 @@ export class Room {
     player.spawnCount = (player.spawnCount || 0) + 1;
     const requested = getWeapon(player.nextWeaponId || player.weaponId).id;
     player.weaponId = ownsWeapon(player, requested) ? requested : 'rifle'; player.nextWeaponId = player.weaponId;
-    const others = [...this.players.values()].filter((p) => p.id !== player.id && p.hp > 0);
-    const choices = this.world.spawns.map((point) => {
+    const others = [...this.players.values()].filter((p) => p.id !== player.id && p.hp > 0 && !sameTeam(p, player));
+    let spawnPoints = this.gameType === 'teams' ? teamSpawnZones(this.world)[player.teamId] : this.world.spawns;
+    if (this.gameType === 'teams') {
+      const unoccupied = spawnPoints.filter((point) => ![...this.players.values()].some((p) => p.id !== player.id && p.hp > 0 && Math.hypot(point.x - p.x, (point.y || 0) - p.y, point.z - p.z) < 1));
+      if (unoccupied.length) spawnPoints = unoccupied;
+    }
+    const choices = spawnPoints.map((point) => {
       const y = point.y || 0, eye = { x: point.x, y: y + RULES.eyeHeight, z: point.z }, chest = { ...eye, y: y + 0.9 };
       const visible = others.filter((p) => { const from = { x: p.x, y: p.y + playerPose(p).eyeHeight, z: p.z }; return hasLineOfSight(from, eye, this.world) || hasLineOfSight(from, chest, this.world); }).length;
       const distance = Math.min(...others.map((p) => Math.hypot(point.x - p.x, point.z - p.z, y - p.y)), Infinity);
@@ -252,7 +260,7 @@ export class Room {
       for (const sample of history) { if (sample.time <= time) before = sample; else { after = sample; break; } }
       const mix = after.time > before.time ? clamp((time - before.time) / (after.time - before.time), 0, 1) : 0;
       const yaw = before.yaw ?? player.yaw, pitch = before.pitch ?? player.pitch;
-      return { id: player.id, hp: player.hp, protectedUntil: player.protectedUntil, x: before.x + (after.x - before.x) * mix, y: before.y + (after.y - before.y) * mix, z: before.z + (after.z - before.z) * mix, yaw: yaw + angleDelta(after.yaw ?? yaw, yaw) * mix, pitch: pitch + ((after.pitch ?? pitch) - pitch) * mix, weaponId: before.weaponId || player.weaponId, crouching: mix < 0.5 ? before.crouching : after.crouching, crouchAmount: (before.crouchAmount ?? (before.crouching ? 1 : 0)) + ((after.crouchAmount ?? (after.crouching ? 1 : 0)) - (before.crouchAmount ?? (before.crouching ? 1 : 0))) * mix };
+      return { id: player.id, teamId: player.teamId, hp: player.hp, protectedUntil: player.protectedUntil, x: before.x + (after.x - before.x) * mix, y: before.y + (after.y - before.y) * mix, z: before.z + (after.z - before.z) * mix, yaw: yaw + angleDelta(after.yaw ?? yaw, yaw) * mix, pitch: pitch + ((after.pitch ?? pitch) - pitch) * mix, weaponId: before.weaponId || player.weaponId, crouching: mix < 0.5 ? before.crouching : after.crouching, crouchAmount: (before.crouchAmount ?? (before.crouching ? 1 : 0)) + ((after.crouchAmount ?? (after.crouching ? 1 : 0)) - (before.crouchAmount ?? (before.crouching ? 1 : 0))) * mix };
     });
   }
 
@@ -327,7 +335,7 @@ export class Room {
     if (id !== this.hostId) throw new Error('방장만 새 라운드를 시작할 수 있습니다.');
     this.phase = 'active'; this.startedAt = this.clock(); this.endsAt = this.startedAt + this.roundSeconds * 1000;
     this.roundId = newRoundId(); this.result = null;
-    this.events = [{ type: 'restart' }]; this.droppedWeapons.clear(); this.impacts.clear();
+    this.events = [{ type: 'restart' }]; this.droppedWeapons.clear(); this.impacts.clear(); this.teamScores = { blue: 0, red: 0 };
     this.spawnUses.clear(); for (const player of this.players.values()) player.hp = 0;
     for (const player of this.players.values()) { player.kills = 0; player.deaths = 0; player.weaponKills = {}; this.spawn(player); }
   }
@@ -344,7 +352,7 @@ export class Room {
     const brain = bot.botBrain ||= freshBotBrain();
     const origin = { x: bot.x, y: bot.y + playerPose(bot).eyeHeight, z: bot.z };
     // Free-for-all: humans and other bots use exactly the same target score.
-    const candidates = [...this.players.values()].filter((p) => p.id !== bot.id && p.hp > 0 && p.protectedUntil <= now).map((target) => {
+    const candidates = [...this.players.values()].filter((p) => p.id !== bot.id && !sameTeam(p, bot) && p.hp > 0 && p.protectedUntil <= now).map((target) => {
       const distance = Math.hypot(target.x - bot.x, target.z - bot.z);
       const pose = playerPose(target);
       const visible = hasLineOfSight(origin, { x: target.x, y: target.y + pose.aimHeight, z: target.z }, this.world) || hasLineOfSight(origin, { x: target.x, y: target.y + pose.eyeHeight, z: target.z }, this.world);
@@ -479,13 +487,13 @@ export class Room {
     for (const angle of shotAngles(firingWeapon, ads, this.random, firingState)) {
       const direction = aimDirection((shot?.yaw ?? player.yaw) + angle.yaw, (shot?.pitch ?? player.pitch) + angle.pitch);
       const trace = traceShot(player, targets, now, this.world, direction, weapon.range);
-      const { headshot, end, distance, protectedTarget, bodyPart, damageMultiplier, limbProgress, surface } = trace, victim = trace.victim ? this.players.get(trace.victim.id) : null;
+      const { headshot, end, distance, protectedTarget, friendlyTarget, bodyPart, damageMultiplier, limbProgress, surface } = trace, victim = trace.victim ? this.players.get(trace.victim.id) : null;
       if (surface) {
         const mark = { ...surface, id: `${this.roundId}-${player.id}-${player.shotSerial}-${rays.length}`, surfaceId: surface.id, at: now, weaponId: weapon.id };
         const key = `${surface.id}/${surface.normal.x},${surface.normal.y},${surface.normal.z}/${Math.round(end.x * BULLET_MARK_RULES.cellScale)},${Math.round(end.y * BULLET_MARK_RULES.cellScale)},${Math.round(end.z * BULLET_MARK_RULES.cellScale)}`;
         this.impacts.delete(key); this.impacts.set(key, mark); while (this.impacts.size > BULLET_MARK_RULES.maxMarks) this.impacts.delete(this.impacts.keys().next().value);
         rays.push({ end, hit: null, headshot, protectedTarget, bodyPart, damageMultiplier, limbProgress, surface: mark });
-      } else rays.push({ end, hit: victim?.id || null, headshot, protectedTarget, bodyPart, damageMultiplier, limbProgress });
+      } else rays.push({ end, hit: victim?.id || null, headshot, protectedTarget, friendlyTarget, bodyPart, damageMultiplier, limbProgress });
       if (!victim || victim.hp <= 0) continue;
       const hit = hits.get(victim.id) || { victim, damage: 0, headshot: false };
       hit.damage += damageAtDistance(weapon, distance, headshot) * damageMultiplier;
@@ -508,15 +516,16 @@ export class Room {
     let contact = null;
     for (const yaw of [0, -.13, .13]) for (const pitch of [0, -.1, .1]) {
       const trace = traceShot(player, this.players.values(), now, this.world, aimDirection((shot?.yaw ?? player.yaw) + yaw, (shot?.pitch ?? player.pitch) + pitch), weapon.range);
-      if (!contact || (trace.victim || trace.protectedTarget) && (!(contact.victim || contact.protectedTarget) || trace.distance < contact.distance)) contact = trace;
+      if (!contact || (trace.victim || trace.protectedTarget || trace.friendlyTarget) && (!(contact.victim || contact.protectedTarget || contact.friendlyTarget) || trace.distance < contact.distance)) contact = trace;
     }
-    const { origin, end, protectedTarget, victim } = contact;
-    this.events.push({ type: 'shot', melee: true, shotId: `${this.roundId}-${player.id}-${player.shotSerial}`, spawnCount: player.spawnCount, equipmentSeq: player.equipmentSeq, fireSeq: player.triggerSeq, shotIndex: player.triggerShotIndex, id: player.id, weaponId: weapon.id, origin, end, hit: victim?.id || null, headshot: false, rays: [{ end, hit: victim?.id || null, protectedTarget, headshot: false }] });
+    const { origin, end, protectedTarget, friendlyTarget, victim } = contact;
+    this.events.push({ type: 'shot', melee: true, shotId: `${this.roundId}-${player.id}-${player.shotSerial}`, spawnCount: player.spawnCount, equipmentSeq: player.equipmentSeq, fireSeq: player.triggerSeq, shotIndex: player.triggerShotIndex, id: player.id, weaponId: weapon.id, origin, end, hit: victim?.id || null, headshot: false, rays: [{ end, hit: victim?.id || null, protectedTarget, friendlyTarget, headshot: false }] });
     if (victim) this.applyDamage(player, victim, weapon.damage, false, origin, weapon, now);
     return true;
   }
 
   applyDamage(player, victim, rawDamage, headshot, origin, weapon, now) {
+      if (this.phase !== 'active' || sameTeam(player, victim) || victim.hp <= 0) return;
       const damage = Math.round(rawDamage);
       victim.hp = Math.max(0, victim.hp - damage);
       if (damage > 0) victim.hitSlowUntil = victim.hp > 0 ? now + RULES.hitSlowSeconds * 1000 : 0;
@@ -533,22 +542,25 @@ export class Room {
         victim.lastDeath = { attackerId: player.id, attackerName: player.name, weaponId: weapon.id, weaponLevel: mastery.level, headshot, damage, at: now };
         victim.input = { ...EMPTY_INPUT, yaw: victim.yaw, pitch: victim.pitch, weaponId: victim.weaponId }; player.kills++;
         this.events.push({ type: 'kill', killId: `${this.roundId}-${player.id}-kill-${player.kills}`, at: now, killer: player.name, victim: victim.name, killerId: player.id, victimId: victim.id, weaponId: weapon.id, weaponLevel: mastery.level, weaponKills: mastery.kills, killChain: player.killChain, headshot });
-        if (player.kills >= this.fragLimit) this.finish();
+        if (this.gameType === 'teams') this.teamScores[player.teamId]++;
+        if ((this.gameType === 'teams' ? this.teamScores[player.teamId] : player.kills) >= this.fragLimit) this.finish();
       }
   }
 
   finish() {
     if (this.phase === 'ended') return;
     this.phase = 'ended';
-    const winner = [...this.players.values()].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)[0];
-    const rewards = Object.fromEntries([...this.players.values()].filter((player) => !player.isBot).map((player) => [player.id, { kills: player.kills, deaths: player.deaths, weaponKills: { ...player.weaponKills }, ...roundReward(player.kills, player.id === winner?.id) }]));
-    this.result = { roundId: this.roundId, winnerId: winner?.id || null, winnerName: winner?.name || 'OPERATOR', winnerKills: winner?.kills || 0, rewards };
-    this.events.push({ type: 'ended', winner: winner?.name || 'OPERATOR', winnerId: winner?.id || null });
+    const winnerTeam = this.gameType === 'teams' ? this.teamScores.blue > this.teamScores.red ? 'blue' : this.teamScores.red > this.teamScores.blue ? 'red' : null : null;
+    const winner = [...this.players.values()].filter((p) => this.gameType !== 'teams' || p.teamId === winnerTeam).sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)[0];
+    const winnerName = this.gameType === 'teams' ? TEAM_NAMES[winnerTeam] || '무승부' : winner?.name || 'OPERATOR';
+    const rewards = Object.fromEntries([...this.players.values()].filter((player) => !player.isBot).map((player) => [player.id, { kills: player.kills, deaths: player.deaths, weaponKills: { ...player.weaponKills }, ...roundReward(player.kills, this.gameType === 'teams' ? !!winnerTeam && player.teamId === winnerTeam : player.id === winner?.id), ...(this.mode === 'custom' ? { completion: 0, killBonus: 0, winBonus: 0, points: 0 } : {}) }]));
+    this.result = { roundId: this.roundId, winnerId: winner?.id || null, winnerName, winnerKills: this.gameType === 'teams' ? this.teamScores[winnerTeam] || 0 : winner?.kills || 0, rewards, ...(this.gameType === 'teams' ? { winnerTeam, teamScores: { ...this.teamScores } } : {}) };
+    this.events.push({ type: 'ended', winner: winnerName, winnerId: winner?.id || null, ...(this.gameType === 'teams' ? { winnerTeam } : {}) });
   }
 
   summary() {
     const humans = [...this.players.values()].filter((p) => !p.isBot);
-    return { code: this.code, mapId: this.world.id, botDifficulty: this.botDifficulty, fragLimit: this.fragLimit, roundSeconds: this.roundSeconds, name: humans.find((p) => p.id === this.hostId)?.name || 'OPERATOR', players: humans.length, bots: this.players.size - humans.length, capacity: RULES.maxPlayers, phase: this.phase };
+    return { code: this.code, mapId: this.world.id, gameType: this.gameType, botDifficulty: this.botDifficulty, fragLimit: this.fragLimit, roundSeconds: this.roundSeconds, name: this.roomName || humans.find((p) => p.id === this.hostId)?.name || 'OPERATOR', players: humans.length, bots: this.players.size - humans.length, capacity: RULES.maxPlayers, phase: this.phase, teams: this.gameType === 'teams' ? Object.fromEntries(['blue', 'red'].map((team) => [team, [...this.players.values()].filter((p) => p.teamId === team).length])) : null };
   }
 
   impactHistory() { const now = this.clock(); return [...this.impacts.values()].filter((mark) => now - mark.at < BULLET_MARK_RULES.lifetimeMs).slice(-BULLET_MARK_RULES.historyLimit); }
@@ -557,9 +569,9 @@ export class Room {
     const now = this.clock();
     const result = {
       type: 'state', serverTime: now,
-      room: { protocolVersion: NETWORK_PROTOCOL, code: this.code, roundId: this.roundId, result: this.result, mapId: this.world.id, botDifficulty: this.botDifficulty, mode: this.mode, hostId: this.hostId, phase: this.phase, timeLeft: Math.max(0, Math.ceil((this.endsAt - now) / 1000)), fragLimit: this.fragLimit, roundSeconds: this.roundSeconds },
+      room: { protocolVersion: NETWORK_PROTOCOL, code: this.code, roundId: this.roundId, result: this.result, mapId: this.world.id, gameType: this.gameType, teamScores: { ...this.teamScores }, name: this.roomName, botDifficulty: this.botDifficulty, mode: this.mode, hostId: this.hostId, phase: this.phase, timeLeft: Math.max(0, Math.ceil((this.endsAt - now) / 1000)), fragLimit: this.fragLimit, roundSeconds: this.roundSeconds },
       players: [...this.players.values()].map((p) => ({
-        id: p.id, name: p.name, isBot: p.isBot, x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yaw: p.yaw, pitch: p.pitch,
+        id: p.id, name: p.name, isBot: p.isBot, teamId: p.teamId, x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yaw: p.yaw, pitch: p.pitch,
         vx: p.vx, vy: p.vy, vz: p.vz, grounded: p.grounded, crouching: p.crouching, crouchAmount: p.crouchAmount, sprinting: p.sprinting, moveSpeed: p.moveSpeed, stepDistance: +p.stepDistance.toFixed(3), shotHeat: p.shotHeat, hp: p.hp, ammo: p.ammo, kills: p.kills, deaths: p.deaths, spawnId: p.spawnId, spawnLevel: p.spawnLevel, lastDeath: p.lastDeath,
         reloadUntil: p.reloadUntil, respawnAt: p.respawnAt, protectedUntil: p.protectedUntil, hitSlowUntil: p.hitSlowUntil,
         weaponId: p.weaponId, weaponSkinId: p.weaponSkinId, equipmentSeq: p.equipmentSeq, nextWeaponId: p.nextWeaponId, loadoutSelecting: p.loadoutSelecting, skinId: p.skinId, outfitId: p.outfitId, characterId: p.characterId, magazines: { ...p.magazines }, switchUntil: p.switchUntil, nextFireAt: p.nextFireAt,

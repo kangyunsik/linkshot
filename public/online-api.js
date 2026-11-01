@@ -22,6 +22,7 @@ export class OnlineApi {
   cancelQueue() { return this.request('/api/queue', { method: 'DELETE' }); }
   queueHeartbeat() { return this.request('/api/queue/heartbeat', { method: 'POST' }); }
   ticket() { return this.request('/api/match/ticket', { method: 'POST' }); }
+  customTicket() { return this.request('/api/custom/ticket', { method: 'POST' }); }
   receipt(id) { return this.request(`/api/results/${encodeURIComponent(id)}`); }
   history() { return this.request('/api/results'); }
   register(username, password, callsign) { return this.request('/api/auth/register', { method: 'POST', body: { username, password, callsign } }); }

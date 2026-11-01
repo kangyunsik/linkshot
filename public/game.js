@@ -18,6 +18,7 @@ import { drawThemedArena } from './themed-arena.js';
 import { VIEWMODEL_LAYER, compileViewmodelPrograms, renderViewmodelFrame } from './viewmodel-renderer.js';
 import { updateTutorialView } from './tutorial-view.js';
 import { BulletMarks } from './bullet-marks.js';
+import { TEAM_COLORS, TEAM_NAMES, sameTeam } from '/shared/teams.js';
 
 const $ = (id) => document.getElementById(id);
 const lerp = THREE.MathUtils.lerp;
@@ -29,9 +30,10 @@ export function renderScoreboard(element, players, selfId) {
   for (const title of ['#', 'OPERATOR', 'KILLS', 'DEATHS', 'K/D']) { const cell = document.createElement('th'); cell.textContent = title; head.append(cell); }
   const body = table.createTBody();
   [...players].sort((a, b) => Number(!!a.abandoned) - Number(!!b.abandoned) || b.kills - a.kills || a.deaths - b.deaths).forEach((player, index) => {
-    const row = body.insertRow(); if (player.id === selfId) row.className = 'self';
+    const row = body.insertRow(); if (player.id === selfId) row.className = 'self'; if (player.teamId) row.dataset.team = player.teamId;
     row.insertCell().textContent = index + 1;
     const name = row.insertCell(); name.textContent = player.name;
+    if (player.teamId) { const badge = document.createElement('span'); badge.className = 'team-badge'; badge.dataset.team = player.teamId; badge.textContent = TEAM_NAMES[player.teamId]; name.prepend(badge); }
     if (player.isBot || player.id === selfId) {
       const badge = document.createElement('span'); badge.className = player.isBot ? 'bot-badge' : 'you-badge'; badge.textContent = player.isBot ? 'BOT' : 'YOU'; name.append(badge);
     }
@@ -344,7 +346,7 @@ export class FPSGame {
   makeAvatar(player) {
     const operator = createOperator(player, this.models), { group } = operator;
     const labelTexture = canvasTexture(512, 64, (ctx) => {
-      ctx.font = '500 24px Arial, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#bfcfd3'; ctx.fillText(`${player.name}${player.isBot ? '  / BOT' : ''}`, 256, 40);
+      ctx.font = '500 24px Arial, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = TEAM_COLORS[player.teamId] || '#bfcfd3'; ctx.fillText(`${player.teamId ? TEAM_NAMES[player.teamId] + ' · ' : ''}${player.name}${player.isBot ? '  / BOT' : ''}`, 256, 40);
     });
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture, transparent: true, opacity: 0.8, depthWrite: false })); label.position.y = 2.15; label.scale.set(2.6, 0.325, 1); group.add(label);
     group.position.set(player.x, player.y, player.z); group.rotation.y = player.yaw; this.scene.add(group);
@@ -506,7 +508,7 @@ export class FPSGame {
       if (player.id === id) continue;
       present.add(player.id);
       const existing = this.remote.get(player.id);
-      if (existing && (existing.group.userData.characterId !== getCharacter(player.characterId).id || existing.group.userData.outfitId !== getOutfit(player.outfitId).id || existing.group.userData.skinId !== getSkin(player.skinId).id)) {
+      if (existing && (existing.target?.teamId !== player.teamId || existing.group.userData.characterId !== getCharacter(player.characterId).id || existing.group.userData.outfitId !== getOutfit(player.outfitId).id || existing.group.userData.skinId !== getSkin(player.skinId).id)) {
         this.scene.remove(existing.group); this.disposeObject(existing.group, false); this.remote.delete(player.id);
       }
       if (!this.remote.has(player.id)) this.remote.set(player.id, this.makeAvatar(player));
@@ -527,7 +529,7 @@ export class FPSGame {
       this.clearInput(); if (this.locked) document.exitPointerLock();
       $('pause-overlay').hidden = true; $('round-overlay').hidden = false; $('respawn-overlay').hidden = true;
       const winner = data.players.find((player) => player.id === data.room.result?.winnerId) || [...data.players].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)[0];
-      $('round-winner').textContent = winner ? `${data.room.result?.winnerName || winner.name} · ${data.room.result?.winnerKills ?? winner.kills} KILLS · 이번 라운드의 최고 기록` : '';
+      $('round-winner').textContent = data.room.gameType === 'teams' ? `${TEAM_NAMES[data.room.result?.winnerTeam] || '무승부'}${data.room.result?.winnerTeam ? ' 승리' : ''} · BLUE ${data.room.teamScores.blue} : ${data.room.teamScores.red} RED` : winner ? `${data.room.result?.winnerName || winner.name} · ${data.room.result?.winnerKills ?? winner.kills} KILLS · 이번 라운드의 최고 기록` : '';
       $('restart-button').hidden = data.room.hostId !== id; $('wait-host').hidden = data.room.hostId === id;
       $('wait-host').textContent = ['casual', 'ranked'].includes(data.room.mode) ? '온라인 경기는 로비에서 다시 매칭할 수 있습니다.' : '방장이 다음 라운드를 시작할 때까지 기다려 주세요.';
       renderScoreboard($('round-table'), data.players, id);
@@ -545,9 +547,11 @@ export class FPSGame {
     $('hud-ammo-reserve').textContent = weapon.melee ? 'MELEE' : '/ ∞';
     this.hud['hud-ammo'].style.color = lowAmmo ? '#ff876a' : '';
     const training = this.room.mode === 'tutorial';
-    const waiting = this.room.phase === 'waiting';
+    const waiting = ['waiting', 'countdown'].includes(this.room.phase), teams = this.room.gameType === 'teams';
     this.hud['hud-timer'].textContent = training ? 'TRAINING' : waiting ? 'WAITING' : clockText(this.room.timeLeft); this.hud['hud-timer'].style.fontSize = training || waiting ? '22px' : '';
-    document.querySelector('.match-clock>span').textContent = training ? 'LOCAL LESSONS' : 'DEATHMATCH'; document.querySelector('.hud-location small').hidden = training;
+    document.querySelector('.match-clock>span').textContent = training ? 'LOCAL LESSONS' : teams ? 'TEAM DEATHMATCH' : 'DEATHMATCH'; document.querySelector('.hud-location small').hidden = training; document.querySelector('.hud-location small').textContent = teams ? TEAM_NAMES[local.teamId] || 'TEAM DEATHMATCH' : 'FREE-FOR-ALL';
+    $('team-score-hud').hidden = !teams; $('team-score-blue').textContent = this.room.teamScores?.blue || 0; $('team-score-red').textContent = this.room.teamScores?.red || 0; $('hud-team-label').textContent = teams ? `${TEAM_NAMES[local.teamId]} · ${this.room.fragLimit}킬 목표` : ''; $('custom-progress-note').hidden = this.room.mode !== 'custom';
+    document.querySelector('.combat-awards').style.top = teams ? '175px' : '';
     $('hud-frag-limit').textContent = training ? `${this.tutorial?.total || 7} STEPS · NO RATING / LP` : waiting ? `HUMANS ${this.online?.connected || 0}/${this.online?.expected || 0}` : `FIRST TO ${this.room.fragLimit}`;
     this.hud['hud-timer'].style.color = this.room.timeLeft < 30 ? '#ff876a' : '';
     this.hud['hud-kd'].textContent = `${local.kills} K  /  ${local.deaths} D`;
@@ -642,7 +646,7 @@ export class FPSGame {
       }
       const avatar = this.remote.get(event.id); if (avatar) { avatar.flashUntil = event.melee ? 0 : performance.now() + 45; if (event.melee) avatar.swingUntil = performance.now() + 360; }
       for (const ray of event.rays || [{ end: event.end, hit: event.hit }]) {
-        if (!event.melee) this.tracer(origin, ray.end, event.id === this.selfId, !ray.hit && !ray.protectedTarget);
+        if (!event.melee) this.tracer(origin, ray.end, event.id === this.selfId, !ray.hit && !ray.protectedTarget && !ray.friendlyTarget);
         if (!event.melee && ray.surface) this.bulletMarks.add(ray.surface, event.origin, performance.now() - Math.max(0, this.serverNow - ray.surface.at));
         if (ray.hit && ray.hit !== this.selfId) this.combat.blood(ray.end, event.origin, this.players.find((player) => player.id === ray.hit)?.y || 0);
       }
@@ -797,7 +801,7 @@ export class FPSGame {
       if (this.activeModel.userData.reticle) this.activeModel.userData.reticle.visible = !ads;
       $('ads-reticle').hidden = !ads || scoped || this.local.hp <= 0;
       $('ads-reticle').style.backgroundColor = getSkin(this.local.skinId).accent;
-      this.weapon.visible = this.local.hp > 0 && this.room.phase === 'active' && !scoped;
+      this.weapon.visible = (this.graphicsPreparing || this.local.hp > 0 && this.room.phase === 'active') && !scoped;
       if (now > this.firePressedUntil) this.localFirePending = false;
       const trigger = input.fire || this.localFirePending;
       if (weapon.burstCount && !this.localBurstLeft && trigger && !this.fireLatched && now >= this.localNextFire) this.localBurstLeft = weapon.burstCount;
@@ -858,9 +862,9 @@ export class FPSGame {
     this.viewTime = viewTimes.length ? Math.min(...viewTimes) : this.serverNow;
     if (now - this.lastMap > 100 && this.predicted) {
       const origin = { x: this.predicted.x, y: this.predicted.y + playerPose(this.predicted).eyeHeight, z: this.predicted.z };
-      const visible = this.players.filter((p) => p.id !== this.selfId && p.hp > 0 && Math.hypot(p.x - origin.x, p.z - origin.z) < 25 && hasLineOfSight(origin, { x: p.x, y: p.y + playerPose(p).eyeHeight, z: p.z }, this.world));
+      const visible = this.players.filter((p) => p.id !== this.selfId && p.hp > 0 && (sameTeam(p, this.local) || Math.hypot(p.x - origin.x, p.z - origin.z) < 25 && hasLineOfSight(origin, { x: p.x, y: p.y + playerPose(p).eyeHeight, z: p.z }, this.world)));
       for (const [id, avatar] of this.remote) avatar.label.visible = visible.some((p) => p.id === id);
-      drawTacticalMap(this.minimap, { world: this.world, players: visible, self: { ...this.predicted, id: this.selfId, hp: this.local.hp, yaw: this.yaw } });
+      drawTacticalMap(this.minimap, { world: this.world, gameType: this.room.gameType, players: visible, self: { ...this.predicted, teamId: this.local.teamId, id: this.selfId, hp: this.local.hp, yaw: this.yaw } });
       this.lastMap = now;
     }
     if (now > this.hitmarkerUntil) { this.hud.hitmarker.classList.remove('visible'); this.hitmarkerAnimation?.cancel(); this.hitmarkerAnimation = null; }
@@ -906,6 +910,7 @@ export class FPSGame {
     if (this.graphicsPreparing) this.disposalPromise = this.graphicsPromise.catch(() => {}).then(() => this.releaseGraphics());
     else { this.releaseGraphics(); this.disposalPromise = Promise.resolve(); }
     $('scope-overlay').hidden = true; $('ads-reticle').hidden = true;
+    $('team-score-hud').hidden = true; $('custom-progress-note').hidden = true;
     this.clearDamageDirections();
     this.clearKillFeedback();
     updateTutorialView(null);

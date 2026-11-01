@@ -75,8 +75,12 @@ test('casual matchmaking fills three empty slots with labelled AI and enters the
   const origin = `http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}`, backend = await services(origin, { engine: true }), context = await browser.newContext();
   try {
     const { page, state } = await onlinePage(context, backend.apiUrl, origin, '일반'); await page.getByRole('button', { name: '일반 매칭', exact: true }).click();
+    await expect(page.locator('#match-intro')).toBeVisible({ timeout: 20_000 }); await expect(page.locator('#lobby')).toBeVisible(); await expect(page.locator('#game-shell')).toBeHidden();
+    await expect.poll(() => state.latest?.room.phase).toBe('countdown'); await expect(page.locator('#match-countdown-value')).toHaveText(/[1-5]/); const countdownStarted = Date.now();
+    await page.screenshot({ path: 'artifacts/match-found-before-entry.png' });
     await expect(page.locator('#pause-overlay')).toBeVisible({ timeout: 20_000 }); await expect(page.locator('#hud-connection-kind')).toHaveText('ONLINE');
     await expect.poll(() => state.latest?.room.phase).toBe('active'); expect(state.latest.players).toHaveLength(4); expect(state.latest.players.filter((player) => player.isBot)).toHaveLength(3); expect(state.latest.room.mode).toBe('casual'); expect(state.latest.room.mapId).not.toBe('training');
+    expect(Date.now() - countdownStarted).toBeGreaterThan(3000); await expect(page.locator('#match-intro')).toBeHidden();
     await expect(page.locator('#profile-points')).toHaveText('1,234'); expect(state.errors).toEqual([]);
     await page.screenshot({ path: 'artifacts/casual-online-ai-fill.png' });
     await expect(page.locator('#round-overlay')).toBeVisible({ timeout: 75_000 }); await expect(page.locator('#round-reward-status')).toContainText('온라인 서버에 저장됨', { timeout: 15_000 }); await expect(page.locator('#online-rating-summary')).toContainText('일반 레이팅');

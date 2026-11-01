@@ -1,8 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { WebSocket } from 'ws';
 import { createOnlineEngine } from '../server/online-engine.js';
+
+test('the online Docker image copies every local module reachable from its entry point', async () => {
+  const root = new URL('../', import.meta.url), dockerfile = await readFile(new URL('server/Dockerfile.online', root), 'utf8');
+  const sources = [...dockerfile.matchAll(/^COPY (.+) \S+\s*$/gm)].flatMap((match) => match[1].split(/\s+/)), visited = new Set();
+  async function visit(file) {
+    if (visited.has(file)) return; visited.add(file);
+    assert.ok(sources.some((source) => file === source || file.startsWith(source + '/')), `${file} is missing from the image`);
+    const source = await readFile(new URL(file, root), 'utf8');
+    for (const match of source.matchAll(/\b(?:from\s*|import\s*)['"](\.[^'"]+)['"]/g)) await visit(path.posix.normalize(path.posix.join(path.posix.dirname(file), match[1])));
+  }
+  await visit('server/online-engine.js');
+  assert.ok(visited.has('server/custom-gateway.js')); assert.ok(visited.has('shared/teams.js'));
+});
 
 function message(socket, type) {
   return new Promise((resolve, reject) => {
@@ -11,17 +26,18 @@ function message(socket, type) {
     socket.on('message', receive);
   });
 }
-async function fixture(t, { mode = 'RANKED', bots = 0, humans = 2, rankedAiEnabled = false, botRating = 1000, clock } = {}) {
+async function fixture(t, { mode = 'RANKED', bots = 0, humans = 2, rankedAiEnabled = false, botRating = 1000, clock, countdownMs = 0 } = {}) {
   const id = randomUUID(), players = Array.from({ length: humans }, (_, i) => ({ id: randomUUID(), callsign: `HUMAN ${i}`, ownedWeapons: ['rifle', 'pistol', 'shotgun', 'sniper'], weaponKills: {}, casualRating: 1000 }));
   const tickets = new Map(), results = [], plan = { id, mode, bots, players, rankedAiEnabled, botRating, mapId: 'foundry', fragLimit: 1, roundSeconds: 60 }, client = {
     pending: async () => [id], claim: async () => plan, heartbeat: async () => {}, cancel: async () => {},
     async consume(matchId, ticket) { const player = tickets.get(ticket); tickets.delete(ticket); if (matchId !== id || !player) throw new Error('Invalid ticket'); return player; },
     async complete(matchId, roster) { results.push({ id: matchId, roster }); return { settled: true }; },
   };
-  const app = createOnlineEngine({ client, port: 0, host: '127.0.0.1', loop: false, ...(clock ? { clock } : {}) }), info = await app.listen(); t.after(() => app.close());
+  const app = createOnlineEngine({ client, port: 0, host: '127.0.0.1', loop: false, countdownMs, ...(clock ? { clock } : {}) }), info = await app.listen(); t.after(() => app.close());
   const join = async (profile, extra = {}) => {
     const socket = new WebSocket(`ws://127.0.0.1:${info.port}/play`); t.after(() => socket.terminate()); await message(socket, 'hello');
-    const ticket = Buffer.from(randomUUID()).toString('base64url').slice(0, 43); tickets.set(ticket, profile); const joined = message(socket, 'joined'); socket.send(JSON.stringify({ type: 'authenticate', matchId: id, ticket, ...extra })); socket.joined = await joined; return socket;
+    const ticket = Buffer.from(randomUUID()).toString('base64url').slice(0, 43); tickets.set(ticket, profile); const joined = message(socket, 'joined'); socket.send(JSON.stringify({ type: 'authenticate', matchId: id, ticket, ...extra })); socket.joined = await joined;
+    const ready = message(socket, 'pong'); socket.send(JSON.stringify({ type: 'ready' })); socket.send(JSON.stringify({ type: 'ping' })); await ready; return socket;
   };
   return { app, id, players, plan, client, join, results, port: info.port };
 }
@@ -41,6 +57,17 @@ test('the online gateway consumes Spring tickets, ignores spoofed identity/owner
 test('ranked weapon access is temporary and does not mutate the canonical online ownership profile', async (t) => {
   const f = await fixture(t); await f.join(f.players[0], { weaponId: 'm82' }); await f.join(f.players[1]);
   const player = f.app.matches.get(f.id).room.players.get(f.players[0].id); assert.equal(player.weaponId, 'm82'); assert.equal(player.ownedWeapons.length, 20); assert.equal(f.players[0].ownedWeapons.includes('m82'), false);
+});
+
+test('ready players are frozen for the complete five-second countdown and the match timer starts only afterward', async (t) => {
+  let now = 1000; const f = await fixture(t, { clock: () => now, countdownMs: 5000 }); const socket = await f.join(f.players[0]); await f.join(f.players[1]); const match = f.app.matches.get(f.id), p = match.room.players.get(f.players[0].id), initial = { x: p.x, z: p.z, ammo: p.ammo };
+  assert.equal(match.room.phase, 'countdown'); assert.equal(match.countdownEndsAt, 6000); match.room.setInput(p.id, { forward: 1, fire: true, spawnCount: p.spawnCount }); now = 5999; f.app.tick(1 / 60); assert.equal(match.room.phase, 'countdown'); assert.deepEqual({ x: p.x, z: p.z, ammo: p.ammo }, initial);
+  now = 6000; f.app.tick(1 / 60); assert.equal(match.room.phase, 'active'); assert.equal(match.room.startedAt, 6000); assert.equal(match.room.endsAt, 66_000); assert.equal(p.hp, 100); assert.equal(p.ammo, initial.ammo); assert.equal(p.protectedUntil, 7500);
+});
+
+test('a disconnect before entry cancels the countdown and a ready reconnect starts a fresh full five seconds', async (t) => {
+  let now = 1000; const f = await fixture(t, { clock: () => now, countdownMs: 5000 }), a = await f.join(f.players[0]); await f.join(f.players[1]); const match = f.app.matches.get(f.id); now = 2000; await disconnect(a, match, f.players[0].id); assert.equal(match.room.phase, 'waiting'); assert.equal(match.countdownEndsAt, null);
+  await f.join(f.players[0]); assert.equal(match.room.phase, 'countdown'); assert.equal(match.countdownEndsAt, 7000); now = 6999; f.app.tick(1 / 60); assert.equal(match.room.phase, 'countdown'); now++; f.app.tick(1 / 60); assert.equal(match.room.phase, 'active');
 });
 
 test('ranked AI assignments still require explicit permission from the authoritative plan', async (t) => {

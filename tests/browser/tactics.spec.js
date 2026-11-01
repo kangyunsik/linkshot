@@ -34,7 +34,7 @@ async function disposeComponent(page) {
   });
 }
 
-for (const weaponId of ['rifle', 'famas']) test(`${weaponId} ADS reticle stays centered and visual recoil cannot change authoritative aim`, async ({ page }) => {
+for (const weaponId of ['rifle', 'famas', 'mp5']) test(`${weaponId} ADS reticle stays centered and visual recoil cannot change authoritative aim`, async ({ page }) => {
   const errors = []; page.on('pageerror', (error) => errors.push(error.message));
   await componentGame(page, weaponId);
   try {

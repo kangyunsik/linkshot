@@ -97,15 +97,16 @@ test('AK/FAMAS blades and rifle optic mounts keep the lower sight picture open w
   await page.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: '' })); await page.goto('/');
   const checks = await page.evaluate(async () => {
     const [THREE, { WeaponModels, disposeModel }] = await Promise.all([import('/vendor/three.module.js'), import('/weapon-model.js')]); const models = new WeaponModels(), checks = [];
-    for (const id of ['ak47', 'famas', 'rifle', 'm4a1', 'dmr', 'm14', 'lmg', 'm249']) {
+    for (const id of ['ak47', 'famas', 'mp5', 'rifle', 'm4a1', 'dmr', 'm14', 'lmg', 'm249']) {
       const model = models.create(id, 'standard'), features = model.userData.firearmBody.userData.features, height = model.userData.aimHeight, meshes = []; model.updateMatrixWorld(true); model.userData.firearmBody.traverse((object) => { if (object.isMesh && object.name !== 'sight-reference' && !object.material.transparent) meshes.push(object); });
-      const iron = ['ak47', 'famas'].includes(id), marksman = ['dmr', 'm14'].includes(id), z = iron ? id === 'famas' ? -.394 : -.524 : marksman ? -.035 : .003;
+      const iron = ['ak47', 'famas', 'mp5'].includes(id), marksman = ['dmr', 'm14'].includes(id), z = iron ? id === 'famas' ? -.394 : id === 'mp5' ? -.404 : -.524 : marksman ? -.035 : .003;
       const clear = (x, y) => { const origin = new THREE.Vector3(0, height, .35), target = new THREE.Vector3(x, y, z), ray = target.clone().sub(origin), distance = ray.length(); return new THREE.Raycaster(origin, ray.normalize(), 0, distance).intersectObjects(meshes, false).length === 0; };
       const tower = features.find((feature) => feature.name === 'front-sight-tower'), blade = features.find((feature) => feature.name === 'front-sight-post'), carry = features.find((feature) => feature.name === 'famas-low-carry-handle');
-      checks.push({ id, height, lower: iron ? [-.006, .006].every((x) => clear(x, height - .015)) : [-.014, .014].every((x) => clear(x, height - (marksman ? .030 : .0255))), riser: iron || clear(0, height - .045), towerHeight: tower && tower.max[1] - tower.min[1], bladeWidth: blade && blade.max[0] - blade.min[0], bladeTip: blade?.max[1], bladeBase: blade?.min[1], towerTop: tower?.max[1], carryTop: carry?.max[1] }); disposeModel(model);
+      const rearOpening = id !== 'mp5' || (() => { const origin = new THREE.Vector3(0, height, .35), target = new THREE.Vector3(0, height - .04, .115), ray = target.clone().sub(origin); return new THREE.Raycaster(origin, ray.clone().normalize(), 0, ray.length()).intersectObjects(meshes, false).length === 0; })();
+      checks.push({ id, height, lower: iron ? [-.006, .006].every((x) => clear(x, height - .015)) : [-.014, .014].every((x) => clear(x, height - (marksman ? .030 : .0255))), rearOpening, riser: iron || clear(0, height - .045), towerHeight: tower && tower.max[1] - tower.min[1], bladeWidth: blade && blade.max[0] - blade.min[0], bladeTip: blade?.max[1], bladeBase: blade?.min[1], towerTop: tower?.max[1], carryTop: carry?.max[1] }); disposeModel(model);
     }
     models.dispose(); return checks;
   });
-  for (const check of checks) { expect(check.lower, check.id).toBe(true); expect(check.riser, check.id).toBe(true); if (['ak47', 'famas'].includes(check.id)) { expect(check.towerHeight).toBeLessThan(.065); expect(check.bladeWidth).toBeLessThan(.006); expect(check.bladeTip).toBeCloseTo(check.height, 6); expect(check.bladeBase).toBeLessThanOrEqual(check.towerTop + .00001); } }
+  for (const check of checks) { expect(check.lower, check.id).toBe(true); expect(check.riser, check.id).toBe(true); expect(check.rearOpening, check.id).toBe(true); if (['ak47', 'famas', 'mp5'].includes(check.id)) { expect(check.towerHeight).toBeLessThan(.065); expect(check.bladeWidth).toBeLessThan(.006); expect(check.bladeTip).toBeCloseTo(check.height, 6); expect(check.bladeBase).toBeLessThanOrEqual(check.towerTop + .00001); } }
   expect(checks.find((check) => check.id === 'famas').height).toBe(.132); expect(checks.find((check) => check.id === 'ak47').height).toBe(.14); expect(checks.find((check) => check.id === 'famas').carryTop).toBeLessThan(.115);
 });
