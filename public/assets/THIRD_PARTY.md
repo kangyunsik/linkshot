@@ -31,6 +31,8 @@
 
 The firearm meshes in `public/firearm-design.js` / `public/firearm-geometry.js` and their procedural metal/polymer/wood micro-finishes are authored in this project, not downloaded weapon-model assets. They reuse the existing finish colors/patterns credited in `asset-manifest.json`. No new third-party weapon model pack or paid service is required.
 
+The circular bullet-scar atlas in `public/bullet-marks.js` is also project-authored: deterministic canvas pitting, chipped rims, powder and fine cracks. It contains no external decal pack or generated image-engine workflow.
+
 ## Recorded firearm sounds
 
 - Author/recordist: Tabasco

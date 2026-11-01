@@ -17,6 +17,7 @@ import { FootstepTracker, footstepMix } from './footsteps.js';
 import { drawThemedArena } from './themed-arena.js';
 import { VIEWMODEL_LAYER, compileViewmodelPrograms, renderViewmodelFrame } from './viewmodel-renderer.js';
 import { updateTutorialView } from './tutorial-view.js';
+import { BulletMarks } from './bullet-marks.js';
 
 const $ = (id) => document.getElementById(id);
 const lerp = THREE.MathUtils.lerp;
@@ -27,13 +28,14 @@ export function renderScoreboard(element, players, selfId) {
   const head = table.createTHead().insertRow();
   for (const title of ['#', 'OPERATOR', 'KILLS', 'DEATHS', 'K/D']) { const cell = document.createElement('th'); cell.textContent = title; head.append(cell); }
   const body = table.createTBody();
-  [...players].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths).forEach((player, index) => {
+  [...players].sort((a, b) => Number(!!a.abandoned) - Number(!!b.abandoned) || b.kills - a.kills || a.deaths - b.deaths).forEach((player, index) => {
     const row = body.insertRow(); if (player.id === selfId) row.className = 'self';
     row.insertCell().textContent = index + 1;
     const name = row.insertCell(); name.textContent = player.name;
     if (player.isBot || player.id === selfId) {
       const badge = document.createElement('span'); badge.className = player.isBot ? 'bot-badge' : 'you-badge'; badge.textContent = player.isBot ? 'BOT' : 'YOU'; name.append(badge);
     }
+    if (player.abandoned || player.connected === false) { const badge = document.createElement('span'); badge.className = 'bot-badge'; badge.textContent = player.abandoned ? '탈주' : '재접속 대기'; name.append(badge); }
     row.insertCell().textContent = player.kills;
     row.insertCell().textContent = player.deaths;
     row.insertCell().textContent = (player.kills / Math.max(1, player.deaths)).toFixed(1);
@@ -87,8 +89,11 @@ export class FPSGame {
     this.camera = new THREE.PerspectiveCamera(settings.fov, 1, 0.04, Math.max(this.world.width, this.world.depth) * 3); this.camera.rotation.order = 'YXZ'; this.scene.add(this.camera);
     this.boxGeometry = new THREE.BoxGeometry(1, 1, 1);
     this.materials = {};
-    this.makeWorld(); this.makeWeapon(); this.applySettings(); this.resize(); this.bindInput();
+    this.makeWorld(); this.scene.updateMatrixWorld(true);
+    const impactMeshes = []; this.scene.traverse((object) => { if (object.isMesh) impactMeshes.push(object); });
+    this.makeWeapon(); this.applySettings(); this.resize(); this.bindInput();
     this.combat = new CombatEffects(this.scene, this.models, this.world);
+    this.bulletMarks = new BulletMarks(this.scene, impactMeshes);
     if (this.world.id === 'training') { this.trainingMarker = new THREE.Mesh(new THREE.TorusGeometry(.6, .045, 6, 32), new THREE.MeshBasicMaterial({ color: '#b4f0cf', depthWrite: false })); this.trainingMarker.rotation.x = -Math.PI / 2; this.trainingMarker.visible = false; this.scene.add(this.trainingMarker); }
     this.graphicsReady = false; this.graphicsPromise = null; this.graphicsPreparing = false; this.retiredGraphics = [];
     this.previousFrame = performance.now(); this.fpsTime = this.previousFrame; this.fpsFrames = 0;
@@ -103,6 +108,7 @@ export class FPSGame {
   prepareGraphics() {
     if (this.graphicsPromise) return this.graphicsPromise;
     const warmup = this.combat.prepareWarmup(this.players), visibility = [];
+    this.bulletMarks.prepareWarmup();
     visibility.push([this.weapon, this.weapon.visible]); this.weapon.visible = true;
     for (const model of this.weaponModels.values()) { visibility.push([model, model.visible], [model.userData.flash, model.userData.flash.visible]); model.visible = true; model.userData.flash.visible = true; }
     for (const avatar of this.remote.values()) { const flash = avatar.weapon.userData.flash; visibility.push([flash, flash.visible]); flash.visible = true; }
@@ -117,6 +123,7 @@ export class FPSGame {
         this.scene.remove(warmup); for (const [object, visible] of visibility) object.visible = visible;
         for (const [id, model] of this.weaponModels) model.visible = id === this.activeWeaponId;
         this.graphicsPreparing = false;
+        this.bulletMarks.finishWarmup();
         // compileAsync keeps material/program references while the driver
         // finishes linking. A departing peer must not invalidate those refs.
         const retired = this.retiredGraphics.splice(0); for (const dispose of retired) dispose();
@@ -272,18 +279,10 @@ export class FPSGame {
 
   makeWeapon() {
     this.weapon = new THREE.Group(); this.camera.add(this.weapon); this.weaponModels = new Map();
-    $('weapon-slots').replaceChildren();
-    $('weapon-slots').style.setProperty('--weapon-count', WEAPONS.length);
     for (const weapon of EQUIPMENT) {
       const model = this.models.create(weapon.id, this.skinId, true, this.outfitId, this.characterId); model.visible = false;
       model.traverse((object) => object.layers.set(VIEWMODEL_LAYER));
       this.weapon.add(model); this.weaponModels.set(weapon.id, model);
-      if (weapon.melee) continue;
-      const slot = document.createElement('div'); slot.className = 'weapon-slot'; slot.dataset.weapon = weapon.id;
-      const key = document.createElement('kbd'); key.textContent = weapon.slot;
-      const name = document.createElement('b'); name.textContent = weapon.name;
-      const count = document.createElement('small'); count.textContent = weapon.magazine;
-      slot.append(key, name, count); $('weapon-slots').append(slot);
     }
     this.muzzleLight = new THREE.PointLight('#ffad60', 0, 5); this.camera.add(this.muzzleLight); this.muzzleLight.position.set(0.2, -0.15, -0.75);
     this.muzzleLight.layers.enable(VIEWMODEL_LAYER); this.scene.traverse((object) => { if (object.isLight) object.layers.enable(VIEWMODEL_LAYER); });
@@ -468,6 +467,7 @@ export class FPSGame {
   applySnapshot(data, id = this.selfId) {
     if (this.disposed) return;
     this.selfId = id; this.room = data.room; this.players = data.players;
+    this.online = data.online;
     this.tutorial = data.tutorial;
     updateTutorialView(data.tutorial);
     if (this.trainingMarker) { const marker = data.tutorial?.marker; this.trainingMarker.visible = !!marker; if (marker) this.trainingMarker.position.set(marker.x, marker.y + .04, marker.z); }
@@ -481,7 +481,7 @@ export class FPSGame {
       this.aimRecoil.reset(this.aimRecoil.aimPitch); this.muzzleFlash.visible = false; this.muzzleLight.intensity = 0;
       $('pause-overlay').hidden = true;
     }
-    if (this.feedbackRound !== data.room.roundId) { this.feedbackRound = data.room.roundId; this.shotFeedback.reset(); this.seenKills.clear(); this.clearKillFeedback(); }
+    if (this.feedbackRound !== data.room.roundId) { this.feedbackRound = data.room.roundId; this.shotFeedback.reset(); this.seenKills.clear(); this.clearKillFeedback(); this.bulletMarks.clear(); }
     if (!this.predicted || respawned) {
       this.closeLoadout(false);
       if (this.local && this.local.hp <= 0 && local.hp > 0) this.onMenu(!this.locked);
@@ -520,6 +520,7 @@ export class FPSGame {
     }
     for (const [remoteId, avatar] of this.remote) if (!present.has(remoteId)) { this.scene.remove(avatar.group); this.disposeObject(avatar.group, false); this.remote.delete(remoteId); }
     this.syncDroppedWeapons(data.droppedWeapons || []); this.updateHud();
+    if (Array.isArray(data.impacts)) for (const impact of data.impacts) this.bulletMarks.add(impact, null, performance.now() - Math.max(0, this.serverNow - impact.at));
     for (const event of data.events) this.handleEvent(event);
     if (data.room.phase === 'ended') {
       this.closeLoadout(false);
@@ -528,6 +529,7 @@ export class FPSGame {
       const winner = data.players.find((player) => player.id === data.room.result?.winnerId) || [...data.players].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)[0];
       $('round-winner').textContent = winner ? `${data.room.result?.winnerName || winner.name} · ${data.room.result?.winnerKills ?? winner.kills} KILLS · 이번 라운드의 최고 기록` : '';
       $('restart-button').hidden = data.room.hostId !== id; $('wait-host').hidden = data.room.hostId === id;
+      $('wait-host').textContent = ['casual', 'ranked'].includes(data.room.mode) ? '온라인 경기는 로비에서 다시 매칭할 수 있습니다.' : '방장이 다음 라운드를 시작할 때까지 기다려 주세요.';
       renderScoreboard($('round-table'), data.players, id);
     } else if (!$('round-overlay').hidden) {
       $('round-overlay').hidden = true; this.onMenu(true);
@@ -543,9 +545,10 @@ export class FPSGame {
     $('hud-ammo-reserve').textContent = weapon.melee ? 'MELEE' : '/ ∞';
     this.hud['hud-ammo'].style.color = lowAmmo ? '#ff876a' : '';
     const training = this.room.mode === 'tutorial';
-    this.hud['hud-timer'].textContent = training ? 'TRAINING' : clockText(this.room.timeLeft); this.hud['hud-timer'].style.fontSize = training ? '22px' : '';
+    const waiting = this.room.phase === 'waiting';
+    this.hud['hud-timer'].textContent = training ? 'TRAINING' : waiting ? 'WAITING' : clockText(this.room.timeLeft); this.hud['hud-timer'].style.fontSize = training || waiting ? '22px' : '';
     document.querySelector('.match-clock>span').textContent = training ? 'LOCAL LESSONS' : 'DEATHMATCH'; document.querySelector('.hud-location small').hidden = training;
-    $('hud-frag-limit').textContent = training ? `${this.tutorial?.total || 6} STEPS · NO RATING / LP` : `FIRST TO ${this.room.fragLimit}`;
+    $('hud-frag-limit').textContent = training ? `${this.tutorial?.total || 6} STEPS · NO RATING / LP` : waiting ? `HUMANS ${this.online?.connected || 0}/${this.online?.expected || 0}` : `FIRST TO ${this.room.fragLimit}`;
     this.hud['hud-timer'].style.color = this.room.timeLeft < 30 ? '#ff876a' : '';
     this.hud['hud-kd'].textContent = `${local.kills} K  /  ${local.deaths} D`;
     const reloading = local.hp > 0 && this.room.phase === 'active' && local.reloadUntil > this.serverNow;
@@ -557,10 +560,6 @@ export class FPSGame {
     $('hud-stance').hidden = !local.crouching || local.hp <= 0;
     $('hud-map-name').textContent = this.world.name; $('scoreboard-map-name').textContent = this.world.name;
     this.hud['reload-indicator'].querySelector('i').style.animationDuration = `${weapon.reloadSeconds}s`;
-    for (const slot of $('weapon-slots').children) {
-      slot.classList.toggle('selected', slot.dataset.weapon === local.weaponId);
-      slot.querySelector('small').textContent = local.magazines[slot.dataset.weapon];
-    }
     if (reloading && !this.hadReload) {
       const until = local.reloadUntil, life = local.spawnCount;
       this.audio.reload(weapon.id, Math.max(0, until - this.serverNow) / 1000, () => !this.disposed && this.local?.hp > 0 && this.local.spawnCount === life && this.local.reloadUntil === until && this.serverNow < until && this.room?.phase === 'active');
@@ -644,6 +643,7 @@ export class FPSGame {
       const avatar = this.remote.get(event.id); if (avatar) { avatar.flashUntil = event.melee ? 0 : performance.now() + 45; if (event.melee) avatar.swingUntil = performance.now() + 360; }
       for (const ray of event.rays || [{ end: event.end, hit: event.hit }]) {
         if (!event.melee) this.tracer(origin, ray.end, event.id === this.selfId, !ray.hit && !ray.protectedTarget);
+        if (!event.melee && ray.surface) this.bulletMarks.add(ray.surface, event.origin, performance.now() - Math.max(0, this.serverNow - ray.surface.at));
         if (ray.hit && ray.hit !== this.selfId) this.combat.blood(ray.end, event.origin, this.players.find((player) => player.id === ray.hit)?.y || 0);
       }
     }
@@ -669,7 +669,7 @@ export class FPSGame {
         this.showKillFeedback(event);
       }
     }
-    if (event.type === 'restart') { this.combat.clear(); $('killfeed').replaceChildren(); this.hud['kill-confirmation'].textContent = ''; this.clearKillFeedback(); }
+    if (event.type === 'restart') { this.combat.clear(); this.bulletMarks.clear(); $('killfeed').replaceChildren(); this.hud['kill-confirmation'].textContent = ''; this.clearKillFeedback(); }
   }
 
   flashHitmarker(headshot = false, protectedTarget = false) {
@@ -870,6 +870,7 @@ export class FPSGame {
     if (now > this.masteryUntil) $('mastery-feedback').hidden = true;
     this.updateDamageDirections(now);
     this.combat.update(now, dt);
+    this.bulletMarks.update(now);
     for (let i = this.effects.length - 1; i >= 0; i--) if (now > this.effects[i].expires) {
       const effect = this.effects[i]; this.scene.remove(effect.object); effect.object.geometry.dispose(); effect.object.material.dispose(); this.effects.splice(i, 1);
     }
@@ -918,6 +919,6 @@ export class FPSGame {
 
   releaseGraphics() {
     if (this.graphicsReleased) return; this.graphicsReleased = true;
-    this.combat.dispose(); this.disposeObject(this.scene); this.sun.shadow.dispose(); this.models.dispose(); this.renderer.dispose();
+    this.combat.dispose(); this.bulletMarks.dispose(); this.disposeObject(this.scene); this.sun.shadow.dispose(); this.models.dispose(); this.renderer.dispose();
   }
 }

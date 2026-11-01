@@ -1,6 +1,7 @@
 import { expandBuildings } from './buildings.js';
 import { addSpawnZones } from './spawns.js';
-export const NETWORK_PROTOCOL = 14;
+export const NETWORK_PROTOCOL = 15;
+export const BULLET_MARK_RULES = Object.freeze({ lifetimeMs: 60_000, fadeMs: 6000, maxMarks: 6144, historyLimit: 2048, cellScale: 40 });
 
 export const RULES = Object.freeze({
   tickRate: 60, snapshotRate: 20, maxPlayers: 8, roundSeconds: 300,
@@ -306,14 +307,33 @@ export function aimDirection(yaw, pitch) {
 }
 
 const rayColliders = new WeakMap();
-export function wallDistance(origin, direction, maxDistance = 200, world = WORLD) {
+export function wallDistance(origin, direction, maxDistance = 200, world = WORLD, details = null) {
   let nearest = maxDistance;
-  if (Object.isFrozen(world) && !rayColliders.has(world)) rayColliders.set(world, world.obstacles.map((box) => bounds(box)));
+  if (details) details.box = null;
+  if (Object.isFrozen(world) && !rayColliders.has(world)) rayColliders.set(world, world.obstacles.map((box, index) => ({ ...bounds(box), id: box.id || `obstacle-${index}`, kind: box.kind })));
   for (const box of rayColliders.get(world) || world.obstacles) {
     const hit = rayBox(origin, direction, box, nearest);
-    if (hit !== null) nearest = hit;
+    if (hit !== null) { nearest = hit; if (details) details.box = box; }
   }
   return nearest;
+}
+
+// Surface metadata is visual only. It never alters body traces, damage,
+// spread, range/falloff or spawn protection; floor misses only shorten VFX.
+export function impactSurface(origin, direction, distance, box, world = WORLD) {
+  const point = { x: origin.x + direction.x * distance, y: origin.y + direction.y * distance, z: origin.z + direction.z * distance };
+  if (direction.y < -1e-9) {
+    const floor = -origin.y / direction.y;
+    const x = origin.x + direction.x * floor, z = origin.z + direction.z * floor;
+    if (floor > .0001 && floor <= distance && Math.abs(x) <= world.width / 2 && Math.abs(z) <= world.depth / 2) return { point: { x, y: 0, z }, normal: { x: 0, y: 1, z: 0 }, id: 'ground', kind: 'ground', bounds: { minX: -world.width / 2, maxX: world.width / 2, minY: 0, maxY: 0, minZ: -world.depth / 2, maxZ: world.depth / 2 } };
+  }
+  if (!box || distance <= .0001) return null;
+  const b = 'minX' in box ? box : bounds(box), faces = [];
+  for (const [axis, low, high] of [['x', 'minX', 'maxX'], ['y', 'minY', 'maxY'], ['z', 'minZ', 'maxZ']]) for (const [edge, sign] of [[low, -1], [high, 1]]) faces.push({ axis, sign, error: Math.abs(point[axis] - b[edge]), strength: Math.abs(direction[axis]) });
+  faces.sort((a, b) => Math.abs(a.error - b.error) > 1e-7 ? a.error - b.error : b.strength - a.strength);
+  if (faces[0].error > .002) return null;
+  const normal = { x: 0, y: 0, z: 0 }; normal[faces[0].axis] = faces[0].sign;
+  return { point, normal, id: box.id || 'world-surface', kind: box.kind || 'wall', bounds: { minX: b.minX, maxX: b.maxX, minY: b.minY, maxY: b.maxY, minZ: b.minZ, maxZ: b.maxZ } };
 }
 
 export function hasLineOfSight(a, b, world = WORLD) {

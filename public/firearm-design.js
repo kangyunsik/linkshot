@@ -14,17 +14,24 @@ function makeTemplate(weapon, shape) {
     for (let i = 0; i < length / .04; i++) g.block('rail-tooth', [.061, .005, .014], [0, y + .008, z + length / 2 - i * .04], 'steel', 'frame', .0007);
   };
   const irons = (height, rear = .13, front = -.42) => {
-    const base = famas ? .11 : mp5 ? .045 : .055, top = height - .018;
+    const compact = ak || famas, base = famas ? .092 : mp5 ? .045 : .055, top = height - .018;
     g.block('rear-sight-pedestal', [.054, top - base, .034], [0, (top + base) / 2, rear]);
-    g.block('front-sight-tower', [.028, height - .051, .036], [0, (.025 + height - .026) / 2, front]);
-    for (const side of [-1, 1]) g.block('rear-sight-ear', [famas ? .006 : .008, famas ? .014 : .024, .015], [side * .021, height + (famas ? -.004 : .001), rear], 'black');
+    const towerBase = ak ? .062 : famas ? .055 : .025, towerTop = height - (compact ? .021 : .026);
+    g.block('front-sight-tower', [compact ? .012 : .028, towerTop - towerBase, compact ? .024 : .036], [0, (towerBase + towerTop) / 2, front], 'black', 'frame', compact ? .0012 : .002);
+    for (const side of [-1, 1]) g.block('rear-sight-ear', [famas ? .006 : .008, famas ? .014 : ak ? .018 : .024, .015], [side * .021, height + (famas ? -.004 : .001), rear], 'black');
     g.block('rear-sight-notch', [.05, .006, .016], [0, height - .016, rear]);
-    g.block('front-sight-post', [.007, .025, .012], [0, height - .0125, front], 'steel');
-    g.ring('front-sight-hood', .021, .003, [0, height - .012, front - .004]);
+    // Include the chamfer in the compact blade tip, keeping it on the ADS axis.
+    g.block('front-sight-post', [compact ? .0035 : .007, compact ? .021 : .025, compact ? .008 : .012], [0, height - (compact ? .0112 : .0125), front], 'steel', 'frame', compact ? .0007 : .002);
+    g.ring('front-sight-hood', compact ? .0165 : .021, compact ? .0023 : .003, [0, height - (compact ? .006 : .012), front - .004]);
+  };
+  const opticMount = (height, z, frameHeight = .063, base = shape === 'lmg' ? .092 : p90 ? .106 : .079, name = 'optic-foot') => {
+    g.block(name, [.054, .008, .055], [0, base, z], 'black', 'frame', .0012);
+    const bottom = base + .003, top = height - frameHeight / 2 + .0015;
+    if (top > bottom) for (const side of [-1, 1]) g.block('open-optic-riser-leg', [.008, top - bottom, .026], [side * .024, (top + bottom) / 2, z], 'black', 'frame', .001);
   };
   const optic = (height = aimHeight, z = .015) => {
-    g.frame('open-reflex-sight', .077, .063, .018, [0, height, z]);
-    g.block('optic-foot', [.048, .038, .075], [0, height - .048, z]);
+    g.frame('open-reflex-sight', .077, .063, .014, [0, height, z], 'black', 'frame', { rim: .004 });
+    opticMount(height, z);
   };
   const barrel = (from, radius = .021) => {
     const capLength = m82 ? .14 : shape === 'pistol' ? .027 : .055, capRadius = m82 ? .047 : shape === 'shotgun' ? .039 : radius * 1.42;
@@ -80,14 +87,14 @@ function makeTemplate(weapon, shape) {
   if (shape === 'rifle') {
     if (famas) {
       g.profile('famas-bullpup-shell', [[-.53, -.023], [-.48, -.058], [.27, -.068], [.36, -.038], [.36, .035], [.29, .065], [-.43, .058], [-.53, .028]], .105, 'coat', 'frame', { bevel: .006, round: .012 });
-      g.profile('famas-low-carry-handle', [[-.25, .069], [-.23, .112], [-.19, .128], [.135, .128], [.16, .11], [.17, .069]], .028, 'black', 'frame', { bevel: .002, holes: [[[-.17, .079], [-.155, .106], [.11, .106], [.13, .079]]] });
+      g.profile('famas-low-carry-handle', [[-.25, .069], [-.23, .097], [-.19, .111], [.135, .111], [.16, .096], [.17, .069]], .028, 'black', 'frame', { bevel: .002, holes: [[[-.17, .079], [-.155, .093], [.11, .093], [.13, .079]]] });
       g.block('famas-butt-pad', [.109, .116, .018], [0, -.018, .371], 'rubber');
       magazine('rifle', .22); irons(aimHeight, .13, -.39);
       for (const side of [-1, 1]) for (let i = 0; i < 4; i++) g.block('famas-cooling-slot', [.002, .013, .036], [side * .055, .012, -.44 + i * .055], 'black');
     } else {
       receiver(ak ? .104 : .112); handguard(-.54, -.25, ak ? .098 : .094, ak ? 'wood' : 'plate');
       stock(ak); magazine(ak ? 'ak' : 'rifle');
-      if (ak) { g.tube('ak-gas-tube', .014, .30, [0, .072, -.37], 'black'); irons(aimHeight, .11, -.52); }
+      if (ak) { g.tube('ak-gas-tube', .014, .30, [0, .072, -.37], 'black'); g.block('ak-front-gas-block', [.036, .043, .04], [0, .0565, -.515]); irons(aimHeight, .11, -.52); }
       else { rail(.45, -.17); optic(); g.tube('upper-receiver', .038, .26, [0, .023, -.03], 'plate'); }
       if (id === 'm4a1') { g.tube('buffer-tube', .027, .14, [0, .004, .19], 'black'); g.block('stock-adjustment-lever', [.042, .022, .105], [0, -.072, .255], 'plate'); }
     }
@@ -163,8 +170,8 @@ function makeTemplate(weapon, shape) {
     if (id === 'm14') g.profile('m14-one-piece-wood-stock', [[-.66, -.022], [-.57, -.057], [-.02, -.057], [.10, -.12], [.125, -.20], [.185, -.205], [.225, -.145], [.30, -.10], [.43, -.085], [.45, -.05], [.43, .034], [.29, .05], [.16, .023], [-.58, .03]], .103, 'wood', 'frame', { bevel: .005, round: .013 });
     else { handguard(-.65, -.26, .093, 'plate'); stock(false, .43); }
     magazine('rifle', -.08); rail(.40, -.10, .077);
-    g.frame('compact-marksman-optic', .079, .072, .04, [0, aimHeight, -.015]);
-    g.block('marksman-optic-foot', [.05, .032, .052], [0, .105, -.015]); barrel(-.64, .022);
+    g.frame('compact-marksman-optic', .079, .072, .026, [0, aimHeight, -.015], 'black', 'frame', { rim: .004 });
+    opticMount(aimHeight, -.015, .072, .085, 'marksman-optic-foot'); barrel(-.64, .022);
   }
 
   // Shared grip/trigger landmarks retain the already approved hand placement.

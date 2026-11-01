@@ -17,6 +17,13 @@ export class OnlineApi {
   health() { return this.request('/api/health'); }
   async refreshCsrf() { const data = await this.request('/api/auth/csrf', { csrf: false }); if (typeof data?.token !== 'string' || data.token.length > 512 || data.headerName !== 'X-CSRF-TOKEN') throw new Error('온라인 인증 응답을 확인할 수 없습니다.'); this.token = data.token; }
   profile() { return this.request('/api/account'); }
+  queue(mode) { return this.request('/api/queue', { method: 'POST', body: { mode } }); }
+  queueStatus() { return this.request('/api/queue'); }
+  cancelQueue() { return this.request('/api/queue', { method: 'DELETE' }); }
+  queueHeartbeat() { return this.request('/api/queue/heartbeat', { method: 'POST' }); }
+  ticket() { return this.request('/api/match/ticket', { method: 'POST' }); }
+  receipt(id) { return this.request(`/api/results/${encodeURIComponent(id)}`); }
+  history() { return this.request('/api/results'); }
   register(username, password, callsign) { return this.request('/api/auth/register', { method: 'POST', body: { username, password, callsign } }); }
   async login(username, password) { const result = await this.request('/api/auth/login', { method: 'POST', form: true, body: { username, password } }); this.token = null; await this.refreshCsrf(); return result.profile; }
   async logout() { await this.request('/api/auth/logout', { method: 'POST' }); this.token = null; }

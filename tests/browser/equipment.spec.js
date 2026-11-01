@@ -24,6 +24,7 @@ async function dispose(page) { await page.evaluate(async () => { const f = windo
 test('G only swaps with a ground gun, leaves the old gun/ammunition on the floor and ignores repeats', async ({ page }) => {
   const errors = []; page.on('pageerror', (error) => errors.push(error.message)); await fixture(page);
   try {
+    await expect(page.locator('#weapon-slots')).toHaveCount(0); await expect(page.locator('#hud-ammo')).toHaveText('07');
     await page.keyboard.press('KeyG'); await expect(page.locator('#hud-weapon-name')).toHaveText('VX–7'); expect(await page.evaluate(() => window.__equipment.room.droppedWeapons.size)).toBe(0);
     await page.evaluate(() => { const f = window.__equipment; f.room.dropWeapon({ ...f.player, weaponId: 'mp5', weaponSkinId: 'circuit', ammo: 12 }); });
     await expect(page.locator('#equipment-hint')).toContainText('MP5와 교체');

@@ -1,4 +1,4 @@
-import { RULES, WORLD, getMap, aimDirection, rayBox, raySphere, rayCapsule, wallDistance, hasLineOfSight, bounds, playerPose, normalizeRoundOptions, NETWORK_PROTOCOL } from './world.js';
+import { RULES, WORLD, getMap, aimDirection, rayBox, raySphere, rayCapsule, wallDistance, impactSurface, hasLineOfSight, bounds, playerPose, normalizeRoundOptions, NETWORK_PROTOCOL, BULLET_MARK_RULES } from './world.js';
 import { EMPTY_INPUT, sanitizeInput, movePlayer, clamp, angleDelta } from './movement.js';
 import { WEAPONS, SKINS, getWeapon, getSkin, freshMagazines, damageAtDistance, shotAngles, isWeaponId, normalizeOwnedWeapons, ownsWeapon, weaponModel } from './catalog.js';
 import { getOutfit, getCharacter, CHARACTERS } from './outfits.js';
@@ -88,7 +88,7 @@ export function tracePlayerBody(origin, direction, target, maxDistance = Infinit
 
 export function traceShot(shooter, players, now = nowMs(), world = WORLD, direction = aimDirection(shooter.yaw, shooter.pitch), range = getWeapon(shooter.weaponId).range) {
   const origin = { x: shooter.x, y: shooter.y + playerPose(shooter).eyeHeight, z: shooter.z };
-  let distance = wallDistance(origin, direction, range, world);
+  const wall = {}; let distance = wallDistance(origin, direction, range, world, wall);
   let victim = null, headshot = false, protectedTarget = null, bodyPart = null, damageMultiplier = 1, limbProgress = null;
   for (const target of players) {
     if (target.id === shooter.id || target.hp <= 0) continue;
@@ -102,7 +102,8 @@ export function traceShot(shooter, players, now = nowMs(), world = WORLD, direct
       bodyPart = hitHead ? 'head' : body.bodyPart; damageMultiplier = protectedTarget ? 0 : hitHead ? 1 : body.damageMultiplier; limbProgress = hitHead ? null : body.limbProgress;
     }
   }
-  return { victim, headshot, protectedTarget, bodyPart, damageMultiplier, limbProgress, origin, distance, end: { x: origin.x + direction.x * distance, y: origin.y + direction.y * distance, z: origin.z + direction.z * distance } };
+  const surface = !victim && !protectedTarget ? impactSurface(origin, direction, distance, wall.box, world) : null;
+  return { victim, headshot, protectedTarget, bodyPart, damageMultiplier, limbProgress, origin, distance, surface, end: surface?.point || { x: origin.x + direction.x * distance, y: origin.y + direction.y * distance, z: origin.z + direction.z * distance } };
 }
 
 const navigation = new WeakMap();
@@ -166,7 +167,7 @@ export class Room {
     this.startedAt = clock(); this.endsAt = this.startedAt + this.roundSeconds * 1000;
     this.roundId = newRoundId(); this.result = null;
     this.lastActivity = this.startedAt;
-    this.spawnUses = new Map(); this.droppedWeapons = new Map(); this.dropSerial = 0;
+    this.spawnUses = new Map(); this.droppedWeapons = new Map(); this.dropSerial = 0; this.impacts = new Map();
     for (let i = 0; i < clamp(Math.floor(Number(bots) || 0), 0, RULES.maxPlayers - 1); i++) this.addPlayer(`bot-${botId()}`, BOT_NAMES[i], true);
   }
 
@@ -326,7 +327,7 @@ export class Room {
     if (id !== this.hostId) throw new Error('방장만 새 라운드를 시작할 수 있습니다.');
     this.phase = 'active'; this.startedAt = this.clock(); this.endsAt = this.startedAt + this.roundSeconds * 1000;
     this.roundId = newRoundId(); this.result = null;
-    this.events = [{ type: 'restart' }]; this.droppedWeapons.clear();
+    this.events = [{ type: 'restart' }]; this.droppedWeapons.clear(); this.impacts.clear();
     this.spawnUses.clear(); for (const player of this.players.values()) player.hp = 0;
     for (const player of this.players.values()) { player.kills = 0; player.deaths = 0; player.weaponKills = {}; this.spawn(player); }
   }
@@ -429,6 +430,7 @@ export class Room {
 
   tick(dt) {
     const now = this.clock();
+    for (const [key, impact] of this.impacts) { if (now - impact.at >= BULLET_MARK_RULES.lifetimeMs) this.impacts.delete(key); else break; }
     for (const [id, drop] of this.droppedWeapons) { if (now >= drop.expiresAt) this.droppedWeapons.delete(id); else settleDroppedWeapon(drop, dt, this.world); }
     if (this.phase !== 'active') return;
     if (now >= this.endsAt) { this.finish(); return; }
@@ -477,8 +479,13 @@ export class Room {
     for (const angle of shotAngles(firingWeapon, ads, this.random, firingState)) {
       const direction = aimDirection((shot?.yaw ?? player.yaw) + angle.yaw, (shot?.pitch ?? player.pitch) + angle.pitch);
       const trace = traceShot(player, targets, now, this.world, direction, weapon.range);
-      const { headshot, end, distance, protectedTarget, bodyPart, damageMultiplier, limbProgress } = trace, victim = trace.victim ? this.players.get(trace.victim.id) : null;
-      rays.push({ end, hit: victim?.id || null, headshot, protectedTarget, bodyPart, damageMultiplier, limbProgress });
+      const { headshot, end, distance, protectedTarget, bodyPart, damageMultiplier, limbProgress, surface } = trace, victim = trace.victim ? this.players.get(trace.victim.id) : null;
+      if (surface) {
+        const mark = { ...surface, id: `${this.roundId}-${player.id}-${player.shotSerial}-${rays.length}`, surfaceId: surface.id, at: now, weaponId: weapon.id };
+        const key = `${surface.id}/${surface.normal.x},${surface.normal.y},${surface.normal.z}/${Math.round(end.x * BULLET_MARK_RULES.cellScale)},${Math.round(end.y * BULLET_MARK_RULES.cellScale)},${Math.round(end.z * BULLET_MARK_RULES.cellScale)}`;
+        this.impacts.delete(key); this.impacts.set(key, mark); while (this.impacts.size > BULLET_MARK_RULES.maxMarks) this.impacts.delete(this.impacts.keys().next().value);
+        rays.push({ end, hit: null, headshot, protectedTarget, bodyPart, damageMultiplier, limbProgress, surface: mark });
+      } else rays.push({ end, hit: victim?.id || null, headshot, protectedTarget, bodyPart, damageMultiplier, limbProgress });
       if (!victim || victim.hp <= 0) continue;
       const hit = hits.get(victim.id) || { victim, damage: 0, headshot: false };
       hit.damage += damageAtDistance(weapon, distance, headshot) * damageMultiplier;
@@ -543,6 +550,8 @@ export class Room {
     const humans = [...this.players.values()].filter((p) => !p.isBot);
     return { code: this.code, mapId: this.world.id, botDifficulty: this.botDifficulty, fragLimit: this.fragLimit, roundSeconds: this.roundSeconds, name: humans.find((p) => p.id === this.hostId)?.name || 'OPERATOR', players: humans.length, bots: this.players.size - humans.length, capacity: RULES.maxPlayers, phase: this.phase };
   }
+
+  impactHistory() { const now = this.clock(); return [...this.impacts.values()].filter((mark) => now - mark.at < BULLET_MARK_RULES.lifetimeMs).slice(-BULLET_MARK_RULES.historyLimit); }
 
   snapshot(flushEvents = true) {
     const now = this.clock();

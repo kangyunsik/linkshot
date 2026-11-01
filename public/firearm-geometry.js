@@ -54,12 +54,12 @@ export class FirearmGeometry {
     this.add(name, new THREE.TorusGeometry(radius, thickness, 6, 20), slot, position, parent, null, 'open-ring', 1);
   }
 
-  frame(name, width, height, depth, position, slot = 'black', parent = 'frame') {
+  frame(name, width, height, depth, position, slot = 'black', parent = 'frame', { rim = .007 } = {}) {
     const rounded = (w, h, r) => {
       const shape = new THREE.Shape(); shape.moveTo(-w / 2 + r, -h / 2); shape.lineTo(w / 2 - r, -h / 2); shape.quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
       shape.lineTo(w / 2, h / 2 - r); shape.quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2); shape.lineTo(-w / 2 + r, h / 2); shape.quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r); shape.lineTo(-w / 2, -h / 2 + r); shape.quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2); return shape;
     };
-    const shape = rounded(width, height, .009), opening = rounded(width - .014, height - .014, .006); shape.holes.push(opening);
+    const shape = rounded(width, height, .009), opening = rounded(width - rim * 2, height - rim * 2, .006); shape.holes.push(opening);
     const geometry = new THREE.ExtrudeGeometry(shape, { depth, steps: 1, curveSegments: 4, bevelEnabled: true, bevelSize: .001, bevelThickness: .001, bevelSegments: 1 }); geometry.translate(0, 0, -depth / 2);
     this.add(name, geometry, slot, position, parent, null, 'open-optic', 1);
   }

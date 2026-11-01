@@ -14,7 +14,7 @@ function start(data) {
     room = new Room('SOLO7', { mode: 'practice', mapId: data.mapId, bots: Math.max(1, Number(data.bots) || 2), botDifficulty: data.botDifficulty, fragLimit: data.fragLimit, roundSeconds: data.roundSeconds });
     room.addPlayer(playerId, data.name, false, data);
   }
-  send({ ...snapshot(), type: 'joined', id: playerId, events: [] });
+  send({ ...snapshot(), type: 'joined', id: playerId, events: [], impacts: room.impactHistory() });
   previousTick = performance.now();
   tickTimer = setInterval(() => { const now = performance.now(); (tutorial || room)?.tick(Math.min((now - previousTick) / 1000, 1 / 30)); previousTick = now; }, 1000 / RULES.tickRate);
   snapshotTimer = setInterval(() => { if (room) send(snapshot()); }, 1000 / RULES.snapshotRate);

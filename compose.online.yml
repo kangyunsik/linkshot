@@ -33,6 +33,7 @@ services:
     environment:
       ENGINE_BIND: 0.0.0.0
       ONLINE_API_URL: http://api:8080
+      ENGINE_PUBLIC_URL: ${ENGINE_PUBLIC_URL:-ws://127.0.0.1:8090/play}
       ENGINE_SECRET: ${ENGINE_SECRET:?Generate online-server/.env first}
       FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:-http://127.0.0.1:4173}
     ports: ["127.0.0.1:8090:8090"]

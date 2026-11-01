@@ -64,7 +64,7 @@ export function createGameServer({ port = Number(process.env.PORT) || 3000, host
   function enter(client, room, name, loadout = {}) {
     room.addPlayer(client.id, name, false, loadout);
     client.room = room.code;
-    send(client.socket, { ...room.snapshot(false), type: 'joined', id: client.id, events: [] });
+    send(client.socket, { ...room.snapshot(false), type: 'joined', id: client.id, events: [], impacts: room.impactHistory() });
   }
   wss.on('connection', (socket, request) => {
     if (request.headers.origin) {

@@ -40,7 +40,7 @@ try {
     const { game, measure, connection } = window.__benchmark;
     const summary = (values) => { const sorted = [...values].sort((a, b) => a - b); return { count: sorted.length, p50: sorted[Math.floor(sorted.length * .5)] || 0, p95: sorted[Math.floor(sorted.length * .95)] || 0, max: sorted.at(-1) || 0 }; };
     const result = Object.fromEntries(Object.entries(measure).map(([key, values]) => [key, Array.isArray(values) ? summary(values) : values]));
-    result.drawCalls = game.renderer.info.render.calls; result.triangles = game.renderer.info.render.triangles; result.corpses = game.combat.corpses.length;
+    result.drawCalls = game.renderer.info.render.calls; result.triangles = game.renderer.info.render.triangles; result.corpses = game.combat.corpses.length; result.bulletMarks = game.bulletMarks.items.length;
     game.dispose(); connection.close(); return result;
   });
   const root = new URL('../artifacts/', import.meta.url); await mkdir(root, { recursive: true });
