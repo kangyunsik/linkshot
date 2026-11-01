@@ -17,5 +17,12 @@
 .tutorial-hud li.done { color: #b4f0cf; }
 .tutorial-hud > small { color: #8aa99a; font-size: 9px; }
 .tutorial-actions { display: grid; gap: 8px; margin-top: 12px; }
+.online-account-panel { padding: 13px; border: 1px solid #516e7b; border-radius: 3px; margin-bottom: 17px; font-size: 11px; line-height: 1.8; }
+.online-account-panel > strong { font: 9px var(--mono); color: #add9ca; }
+.online-account-panel label { display: block; color: #c0d1d8; margin: 8px 0 4px; }
+.online-account-panel input { width: 100%; min-width: 0; padding: 9px; border: 1px solid #4a626b; background: #132029; color: #e0eae4; border-radius: 3px; }
+.online-account-panel form > div { display: grid; gap: 6px; margin-top: 12px; }
+.online-account-panel small { display: block; font-size: 9px; color: #9bada7; }
+.online-account-panel .secondary-button { font-size: 11px; min-height: 36px; }
 @media (max-width: 1100px) { .tutorial-hud { left: 20px; top: 235px; width: 290px; padding: 12px 15px; } }
 @media (max-width: 740px) { .tutorial-hud { top: 175px; width: 250px; } .tutorial-hud p,.tutorial-hud ul { font-size: 10px; } }

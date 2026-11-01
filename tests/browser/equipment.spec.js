@@ -29,6 +29,7 @@ test('G drops a rendered gun, equips a knife, ignores repeats and picks up the s
     await expect(page.locator('#hud-ammo')).toHaveText('—'); await expect(page.locator('#equipment-hint')).toContainText('줍기');
     await page.keyboard.press('KeyR'); await page.mouse.down({ button: 'right' }); await expect(page.locator('#scope-overlay')).toBeHidden(); await expect(page.locator('#reload-indicator')).toBeHidden(); await page.mouse.up({ button: 'right' });
     await page.mouse.click(600, 450); await expect.poll(() => page.evaluate(() => window.__equipment.sounds.length)).toBe(1);
+    await expect.poll(() => page.evaluate(() => { const item = [...window.__equipment.game.groundItems.values()][0]; return item.target.grounded && item.group.position.y < .002; })).toBe(true);
     const visual = await page.evaluate(async () => { const f = window.__equipment, { Box3 } = await import('/vendor/three.module.js'); f.game.scene.updateMatrixWorld(true); const item = [...f.game.groundItems.values()][0], bounds = new Box3().setFromObject(item.group.children[0]); return { items: f.game.groundItems.size, bottom: bounds.min.y, knife: f.game.activeModel.getObjectByName('knife-body')?.children.length, flash: f.game.muzzleFlash.visible, tracers: f.game.effects.length }; });
     expect(visual.items).toBe(1); expect(visual.bottom).toBeCloseTo(.025, 2); expect(visual.knife).toBeGreaterThan(0); expect(visual.flash).toBe(false); expect(visual.tracers).toBe(0);
     await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/knife-and-dropped-gun.png' });

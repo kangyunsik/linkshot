@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:18.3-alpine
+    environment:
+      POSTGRES_DB: linkshot
+      POSTGRES_USER: linkshot
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?Generate online-server/.env first}
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["online-db:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U linkshot -d linkshot"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  api:
+    build: ./online-server
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      ONLINE_BIND: 0.0.0.0
+      DATABASE_URL: jdbc:postgresql://db:5432/linkshot
+      DATABASE_USER: linkshot
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Generate online-server/.env first}
+      ENGINE_SECRET: ${ENGINE_SECRET:?Generate online-server/.env first}
+      ENGINE_PUBLIC_URL: ${ENGINE_PUBLIC_URL:-ws://127.0.0.1:8090/play}
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:-http://127.0.0.1:4173}
+    ports: ["127.0.0.1:8080:8080"]
+  engine:
+    build:
+      context: .
+      dockerfile: server/Dockerfile.online
+    depends_on: [api]
+    environment:
+      ENGINE_BIND: 0.0.0.0
+      ONLINE_API_URL: http://api:8080
+      ENGINE_SECRET: ${ENGINE_SECRET:?Generate online-server/.env first}
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:-http://127.0.0.1:4173}
+    ports: ["127.0.0.1:8090:8090"]
+volumes:
+  online-db:

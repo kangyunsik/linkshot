@@ -64,6 +64,8 @@ export function pngMetadata(bytes) {
 export function publicationRisk(file) {
   const name = path.posix.basename(file);
   if (/^(?:node_modules|\.toolchain|artifacts|dist|release|test-results|playwright-report|\.vercel)\//.test(file)) return 'private-build-output';
+  if (/^online-server\/target\//.test(file) || /\.(?:jar|war|class)$/i.test(name)) return 'private-build-output';
+  if (/^next-plan\.md$/i.test(name)) return 'local-planning-file';
   if (/^\.env(?:\.|$)/.test(name) && !/\.(?:example|sample)$/.test(name)) return 'environment-file';
   if (/^(?:\.npmrc|\.pypirc|\.netrc|\.htpasswd|id_rsa|id_ed25519)$/.test(name) || /\.(?:key|p12|pfx|keystore|jks)$/i.test(name) || /(?:credentials|service-account).*\.json$/i.test(name)) return 'credential-file';
   if (/^(?:profile|profiles|linkshot-profile)(?:[.-].*)?\.json(?:\.tmp)?$/i.test(name) || /^(?:data|\.linkshot)\//.test(file)) return 'personal-progression-data';

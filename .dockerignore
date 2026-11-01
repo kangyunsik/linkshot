@@ -1,0 +1,15 @@
+.git
+node_modules
+.toolchain
+dist
+release
+artifacts
+test-results
+playwright-report
+data
+.linkshot
+.env*
+**/.env*
+**/profile*.json
+online-server/target
+next-plan.md

@@ -5,7 +5,8 @@ import { MAPS, getMap, RULES, normalizeRoundOptions, NETWORK_PROTOCOL } from '/s
 import { WEAPONS, SKINS, getWeapon, getSkin, ownsWeapon } from '/shared/catalog.js';
 import { ArmoryPreview } from './weapon-model.js';
 import { SoloConnection } from './solo-connection.js';
-import { APP_MODE, PROFILE_STORAGE } from './runtime-config.js';
+import * as runtime from './runtime-config.js';
+import { OnlineApi } from './online-api.js';
 import { ProfileStore, PROFILE_KEY } from './profile.js';
 import { profileStats, POINT_RULES, weaponMastery } from '/shared/progression.js';
 import { OUTFITS, getOutfit, CHARACTERS, getCharacter } from '/shared/outfits.js';
@@ -15,6 +16,7 @@ import { PLAY_MODES, getPlayMode, recordsLocalProgress } from './play-modes.js';
 import { TRAINING_WORLD } from '/shared/training-world.js';
 
 const $ = (id) => document.getElementById(id);
+const { APP_MODE, PROFILE_STORAGE, ONLINE_SERVER_URL = '' } = runtime;
 const defaults = { sensitivity: 1, fov: 82, volume: 65, quality: 'normal' };
 // Retain prototype storage keys so existing names, settings and loadouts survive the LINKSHOT rename.
 function stored(key, fallback) { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } }
@@ -41,6 +43,8 @@ selectedOutfitId = profileStore.profile.equippedOutfitId;
 const audio = new GameAudio(settings);
 audio.muted = stored('sector07-muted', 'false') === 'true';
 let socket, game = null, connected = false, mode = SOLO ? 'practice' : 'lan', transportKind = SOLO ? 'local' : 'lan', botCount = 2, rooms = [], lanUrl = location.origin;
+let onlineApi = null, onlineUser = null, onlineAvailable = false, onlineBusy = false, onlineReason = '';
+if (ONLINE_SERVER_URL) { try { onlineApi = new OnlineApi(ONLINE_SERVER_URL); } catch (error) { onlineReason = error.message; } }
 let botDifficulty = getBotDifficulty(stored('linkshot-bot-difficulty', 'beginner')).id;
 let savedRound = {}; try { savedRound = JSON.parse(stored('linkshot-round-options', '{}')) || {}; } catch { /* Defaults. */ }
 let roundOptions = normalizeRoundOptions(savedRound);
@@ -87,9 +91,10 @@ function setBusy(value) {
 
 function updateConnection(value) {
   connected = value;
-  $('connection-status').classList.toggle('offline', !value);
-  $('connection-status').lastElementChild.textContent = value ? transportKind === 'local' ? 'SOLO READY · LOCAL SIMULATION' : 'LAN SERVER ONLINE' : transportKind === 'online' ? 'ONLINE SERVER NOT CONFIGURED' : transportKind === 'local' ? '시뮬레이션 준비 중' : SOLO ? 'LAN 서버 페이지로 접속하세요' : '서버 연결 대기 중';
-  document.querySelector('.connection-dot').style.background = value ? '#a3dbc9' : '#ff6249';
+  const serviceReady = value || transportKind === 'online' && onlineAvailable;
+  $('connection-status').classList.toggle('offline', !serviceReady);
+  $('connection-status').lastElementChild.textContent = value ? transportKind === 'local' ? 'SOLO READY · LOCAL SIMULATION' : 'LAN SERVER ONLINE' : transportKind === 'online' ? onlineAvailable ? 'ONLINE SERVICES READY' : onlineApi ? 'ONLINE SERVER OFFLINE' : 'ONLINE SERVER NOT CONFIGURED' : transportKind === 'local' ? '시뮬레이션 준비 중' : SOLO ? 'LAN 서버 페이지로 접속하세요' : '서버 연결 대기 중';
+  document.querySelector('.connection-dot').style.background = serviceReady ? '#a3dbc9' : '#ff6249';
   $('create-button').disabled = !value || busy;
   $('join-form').querySelector('button').disabled = !value || busy;
 }
@@ -237,7 +242,8 @@ function setMode(value) {
   $('create-button').querySelector('span').textContent = selected.action; $('mode-description').textContent = selected.description;
   const unavailable = selected.transport === 'online' || SOLO && mode === 'lan';
   $('mode-unavailable').hidden = !unavailable;
-  $('mode-unavailable').textContent = selected.transport === 'online' ? '중앙 온라인 서버가 아직 구성되지 않았습니다. Java/Spring Boot 계정·매칭 서버 연결 후 제공할 모드이며, 현재는 매칭이나 경쟁 점수를 생성하지 않습니다.' : '이 페이지에는 LAN 서버가 없습니다. 아래 주소로 로컬 서버 페이지를 열어 주세요.';
+  $('mode-unavailable').textContent = selected.transport === 'online' ? onlineAvailable ? 'Java/Spring Boot 온라인 서비스에 연결되었습니다. 계정은 이용할 수 있으며 일반·랭크 매칭/점수 체계는 후속 단계에서 활성화합니다.' : onlineReason || '중앙 온라인 서버가 아직 구성되지 않았습니다. Java/Spring Boot 계정·매칭 서버 연결 후 제공할 모드이며, 현재는 매칭이나 경쟁 점수를 생성하지 않습니다.' : '이 페이지에는 LAN 서버가 없습니다. 아래 주소로 로컬 서버 페이지를 열어 주세요.';
+  $('online-account-panel').hidden = selected.transport !== 'online' || !onlineApi; renderOnlineAccount();
   $('lan-connect-guide').hidden = !(SOLO && mode === 'lan');
   $('deploy-note').lastChild.textContent = mode === 'lan' ? ' 방 코드로 친구를 초대할 수 있어요' : mode === 'tutorial' ? ' 약 3–5분 · 언제든 건너뛰기 / 다시 시작' : ' 튜토리얼·혼자 연습은 서버 없이 이용할 수 있어요';
   $('bot-description').textContent = mode === 'lan' ? '친구를 기다리는 동안 가볍게' : '함께 실력을 쌓아갈 연습 상대';
@@ -258,6 +264,27 @@ function handleTutorialState(data) {
   if (tutorialCompletedRound === data.room.roundId) return;
   tutorialCompletedRound = data.room.roundId; store('linkshot-tutorial-v1', 'completed'); $('tutorial-recommendation').hidden = true;
   game.clearInput(); if (game.locked) document.exitPointerLock(); showMenu(true);
+}
+
+function renderOnlineAccount() {
+  $('online-server-state').textContent = onlineAvailable ? 'SPRING ONLINE SERVICES · 연결됨' : '온라인 서버에 연결되어 있지 않습니다';
+  $('online-auth-form').hidden = !!onlineUser; $('online-profile-summary').hidden = !onlineUser; $('online-logout').hidden = !onlineUser;
+  if (onlineUser) $('online-profile-summary').textContent = `${onlineUser.callsign} · 온라인 ${onlineUser.points} LP · ${onlineUser.kills} K / ${onlineUser.deaths} D · 일반 ${onlineUser.casualRating} · ${onlineUser.rankTier === 'UNRANKED' ? '랭크 미배치' : onlineUser.rankTier}`;
+  for (const id of ['online-login', 'online-register', 'online-logout']) $(id).disabled = onlineBusy || !onlineAvailable;
+}
+async function connectOnlineServices() {
+  if (!onlineApi) return;
+  try { const health = await onlineApi.health(); if (health.service !== 'linkshot-online') throw new Error('온라인 서버 종류를 확인하세요.'); onlineAvailable = true; onlineReason = ''; try { onlineUser = await onlineApi.profile(); } catch (error) { if (error.status !== 401) throw error; } }
+  catch { onlineAvailable = false; onlineReason = '온라인 서버에 연결할 수 없습니다. Java/Spring Boot 서버 주소를 확인하세요. 튜토리얼과 혼자 연습은 계속 이용할 수 있습니다.'; }
+  renderOnlineAccount(); if (getPlayMode(mode).transport === 'online') setMode(mode);
+}
+async function onlineAuthenticate(register = false) {
+  if (!onlineApi || onlineBusy || !onlineAvailable || !$('online-auth-form').reportValidity()) return;
+  onlineBusy = true; renderOnlineAccount(); $('online-auth-status').textContent = '온라인 계정 확인 중…';
+  const username = $('online-username').value, password = $('online-password').value;
+  try { if (register) await onlineApi.register(username, password, $('online-callsign').value || 'OPERATOR'); onlineUser = await onlineApi.login(username, password); $('online-auth-status').textContent = '온라인 로그인 완료 · 기기 기록은 변경하지 않았습니다.'; }
+  catch (error) { $('online-auth-status').textContent = error.message; }
+  finally { $('online-password').value = ''; onlineBusy = false; renderOnlineAccount(); }
 }
 
 function updateBots() {
@@ -480,6 +507,13 @@ document.querySelector('.mode-switch').addEventListener('keydown', (event) => {
   setMode(PLAY_MODES[next].id); $(`mode-${PLAY_MODES[next].id}`).focus();
 });
 $('recommend-tutorial').addEventListener('click', () => setMode('tutorial'));
+$('online-auth-form').addEventListener('submit', (event) => { event.preventDefault(); void onlineAuthenticate(); });
+$('online-register').addEventListener('click', () => { void onlineAuthenticate(true); });
+$('online-logout').addEventListener('click', async () => {
+  if (!onlineApi || onlineBusy) return; onlineBusy = true; renderOnlineAccount();
+  try { await onlineApi.logout(); onlineUser = null; $('online-auth-status').textContent = '온라인 로그아웃 완료'; } catch (error) { $('online-auth-status').textContent = error.message; }
+  finally { onlineBusy = false; renderOnlineAccount(); }
+});
 $('dismiss-tutorial').addEventListener('click', () => { store('linkshot-tutorial-v1', 'dismissed'); $('tutorial-recommendation').hidden = true; });
 $('lan-connect-guide').addEventListener('submit', (event) => {
   event.preventDefault();
@@ -583,3 +617,4 @@ if (SOLO) {
   $('help-dialog').querySelector('.rooms-footnote').textContent = '튜토리얼과 혼자 연습은 서버 없이 실행됩니다. LAN대전은 로컬 서버 페이지로 접속하며, 일반·랭크는 별도의 중앙 온라인 서버가 필요합니다.';
 }
 updateSettings(); updateBots(); setMode(mode); updateRooms([]);
+void connectOnlineServices();
