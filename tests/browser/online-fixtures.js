@@ -30,6 +30,8 @@ export async function onlinePage(context, apiUrl, origin, mode, index = 0) {
   await context.addInitScript((profile) => { try { if (!localStorage.getItem('linkshot-profile-v1')) localStorage.setItem('linkshot-profile-v1', JSON.stringify(profile)); localStorage.setItem('sector07-settings', JSON.stringify({ volume: 0, quality: 'low', fov: 82, sensitivity: 1 })); } catch {} }, local);
   const page = await context.newPage(), state = { latest: null, errors: [] }; page.on('pageerror', (error) => state.errors.push(error.message)); page.on('websocket', (socket) => socket.on('framereceived', ({ payload }) => { try { const data = JSON.parse(payload.toString()); if (['joined', 'state'].includes(data.type)) state.latest = data; } catch {} }));
   await page.goto(origin); await page.getByRole('tab', { name: mode, exact: true }).click(); await expect(page.locator('#online-server-state')).toContainText('연결됨');
+  await page.locator('#profile-button').click();
   await page.locator('#online-username').fill('ui_' + randomBytes(7).toString('hex')); await page.locator('#online-password').fill('test-only-long-passphrase'); await page.locator('#online-callsign').fill(`PLAYER ${index}`); await page.locator('#online-register').click(); await expect(page.locator('#online-profile-summary')).toContainText(`PLAYER ${index} · 온라인 0 LP`);
+  await page.getByLabel('프로필 닫기').click(); await expect(page.locator('#profile-dialog')).toBeHidden();
   return { page, state };
 }

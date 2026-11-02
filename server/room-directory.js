@@ -1,6 +1,7 @@
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { Room, createRoomCode } from './game.js';
+import { LobbyRoom } from './room-lobby.js';
 
 const derive = promisify(scrypt);
 let pendingHashes = 0;
@@ -34,7 +35,8 @@ export class RoomDirectory {
     }
     const salt = password ? randomBytes(16) : null, key = password ? await passwordKey(password, salt) : null;
     if (this.rooms.size >= this.capacity()) throw new Error('서버의 방이 모두 사용 중입니다.');
-    const room = new Room(createRoomCode(this.rooms), { ...options, clock: this.clock, mode: this.mode === 'lan' && options.mode === 'practice' ? 'practice' : this.mode });
+    const RoomType = options.staging === true && options.mode !== 'practice' ? LobbyRoom : Room;
+    const room = new RoomType(createRoomCode(this.rooms), { ...options, clock: this.clock, mode: this.mode === 'lan' && options.mode === 'practice' ? 'practice' : this.mode });
     if (key) this.passwords.set(room, { salt, key });
     this.rooms.set(room.code, room); return room;
   }

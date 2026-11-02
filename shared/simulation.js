@@ -341,7 +341,7 @@ export class Room {
   }
 
   botInput(bot, now, dt) {
-    const behavior = this.botBehavior;
+    const behavior = bot.botDifficulty ? getBotDifficulty(bot.botDifficulty).behavior : this.botBehavior;
     while (bot.spawnExitPath?.length && Math.hypot(bot.spawnExitPath[0].x - bot.x, bot.spawnExitPath[0].z - bot.z) < 0.25) bot.spawnExitPath.shift();
     if (bot.spawnExitPath?.length) {
       const point = bot.spawnExitPath[0], targetYaw = Math.atan2(-(point.x - bot.x), -(point.z - bot.z));
@@ -443,6 +443,7 @@ export class Room {
     if (this.phase !== 'active') return;
     if (now >= this.endsAt) { this.finish(); return; }
     for (const player of this.players.values()) {
+      if (player.roomStatus === 'waiting') continue;
       if (player.hp <= 0) { if (now >= player.respawnAt) this.spawn(player); else continue; }
       const input = player.isBot ? this.botInput(player, now, dt) : now - player.lastInput > 500 ? { ...EMPTY_INPUT, yaw: player.yaw, pitch: player.pitch, weaponId: player.weaponId } : player.input;
       movePlayer(player, input, dt, this.world, now);
@@ -472,16 +473,16 @@ export class Room {
     player.triggerShotIndex++; player.shotSerial++;
     player.ammo--; player.lastShot = now; player.protectedUntil = 0;
     player.magazines[player.weaponId] = player.ammo;
-    const withinBurst = weapon.burstCount && player.burstLeft > 1;
-    player.nextFireAt = now + Math.max(weapon.fireSeconds * 1000, player.isBot && !withinBurst ? this.botBehavior.shotIntervalMs : 0);
+    const withinBurst = weapon.burstCount && player.burstLeft > 1, behavior = player.botDifficulty ? getBotDifficulty(player.botDifficulty).behavior : this.botBehavior;
+    player.nextFireAt = now + Math.max(weapon.fireSeconds * 1000, player.isBot && !withinBurst ? behavior.shotIntervalMs : 0);
     if (weapon.burstCount) { player.burstLeft = Math.max(0, (player.burstLeft || 0) - 1); if (player.ammo === 0) player.burstLeft = 0; if (!player.burstLeft) player.nextFireAt = Math.max(player.nextFireAt, now + weapon.burstPause * 1000); }
     if (player.isBot && player.botBrain?.burstLeft > 0) {
       player.botBrain.burstLeft--;
-      if (player.botBrain.burstLeft === 0) player.botBrain.nextBurstAt = now + this.botBehavior.burstPauseMinMs + this.random() * (this.botBehavior.burstPauseMaxMs - this.botBehavior.burstPauseMinMs);
+      if (player.botBrain.burstLeft === 0) player.botBrain.nextBurstAt = now + behavior.burstPauseMinMs + this.random() * (behavior.burstPauseMaxMs - behavior.burstPauseMinMs);
     }
     const hits = new Map(), rays = [];
     const origin = { x: player.x, y: player.y + playerPose(player).eyeHeight, z: player.z };
-    const firingWeapon = player.isBot ? { ...weapon, spread: weapon.spread + this.botBehavior.shotSpread, adsSpread: weapon.adsSpread + this.botBehavior.shotSpread } : weapon;
+    const firingWeapon = player.isBot ? { ...weapon, spread: weapon.spread + behavior.shotSpread, adsSpread: weapon.adsSpread + behavior.shotSpread } : weapon;
     const targets = shot?.viewTime != null && !player.isBot ? this.playersAt(clamp(shot.viewTime, now - 200, now)) : [...this.players.values()];
     const firingState = shot?.movement ? { ...player, ...shot.movement, grounded: player.grounded && shot.movement.grounded } : player;
     for (const angle of shotAngles(firingWeapon, ads, this.random, firingState)) {
@@ -551,9 +552,9 @@ export class Room {
     if (this.phase === 'ended') return;
     this.phase = 'ended';
     const winnerTeam = this.gameType === 'teams' ? this.teamScores.blue > this.teamScores.red ? 'blue' : this.teamScores.red > this.teamScores.blue ? 'red' : null : null;
-    const winner = [...this.players.values()].filter((p) => this.gameType !== 'teams' || p.teamId === winnerTeam).sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)[0];
+    const winner = [...this.players.values()].filter((p) => p.roomStatus !== 'waiting' && (this.gameType !== 'teams' || p.teamId === winnerTeam)).sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)[0];
     const winnerName = this.gameType === 'teams' ? TEAM_NAMES[winnerTeam] || '무승부' : winner?.name || 'OPERATOR';
-    const rewards = Object.fromEntries([...this.players.values()].filter((player) => !player.isBot).map((player) => [player.id, { kills: player.kills, deaths: player.deaths, weaponKills: { ...player.weaponKills }, ...roundReward(player.kills, this.gameType === 'teams' ? !!winnerTeam && player.teamId === winnerTeam : player.id === winner?.id), ...(this.mode === 'custom' ? { completion: 0, killBonus: 0, winBonus: 0, points: 0 } : {}) }]));
+    const rewards = Object.fromEntries([...this.players.values()].filter((player) => !player.isBot && player.roomStatus !== 'waiting').map((player) => [player.id, { kills: player.kills, deaths: player.deaths, weaponKills: { ...player.weaponKills }, ...roundReward(player.kills, this.gameType === 'teams' ? !!winnerTeam && player.teamId === winnerTeam : player.id === winner?.id), ...(this.mode === 'custom' ? { completion: 0, killBonus: 0, winBonus: 0, points: 0 } : {}) }]));
     this.result = { roundId: this.roundId, winnerId: winner?.id || null, winnerName, winnerKills: this.gameType === 'teams' ? this.teamScores[winnerTeam] || 0 : winner?.kills || 0, rewards, ...(this.gameType === 'teams' ? { winnerTeam, teamScores: { ...this.teamScores } } : {}) };
     this.events.push({ type: 'ended', winner: winnerName, winnerId: winner?.id || null, ...(this.gameType === 'teams' ? { winnerTeam } : {}) });
   }

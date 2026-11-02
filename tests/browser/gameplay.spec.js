@@ -244,10 +244,11 @@ test('holding ADS through ROUND OVER cannot open browser context menus on overla
 test('host kill/time settings persist and are displayed in the actual LAN match', async ({ page }) => {
   let state; page.on('websocket', (socket) => socket.on('framereceived', ({ payload }) => { try { const data = JSON.parse(String(payload)); if (data.type === 'state') state = data; } catch { /* Non-JSON. */ } }));
   await page.goto('/'); await expect(page.getByText('LAN SERVER ONLINE')).toBeVisible();
+  await page.locator('#create-button').click();
   await page.getByLabel('목표 킬 수', { exact: true }).fill('7'); await page.getByLabel('제한 시간 (분)', { exact: true }).fill('2'); await page.getByLabel('제한 시간 (분)', { exact: true }).press('Tab');
-  await page.reload(); await expect(page.getByLabel('목표 킬 수', { exact: true })).toHaveValue('7'); await expect(page.getByLabel('제한 시간 (분)', { exact: true })).toHaveValue('2');
+  await page.reload(); await page.locator('#create-button').click(); await expect(page.getByLabel('목표 킬 수', { exact: true })).toHaveValue('7'); await expect(page.getByLabel('제한 시간 (분)', { exact: true })).toHaveValue('2');
   await page.getByRole('button', { name: '봇 한 명 줄이기' }).click(); await page.getByRole('button', { name: '봇 한 명 줄이기' }).click();
-  await page.getByRole('button', { name: '방 만들고 출격', exact: true }).click();
+  await page.locator('#room-create-confirm').click(); await expect(page.locator('#room-lobby-dialog')).toBeVisible(); await page.locator('#room-lobby-action').click();
   await expect(page.locator('#hud-frag-limit')).toHaveText('FIRST TO 7');
   await expect.poll(() => state?.room.roundSeconds).toBe(120); expect(state.room.fragLimit).toBe(7);
   await page.getByRole('button', { name: '로비로 나가기', exact: true }).click();

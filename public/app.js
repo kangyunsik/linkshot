@@ -10,6 +10,8 @@ import { OnlineApi } from './online-api.js';
 import { OnlineConnection } from './online-connection.js';
 import { CustomConnection } from './custom-connection.js';
 import { MatchIntro } from './match-intro.js';
+import { DialogMotion } from './dialog-motion.js';
+import { RoomLobbyView } from './room-lobby.js';
 import { ProfileStore, PROFILE_KEY } from './profile.js';
 import { profileStats, POINT_RULES, weaponMastery } from '/shared/progression.js';
 import { OUTFITS, getOutfit, CHARACTERS, getCharacter } from '/shared/outfits.js';
@@ -35,7 +37,9 @@ const settings = {
 const SOLO = APP_MODE === 'solo';
 let savedLoadout = {}; try { savedLoadout = JSON.parse(stored('sector07-loadout', '{}')) || {}; } catch { /* Use catalog defaults. */ }
 const loadout = { mapId: getMap(savedLoadout.mapId).id, weaponId: getWeapon(savedLoadout.weaponId).id, skinId: getSkin(savedLoadout.skinId).id };
-let preview = null;
+let preview = null, onlinePreview = null, roomSession = null;
+const dialogs = new DialogMotion();
+const roomLobby = new RoomLobbyView((data) => send(data));
 let operatorPreview = null, selectedOutfitId = 'field', purchaseRequestId = null, shopBusy = false;
 let selfSessionId = null, lastRoundReward = null;
 let tutorialCompletedRound = null;
@@ -57,7 +61,7 @@ const onlineWeaponWrap = document.createElement('div'); onlineWeaponWrap.id = 'o
 const onlineWeaponLabel = document.createElement('label'); onlineWeaponLabel.htmlFor = 'online-weapon-choice'; onlineWeaponLabel.textContent = '온라인 출격 무기';
 const onlineWeaponChoice = document.createElement('select'); onlineWeaponChoice.id = 'online-weapon-choice';
 for (const weapon of WEAPONS) { const option = document.createElement('option'); option.value = weapon.id; option.textContent = weapon.name; onlineWeaponChoice.append(option); }
-const onlineWeaponNote = document.createElement('small'); onlineWeaponNote.id = 'online-weapon-note'; onlineWeaponWrap.append(onlineWeaponLabel, onlineWeaponChoice, onlineWeaponNote); $('online-auth-form').before(onlineWeaponWrap);
+const onlineWeaponNote = document.createElement('small'); onlineWeaponNote.id = 'online-weapon-note'; onlineWeaponWrap.append(onlineWeaponLabel, onlineWeaponChoice, onlineWeaponNote); $('online-loadout-content').append(onlineWeaponWrap);
 if (ONLINE_SERVER_URL) { try { onlineApi = new OnlineApi(ONLINE_SERVER_URL); } catch (error) { onlineReason = error.message; } }
 let botDifficulty = getBotDifficulty(stored('linkshot-bot-difficulty', 'beginner')).id;
 let savedRound = {}; try { savedRound = JSON.parse(stored('linkshot-round-options', '{}')) || {}; } catch { /* Defaults. */ }
@@ -98,6 +102,7 @@ function setBusy(value) {
   busy = value; $('loading-overlay').hidden = !value;
   updateDeployButton();
   $('join-form').querySelector('button').disabled = value || !connected;
+  $('room-create-confirm').disabled = value; $('room-password-form').querySelector('button[type="submit"]').disabled = value;
   clearTimeout(requestTimeout);
   if (value) { $('loading-overlay').querySelector('h2').textContent = '전장에 연결하는 중'; $('loading-overlay').querySelector('.eyebrow').textContent = 'ESTABLISHING CONNECTION'; }
   if (value) requestTimeout = setTimeout(() => {
@@ -114,15 +119,22 @@ function updateConnection(value) {
   document.querySelector('.connection-dot').style.background = serviceReady ? '#a3dbc9' : '#ff6249';
   updateDeployButton();
   $('join-form').querySelector('button').disabled = !value || busy;
-  $('room-browser-button').disabled = !value || busy;
+  $('room-browser-button').disabled = busy || (mode === 'custom' && !onlineUser ? !onlineAvailable : !value);
+  renderModeBrief();
+}
+
+function renderModeBrief() {
+  const selected = getPlayMode(mode);
+  $('mode-info-title').textContent = `${selected.name} · 모드 안내`; $('mode-info-description').textContent = selected.description;
+  $('mode-service-status').textContent = usesOnlineServices() ? !onlineAvailable ? '온라인 연결 안내' : onlineUser ? '온라인 준비' : '로그인 안내' : mode === 'lan' ? connected ? 'LAN 준비' : 'LAN 연결 안내' : '로컬 실행 · 안내';
 }
 
 function isOnlineRoom(room = game?.room) { return ['casual', 'ranked'].includes(room?.mode); }
 function usesOnlineServices(value = mode) { return ['online', 'custom'].includes(getPlayMode(value).transport); }
 function updateDeployButton() {
   const online = getPlayMode(mode).transport === 'online', ready = onlineQueueState?.state === 'READY', blocked = ['QUEUED', 'ASSIGNED', 'ABANDONED'].includes(onlineQueueState?.state);
-  $('create-button').disabled = busy || (online ? onlineBusy || !onlineAvailable || !onlineUser || blocked || !ready && !onlineCapabilities.matchmaking : !connected);
-  if (mode === 'custom') $('create-button').disabled = busy || onlineBusy || !onlineUser || !onlineAvailable || !onlineCapabilities.customRooms || !connected;
+  $('create-button').disabled = busy || (online ? onlineBusy || !onlineApi || !onlineAvailable || !!onlineUser && (blocked || !ready && !onlineCapabilities.matchmaking) : !connected);
+  if (mode === 'custom') $('create-button').disabled = busy || onlineBusy || !onlineApi || !onlineAvailable || !!onlineUser && (!onlineCapabilities.customRooms || !connected);
   if (online) $('create-button').querySelector('span').textContent = ready ? '배정된 경기 입장' : blocked ? '매칭 대기 중…' : getPlayMode(mode).action;
 }
 
@@ -141,11 +153,11 @@ function updateRooms(list) {
     const row = document.createElement('div'); row.className = 'room-row';
     const details = document.createElement('div'); details.className = 'room-details';
     const code = document.createElement('strong'); code.textContent = room.code;
-    const name = document.createElement('small'); name.textContent = `${room.passwordProtected ? '🔒 비밀번호 · ' : ''}${getMap(room.mapId).name} · ${room.name} · ${room.gameType === 'teams' ? '팀전' : '개인전'} · 봇 ${room.bots}명 · ${room.fragLimit || RULES.fragLimit}킬/${Math.round((room.roundSeconds || RULES.roundSeconds) / 60)}분 · ${room.phase === 'ended' ? '종료' : '교전 중'}`;
+    const name = document.createElement('small'); name.textContent = `${room.passwordProtected ? '🔒 비밀번호 · ' : ''}${getMap(room.mapId).name} · ${room.name} · ${room.gameType === 'teams' ? '팀전' : '개인전'} · AI ${room.bots}명 · ${room.fragLimit || RULES.fragLimit}킬/${Math.round((room.roundSeconds || RULES.roundSeconds) / 60)}분 · ${room.phase === 'ended' ? '라운드 종료' : room.phase === 'lobby' ? '대기 중' : `교전 중 ${room.playing ?? room.players}명`}`;
     details.append(code, name);
     const count = document.createElement('span'); count.textContent = `${room.players}/${room.capacity}`;
     const button = document.createElement('button'); button.textContent = '참가'; button.disabled = room.players >= room.capacity;
-    button.addEventListener('click', () => { $('rooms-dialog').close(); if (room.passwordProtected) askRoomPassword(room.code); else requestJoin(room.code); });
+    button.addEventListener('click', () => { if (room.passwordProtected) askRoomPassword(room.code); else requestJoin(room.code); });
     row.append(details, count, button); container.append(row);
   }
 }
@@ -187,14 +199,14 @@ function bindConnection(connection, kind) {
       $('hud-ping').textContent = `${latency} MS`;
       $('connection-status').title = kind === 'local' ? `브라우저 시뮬레이션 응답: ${latency}ms` : `서버 왕복 지연: ${latency}ms`;
     }
-    if (data.type === 'joined') { clearTimeout(requestTimeout); pendingJoinCode = null; $('room-join-password').value = ''; if ($('room-password-dialog').open) $('room-password-dialog').close(); selfSessionId = data.id; if (kind === 'online') { onlineActiveMatch = data.online?.matchId; onlineReconnectUntil = 0; } syncProgress(data); enterGame(data); }
-    if (data.type === 'state') { syncProgress(data); game?.applySnapshot(data); handleTutorialState(data); handleOnlineState(data); }
-    if (data.type === 'left') { selfSessionId = null; if (game) leaveGame(false); }
-    if (data.type === 'error') { setBusy(false); if (data.code === 'ROOM_PASSWORD' && pendingJoinCode) { askRoomPassword(pendingJoinCode); $('room-password-error').textContent = data.message; } else toast(data.message, true); }
+    if (data.type === 'joined') { clearTimeout(requestTimeout); pendingJoinCode = null; $('room-join-password').value = ''; dialogs.closeAll(); selfSessionId = data.id; if (kind === 'online') { onlineActiveMatch = data.online?.matchId; onlineReconnectUntil = 0; } syncProgress(data); if (data.room.staging) handleRoomSession(data); else enterGame(data); }
+    if (data.type === 'state') { syncProgress(data); if (data.room?.staging) handleRoomSession(data); else { game?.applySnapshot(data); handleTutorialState(data); handleOnlineState(data); } }
+    if (data.type === 'left') { if (game || roomSession) leaveGame(false); selfSessionId = null; }
+    if (data.type === 'error') { setBusy(false); if (data.code === 'ROOM_PASSWORD' && pendingJoinCode) { askRoomPassword(pendingJoinCode); $('room-password-error').textContent = data.message; } else { if (roomSession) $('room-lobby-status').textContent = data.message; toast(data.message, true); } }
   });
   connection.addEventListener('close', (event) => {
     if (socket !== connection) return;
-    const wasPlaying = !!game, phase = game?.room?.phase, ended = phase === 'ended';
+    const wasPlaying = !!game || !!roomSession, phase = game?.room?.phase, ended = phase === 'ended';
     updateConnection(false); setBusy(false); updateRooms([]);
     if (kind === 'online') {
       matchIntro.hide(); onlineEntering = false;
@@ -231,10 +243,10 @@ function askRoomPassword(code) {
   pendingJoinCode = code; $('room-password-code').textContent = `방 코드 ${code}`; $('room-password-error').textContent = ''; $('room-join-password').value = ''; openDialog('room-password-dialog'); $('room-join-password').focus();
 }
 function requestJoin(code, password = '') {
-  if (busy || game) return;
+  if (busy || game || roomSession) return;
   if (!connected) { toast('먼저 로컬 서버에 연결되어야 합니다.', true); return; }
   if (!/^[A-Z2-9]{5}$/.test(code)) { toast('5자리 방 코드를 입력해 주세요.', true); return; }
-  pendingJoinCode = code; setBusy(true);
+  pendingJoinCode = code; dialogs.closeAll(); setBusy(true);
   send(transportKind === 'custom' ? { type: 'join', code, password, weaponId: onlineSelectedWeapon, skinId: loadout.skinId } : { type: 'join', code, password, name: callsign(), ...profileLoadout() });
 }
 
@@ -248,6 +260,18 @@ function showMenu(visible) {
   const training = game.room?.mode === 'tutorial'; $('tutorial-actions').hidden = !training;
   if (training && game.room.phase === 'training-complete') { $('pause-title').textContent = 'TRAINING COMPLETE'; $('pause-description').textContent = '기초 훈련을 마쳤습니다. 다시 도전하거나 혼자 연습으로 이어가세요.'; $('resume-button').hidden = true; }
   else $('resume-button').hidden = false;
+  $('return-room-button').hidden = !game.room.staging;
+}
+
+function handleRoomSession(data) {
+  roomSession = data; const self = data.players.find((p) => p.id === selfSessionId);
+  if (!self) return;
+  if (self.roomStatus === 'waiting') {
+    if (game) { game.dispose(); game = null; for (const id of ['pause-overlay', 'round-overlay', 'respawn-overlay', 'scoreboard-overlay']) $(id).hidden = true; }
+    $('lobby').hidden = false; $('game-shell').hidden = true; setBusy(false);
+    roomLobby.update(data, selfSessionId); dialogs.show($('room-lobby-dialog'));
+  } else if (!game) { dialogs.closeAll(); setBusy(true); void enterGame({ ...data, id: selfSessionId }); }
+  else game.applySnapshot(data);
 }
 
 async function enterGame(data) {
@@ -283,7 +307,7 @@ function leaveGame(notify = true) {
   matchIntro.hide(); onlineEntering = false;
   const online = isOnlineRoom(); if (notify && online) { onlineReconnectUntil = 0; clearTimeout(reconnectTimeout); }
   if (notify) send({ type: 'leave' });
-  game?.dispose(); game = null;
+  game?.dispose(); game = null; roomSession = null; dialogs.closeAll();
   if (online) { onlineQueueState = null; renderOnlineQueue(); }
   selfSessionId = null; $('tutorial-actions').hidden = true; $('resume-button').hidden = false;
   $('lobby').hidden = false; $('game-shell').hidden = true;
@@ -293,7 +317,7 @@ function leaveGame(notify = true) {
 }
 
 function setMode(value) {
-  if (game || busy || onlineBusy) return;
+  if (game || roomSession || busy || onlineBusy) return;
   if (onlineQueueState?.state === 'QUEUED' && getPlayMode(value).id !== onlineQueueState.mode.toLowerCase()) { void cancelOnlineQueue().then((cancelled) => { if (cancelled) setMode(value); }); return; }
   const selected = getPlayMode(value); mode = selected.id;
   const roomBrowserLabel = mode === 'custom' ? '사용자 대전 방 목록' : 'LAN 방 목록'; $('nav-rooms').title = roomBrowserLabel; $('nav-rooms').setAttribute('aria-label', roomBrowserLabel); $('nav-rooms').querySelector('span').textContent = mode === 'custom' ? '사용자 방' : 'LAN 방';
@@ -302,13 +326,15 @@ function setMode(value) {
   $('create-button').querySelector('span').textContent = selected.action; $('mode-description').textContent = selected.description;
   const unavailable = usesOnlineServices() && (!onlineAvailable || !(mode === 'custom' ? onlineCapabilities.customRooms : onlineCapabilities.matchmaking)) || SOLO && mode === 'lan';
   $('mode-unavailable').hidden = !unavailable;
-  $('mode-unavailable').textContent = usesOnlineServices() ? onlineAvailable ? 'Java/Spring Boot 계정 서비스에 연결되었습니다. 전투 노드가 준비되면 온라인 교전을 이용할 수 있습니다.' : onlineReason || '중앙 온라인 서버가 아직 구성되지 않았습니다. Java/Spring Boot 서버 주소와 전투 노드 연결 후 이용할 수 있습니다.' : '이 페이지에는 LAN 서버가 없습니다. 아래 주소로 로컬 서버 페이지를 열어 주세요.';
-  $('online-account-panel').hidden = !usesOnlineServices() || !onlineApi; renderOnlineAccount(); renderOnlineQueue();
-  $('lan-connect-guide').hidden = !(SOLO && mode === 'lan');
+  $('mode-unavailable').textContent = usesOnlineServices() ? onlineAvailable ? 'Java/Spring Boot 연결됨 · 전투 노드 준비 중' : 'Java/Spring Boot 서버 미연결 · 프로필에서 상태를 확인하세요.' : 'LAN 서버 페이지에서 이용할 수 있습니다.';
+  renderOnlineAccount(); renderOnlineQueue();
+  $('lan-connect-guide').hidden = !SOLO; $('lan-share-panel').hidden = SOLO;
   $('deploy-note').lastChild.textContent = mode === 'lan' ? ' 방 코드로 친구를 초대할 수 있어요' : mode === 'tutorial' ? ' 약 3–5분 · 언제든 건너뛰기 / 다시 시작' : ' 튜토리얼·혼자 연습은 서버 없이 이용할 수 있어요';
   $('bot-description').textContent = mode === 'lan' ? '친구를 기다리는 동안 가볍게' : '함께 실력을 쌓아갈 연습 상대';
   const roomMode = mode === 'custom' || mode === 'lan' && !SOLO;
   $('join-section').hidden = !roomMode; $('room-settings').hidden = !roomMode; $('room-browser-button').hidden = !roomMode; $('practice-note').hidden = mode !== 'practice';
+  $('deployment-settings-button').hidden = mode !== 'practice'; $('online-loadout-button').hidden = !usesOnlineServices();
+  $('tutorial-recommendation').hidden = !['tutorial', 'practice'].includes(mode) || !!stored('linkshot-tutorial-v1', '');
   const settingsVisible = mode === 'practice' || roomMode;
   for (const selector of ['.bot-row', '.bot-level-row', '.match-options']) document.querySelector(selector).hidden = !settingsVisible;
   $('choose-map').disabled = mode === 'tutorial' || selected.transport === 'online';
@@ -332,14 +358,18 @@ function handleTutorialState(data) {
 
 function renderOnlineAccount() {
   renderOnlineProfileStats();
+  renderModeBrief();
   $('online-server-state').textContent = onlineAvailable ? 'SPRING ONLINE SERVICES · 연결됨' : '온라인 서버에 연결되어 있지 않습니다';
+  $('account-badge-state').textContent = onlineUser ? 'ONLINE · 로그인됨' : '로그인 / 회원가입'; $('operator-callsign').textContent = onlineUser?.callsign || profileStore.profile.callsign;
+  $('mode-account-note').hidden = !usesOnlineServices(); $('mode-account-note').textContent = onlineUser ? `${onlineUser.callsign} · 온라인 계정으로 출격` : '온라인 로그인은 우측 상단 프로필에서 진행하세요.';
   $('online-auth-form').hidden = !!onlineUser; $('online-profile-summary').hidden = !onlineUser; $('online-logout').hidden = !onlineUser;
   if (onlineUser) $('online-profile-summary').textContent = `${onlineUser.callsign} · 온라인 ${onlineUser.points} LP · ${onlineUser.kills} K / ${onlineUser.deaths} D · 일반 ${onlineUser.casualRating} · ${rankText(onlineUser.rankTier, onlineUser.rankDivision, onlineUser.rankPoints, onlineUser.placementsPlayed)}`;
   onlineWeaponWrap.hidden = !onlineUser;
   const ranked = (onlineQueueState?.mode?.toLowerCase() || mode) === 'ranked', allowed = new Set(ranked ? WEAPONS.map((weapon) => weapon.id) : onlineUser?.ownedWeapons || []);
   if (!allowed.has(onlineSelectedWeapon)) onlineSelectedWeapon = 'rifle';
   for (const option of onlineWeaponChoice.options) option.disabled = !allowed.has(option.value); onlineWeaponChoice.value = onlineSelectedWeapon;
-  onlineWeaponNote.textContent = ranked ? '랭크는 20종 모두 임시 허용 · 영구 소유권은 변하지 않음' : '일반은 온라인 보유 무기만 출격 · 바닥 총과 G 교체 가능';
+  onlineWeaponNote.textContent = ranked ? '랭크는 20종 모두 임시 허용 · 영구 소유권은 변하지 않음' : '일반·사용자 대전은 온라인 보유 무기만 출격 · 바닥 총과 G 교체 가능';
+  onlinePreview?.set(onlineSelectedWeapon, loadout.skinId);
   for (const id of ['online-login', 'online-register', 'online-logout']) $(id).disabled = onlineBusy || !onlineAvailable;
   updateDeployButton();
 }
@@ -370,7 +400,7 @@ async function onlineAuthenticate(register = false) {
 }
 
 function renderOnlineQueue() {
-  const state = onlineQueueState, visible = getPlayMode(mode).transport === 'online' && !!onlineUser && state && state.state !== 'IDLE'; $('online-queue-panel').hidden = !visible;
+  const state = onlineQueueState, visible = getPlayMode(mode).transport === 'online' && !!onlineUser && state && state.state !== 'IDLE'; $('online-queue-panel').hidden = !visible; $('queue-status-button').hidden = !visible;
   if (!visible) { updateDeployButton(); return; }
   const queued = state.state === 'QUEUED', ready = state.state === 'READY';
   $('online-queue-title').textContent = queued ? `${state.mode === 'RANKED' ? '랭크' : '일반'} 매칭 대기 · ${state.elapsedSeconds}초` : ready ? '배정된 경기 · 입장 / 재접속 가능' : state.state === 'ABANDONED' ? '탈주 처리 · 경기 정산 대기' : '경기 배정 완료 · 전투 노드 준비 중';
@@ -397,20 +427,20 @@ async function joinOnlineQueue() {
   if (!onlineApi || !onlineUser || onlineBusy || busy || game) return;
   if (onlineQueueState?.state === 'READY') { startOnlineMatch(); return; }
   onlineBusy = true; onlineAutoJoin = true; renderOnlineAccount();
-  try { onlineQueueState = await onlineApi.queue(mode === 'ranked' ? 'RANKED' : 'CASUAL'); startQueuePolling(); }
-  catch (error) { onlineAutoJoin = false; $('online-auth-status').textContent = error.message; }
+  try { onlineQueueState = await onlineApi.queue(mode === 'ranked' ? 'RANKED' : 'CASUAL'); renderOnlineQueue(); openDialog('queue-dialog'); startQueuePolling(); }
+  catch (error) { onlineAutoJoin = false; toast(error.message, true); }
   finally { onlineBusy = false; renderOnlineAccount(); renderOnlineQueue(); }
 }
 async function cancelOnlineQueue() {
   if (!onlineApi || onlineBusy) return false;
   onlineBusy = true; onlineAutoJoin = false; renderOnlineAccount();
-  try { onlineQueueState = await onlineApi.cancelQueue(); stopQueuePolling(); return true; }
+  try { onlineQueueState = await onlineApi.cancelQueue(); stopQueuePolling(); void dialogs.close($('queue-dialog')); return true; }
   catch (error) { toast(error.message, true); await refreshOnlineQueue(); return false; }
   finally { onlineBusy = false; renderOnlineAccount(); renderOnlineQueue(); }
 }
 function startOnlineMatch() {
   if (!onlineApi || !onlineUser || onlineQueueState?.state !== 'READY' || game || busy) return false;
-  stopQueuePolling(); onlineAutoJoin = false; onlineReceipt = null; onlineResultPending = null; onlineResultNextAt = 0; matchIntro.show(); setBusy(true);
+  stopQueuePolling(); dialogs.closeAll(); onlineAutoJoin = false; onlineReceipt = null; onlineResultPending = null; onlineResultNextAt = 0; matchIntro.show(); setBusy(true);
   const previous = socket; socket = null; previous?.close(); transportKind = 'online'; selfSessionId = null;
   const connection = new OnlineConnection(onlineApi, onlineSelectedWeapon); socket = connection; bindConnection(connection, 'online'); return true;
 }
@@ -445,29 +475,32 @@ function updateBots() {
 function openDialog(id) {
   if (game?.locked) document.exitPointerLock();
   const dialog = $(id);
-  if (dialog.open) return;
+  if (dialog.open && dialog.dataset.motion !== 'closing') return;
   if (id === 'briefing-dialog') {
     const world = getMap(loadout.mapId);
     drawTacticalMap($('briefing-map'), { world, spawns: true, detailed: true, gameType: ['lan', 'custom'].includes(mode) ? $('room-game-type').value : 'ffa' });
     $('briefing-map-title').textContent = world.name; $('briefing-map-size').textContent = `${world.width} × ${world.depth} M`;
     $('briefing-map-description').textContent = `${world.description} 건물 ${world.buildings.length}개·추가 엄폐벽 ${world.coverWalls.length}개와 계단식 발판을 활용하세요. 지상·2/3층·옥상 ${world.spawns.length}개 스폰은 건물·화물·설비의 자연 엄폐를 사용합니다. ${roundOptions.roundSeconds / 60}분 또는 먼저 ${roundOptions.fragLimit}킬을 달성하면 라운드가 끝납니다.`;
   }
-  dialog.showModal();
+  if (id === 'profile-dialog') renderOnlineAccount();
+  if (id === 'room-create-dialog') { $('room-create-title').textContent = mode === 'practice' ? '연습 교전 설정' : mode === 'custom' ? '사용자 방 만들기' : 'LAN 방 만들기'; $('room-create-confirm').textContent = mode === 'practice' ? '설정 저장' : '대기실 만들기'; $('room-map-choice').value = loadout.mapId; $('room-initial-team').disabled = $('room-game-type').value !== 'teams'; }
+  dialogs.show(dialog);
   if (id === 'armory-dialog') {
-    try { preview = new ArmoryPreview($('weapon-preview')); preview.set(selectedWeaponId, loadout.skinId); $('preview-fallback').hidden = true; }
+    try { preview ||= new ArmoryPreview($('weapon-preview')); preview.set(selectedWeaponId, loadout.skinId); $('preview-fallback').hidden = true; }
     catch { $('preview-fallback').hidden = false; }
   }
   if (id === 'shop-dialog') {
     renderShop();
-    try { operatorPreview = new OperatorPreview($('operator-preview')); operatorPreview.set(selectedOutfitId, loadout.skinId, loadout.weaponId, profileStore.profile.characterId); $('operator-preview-fallback').hidden = true; }
+    try { operatorPreview ||= new OperatorPreview($('operator-preview')); operatorPreview.set(selectedOutfitId, loadout.skinId, loadout.weaponId, profileStore.profile.characterId); $('operator-preview-fallback').hidden = true; }
     catch { $('operator-preview-fallback').hidden = false; }
   }
+  if (id === 'online-loadout-dialog') { try { onlinePreview ||= new ArmoryPreview($('online-weapon-preview')); onlinePreview.set(onlineSelectedWeapon, loadout.skinId); } catch { /* Selection remains available without WebGL. */ } }
 }
 
 function renderProfile() {
   const profile = profileStore.profile, stats = profileStats(profile), character = getCharacter(profile.characterId);
   const format = (number) => number.toLocaleString('ko-KR');
-  $('profile-callsign').textContent = profile.callsign; $('operator-callsign').textContent = profile.callsign;
+  $('profile-callsign').textContent = profile.callsign; $('operator-callsign').textContent = onlineUser?.callsign || profile.callsign;
   $('profile-device').textContent = `기기 #${profile.id.slice(0, 8).toUpperCase()}`;
   $('profile-portrait').src = `/assets/${character.image}?v=${NETWORK_PROTOCOL}`; $('profile-portrait').alt = character.label;
   $('profile-kills').textContent = format(stats.kills); $('profile-deaths').textContent = format(stats.deaths);
@@ -485,6 +518,7 @@ function syncProgress(data) {
   if (transportKind === 'online' || !recordsLocalProgress(data.room)) { lastRoundReward = null; renderRoundReward(); return; }
   if (!selfSessionId || !data.room?.roundId) return;
   const player = data.players.find((entry) => entry.id === selfSessionId); if (!player) return;
+  if (data.room.staging && player.roomStatus === 'waiting' && !data.room.result?.rewards?.[selfSessionId]) return;
   const result = data.room.result?.roundId === data.room.roundId ? data.room.result.rewards?.[selfSessionId] : null;
   lastRoundReward = data.room.phase === 'ended' && result ? result : null;
   profileStore.syncRound({ roundId: data.room.roundId, kills: result?.kills ?? player.kills, deaths: result?.deaths ?? player.deaths, weaponKills: result?.weaponKills ?? player.weaponKills, completed: !!lastRoundReward, won: lastRoundReward?.won === true }).catch((error) => toast(error.message, true));
@@ -558,6 +592,7 @@ function updateSelections() {
     const row = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.textContent = value; row.append(dt, dd); $('weapon-stats').append(row);
   }
   preview?.set(weapon.id, skin.id); store('sector07-loadout', JSON.stringify(loadout));
+  if (roomSession && transportKind === 'lan') send({ type: 'room-loadout', weaponId: loadout.weaponId, skinId: loadout.skinId });
   renderWeaponOwnership();
 }
 
@@ -591,6 +626,7 @@ function makeCollections() {
     });
   }
   for (const world of MAPS) {
+    const option = document.createElement('option'); option.value = world.id; option.textContent = world.name; $('room-map-choice').append(option);
     const button = document.createElement('button'); button.className = 'map-choice'; button.dataset.map = world.id; button.setAttribute('aria-label', `${world.label} 전장 선택`);
     const art = document.createElement('div'); art.className = 'map-choice-art'; art.style.backgroundImage = `url('/assets/${world.image}')`;
     const tag = document.createElement('span'); tag.className = 'map-choice-tag'; tag.textContent = world.tag;
@@ -601,7 +637,7 @@ function makeCollections() {
     const description = document.createElement('p'); description.textContent = world.description;
     const size = document.createElement('small'); size.textContent = `${world.width} × ${world.depth} M  /  ${world.platforms.length} DECKS + ${world.extraCover.length} COVER`;
     copy.append(title, description, size); button.append(art, copy); $('map-choices').append(button);
-    button.addEventListener('click', () => { loadout.mapId = world.id; updateSelections(); $('maps-dialog').close(); });
+    button.addEventListener('click', () => { loadout.mapId = world.id; updateSelections(); void dialogs.close($('maps-dialog')); });
   }
   for (const weapon of WEAPONS) {
     const button = document.createElement('button'); button.dataset.weapon = weapon.id; button.setAttribute('aria-label', `${weapon.label} ${weapon.name} 선택`);
@@ -653,14 +689,28 @@ function updateSettings() {
 
 $('create-button').addEventListener('click', () => {
   if (busy) return;
+  if (usesOnlineServices() && !onlineUser) { openDialog('profile-dialog'); return; }
   if (getPlayMode(mode).transport === 'online') { void joinOnlineQueue(); return; }
   if (!connected) return;
-  const roomOptions = { roomName: $('room-title').value, password: $('room-password').value, gameType: $('room-game-type').value };
-  setBusy(true); send(transportKind === 'custom' ? { type: 'create', ...roomOptions, bots: botCount, botDifficulty, ...roundOptions, mapId: loadout.mapId, weaponId: onlineSelectedWeapon, skinId: loadout.skinId } : { type: 'create', mode, bots: botCount, botDifficulty, ...roundOptions, ...(mode === 'lan' ? roomOptions : {}), name: callsign(), ...profileLoadout() }); $('room-password').value = '';
+  if (['lan', 'custom'].includes(mode)) { openDialog('room-create-dialog'); return; }
+  setBusy(true); send({ type: 'create', mode, bots: botCount, botDifficulty, ...roundOptions, name: callsign(), ...profileLoadout() });
+});
+$('deployment-settings-button').addEventListener('click', () => openDialog('room-create-dialog'));
+$('room-create-form').addEventListener('submit', (event) => {
+  event.preventDefault(); if (busy || game || roomSession || !$('room-create-form').reportValidity()) return;
+  loadout.mapId = getMap($('room-map-choice').value).id; updateSelections();
+  roundOptions = normalizeRoundOptions({ fragLimit: Number($('frag-limit').value), roundSeconds: Number($('round-minutes').value) * 60 }); store('linkshot-round-options', JSON.stringify(roundOptions)); updateRoundOptions();
+  if (mode === 'practice') { void dialogs.close($('room-create-dialog')); return; }
+  if (!connected) { toast('서버에 연결한 뒤 다시 시도해 주세요.', true); return; }
+  const options = { staging: true, roomName: $('room-title').value, password: $('room-password').value, gameType: $('room-game-type').value, teamId: $('room-initial-team').value, bots: botCount, botDifficulty, ...roundOptions, mapId: loadout.mapId };
+  dialogs.closeAll(); setBusy(true); send(transportKind === 'custom' ? { type: 'create', ...options, weaponId: onlineSelectedWeapon, skinId: loadout.skinId } : { type: 'create', mode, ...profileLoadout(), ...options, name: callsign() }); $('room-password').value = '';
 });
 $('join-form').addEventListener('submit', (event) => { event.preventDefault(); requestJoin($('room-code').value.trim().toUpperCase()); });
 $('room-password-form').addEventListener('submit', (event) => { event.preventDefault(); if (!$('room-password-form').reportValidity() || !pendingJoinCode) return; const password = $('room-join-password').value; $('room-join-password').value = ''; requestJoin(pendingJoinCode, password); });
-$('room-game-type').addEventListener('change', () => { document.querySelector('label[for="frag-limit"]').firstChild.textContent = $('room-game-type').value === 'teams' ? '팀 합산 목표 킬' : '목표 킬 수'; });
+$('room-game-type').addEventListener('change', () => { document.querySelector('label[for="frag-limit"]').firstChild.textContent = $('room-game-type').value === 'teams' ? '팀 합산 목표 킬' : '목표 킬 수'; $('room-initial-team').disabled = $('room-game-type').value !== 'teams'; });
+$('profile-dialog').addEventListener('close', () => { $('online-password').value = ''; });
+$('room-create-dialog').addEventListener('close', () => { $('room-password').value = ''; });
+$('room-password-dialog').addEventListener('close', () => { $('room-join-password').value = ''; });
 $('room-code').addEventListener('input', () => { $('room-code').value = $('room-code').value.toUpperCase().replace(/[^A-Z2-9]/g, ''); });
 $('player-name').addEventListener('change', () => callsign());
 for (const item of PLAY_MODES) $(`mode-${item.id}`).addEventListener('click', () => setMode(item.id));
@@ -670,10 +720,16 @@ document.querySelector('.mode-switch').addEventListener('keydown', (event) => {
   event.preventDefault(); const next = event.key === 'Home' ? 0 : event.key === 'End' ? PLAY_MODES.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + PLAY_MODES.length) % PLAY_MODES.length;
   setMode(PLAY_MODES[next].id); $(`mode-${PLAY_MODES[next].id}`).focus();
 });
-$('recommend-tutorial').addEventListener('click', () => setMode('tutorial'));
+$('recommend-tutorial').addEventListener('click', () => { dialogs.closeAll(); setMode('tutorial'); });
 $('online-auth-form').addEventListener('submit', (event) => { event.preventDefault(); void onlineAuthenticate(); });
 $('online-register').addEventListener('click', () => { void onlineAuthenticate(true); });
-onlineWeaponChoice.addEventListener('change', () => { onlineSelectedWeapon = getWeapon(onlineWeaponChoice.value).id; });
+onlineWeaponChoice.addEventListener('change', () => { onlineSelectedWeapon = getWeapon(onlineWeaponChoice.value).id; onlinePreview?.set(onlineSelectedWeapon, loadout.skinId); if (roomSession) send({ type: 'room-loadout', weaponId: onlineSelectedWeapon, skinId: loadout.skinId }); });
+$('online-loadout-dialog').addEventListener('close', () => { if (!$('online-loadout-dialog').open) { onlinePreview?.dispose(); onlinePreview = null; } });
+function chooseDeploymentWeapon() { if (usesOnlineServices()) { if (!onlineUser) openDialog('profile-dialog'); else { renderOnlineAccount(); openDialog('online-loadout-dialog'); } } else openDialog('armory-dialog'); }
+$('online-loadout-button').addEventListener('click', chooseDeploymentWeapon);
+$('room-lobby-weapon').addEventListener('click', chooseDeploymentWeapon);
+$('room-lobby-leave').addEventListener('click', () => leaveGame());
+$('queue-status-button').addEventListener('click', () => openDialog('queue-dialog'));
 $('online-cancel-queue').addEventListener('click', () => { void cancelOnlineQueue(); });
 $('online-reconnect').addEventListener('click', () => startOnlineMatch());
 $('online-logout').addEventListener('click', async () => {
@@ -699,6 +755,7 @@ $('copy-invite').addEventListener('click', () => {
   const url = new URL(game.room.mode === 'custom' ? location.origin : lanUrl); url.searchParams.set(game.room.mode === 'custom' ? 'custom' : 'room', game.room.code);
   copyText(url.toString(), `초대 링크를 복사했습니다. 방 코드: ${game.room.code}`);
 });
+$('room-lobby-invite').addEventListener('click', () => { if (!roomSession) return; const url = new URL(roomSession.room.mode === 'custom' ? location.origin : lanUrl); url.searchParams.set(roomSession.room.mode === 'custom' ? 'custom' : 'room', roomSession.room.code); void copyText(url.toString(), `초대 링크를 복사했습니다. 방 코드: ${roomSession.room.code}`); });
 $('sound-button').addEventListener('click', async () => {
   audio.muted = !audio.muted;
   if (!audio.muted && settings.volume === 0) { settings.volume = 65; updateSettings(); }
@@ -707,10 +764,10 @@ $('sound-button').addEventListener('click', async () => {
 $('briefing-button').addEventListener('click', () => openDialog('briefing-dialog'));
 $('map-card').addEventListener('click', () => openDialog('maps-dialog'));
 $('choose-map').addEventListener('click', () => openDialog('maps-dialog'));
-$('armory-button').addEventListener('click', () => openDialog('armory-dialog'));
+$('armory-button').addEventListener('click', chooseDeploymentWeapon);
 $('nav-armory').addEventListener('click', () => openDialog('armory-dialog'));
-$('armory-dialog').addEventListener('close', () => { preview?.dispose(); preview = null; });
-$('shop-dialog').addEventListener('close', () => { operatorPreview?.dispose(); operatorPreview = null; });
+$('armory-dialog').addEventListener('close', () => { if (!$('armory-dialog').open) { preview?.dispose(); preview = null; } });
+$('shop-dialog').addEventListener('close', () => { if (!$('shop-dialog').open) { operatorPreview?.dispose(); operatorPreview = null; } });
 $('shop-action').addEventListener('click', async () => {
   const outfit = getOutfit(selectedOutfitId);
   if (!profileStore.profile.ownedOutfits.includes(outfit.id)) {
@@ -736,20 +793,17 @@ $('confirm-purchase').addEventListener('click', async () => {
     if (request.type === 'weapon') {
       await profileStore.purchaseWeapon(request.id); loadout.weaponId = request.id; selectedWeaponId = request.id; updateSelections(); toast(`${getWeapon(request.id).name} 영구 해금 완료`);
     } else { await profileStore.purchase(request.id); toast(`${getOutfit(request.id).label} 외형을 구매하고 장착했습니다.`); }
-    $('purchase-dialog').close();
+    void dialogs.close($('purchase-dialog'));
   } catch (error) { toast(error.message, true); } finally { shopBusy = false; purchaseRequestId = null; $('confirm-purchase').disabled = false; renderShop(); renderWeaponOwnership(); }
 });
 $('nav-play').addEventListener('click', () => {
   setMode(SOLO ? 'practice' : 'lan'); $('create-button').focus({ preventScroll: true });
-  document.querySelector('.operation-grid').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'center' });
 });
-function browseRooms() { if (!['lan', 'custom'].includes(mode)) setMode('lan'); if (SOLO && mode === 'lan') { $('lan-server-address').focus(); return; } if (mode === 'custom' && !connected) { toast('온라인 로그인 후 사용자 대전 서버에 연결해 주세요.', true); return; } $('room-browser-title').textContent = mode === 'custom' ? '열려 있는 사용자 대전 방' : '열려 있는 LAN 방'; $('room-browser-note').textContent = mode === 'custom' ? '연결된 온라인 서버의 사용자 방입니다. 점수·LP에는 반영하지 않습니다.' : '현재 LAN 서버에서 생성된 방입니다.'; send({ type: 'list' }); openDialog('rooms-dialog'); updateRooms(rooms); }
+function browseRooms() { if (!['lan', 'custom'].includes(mode)) setMode('lan'); if (SOLO && mode === 'lan') { openDialog('network-dialog'); $('lan-server-address').focus(); return; } if (mode === 'custom' && !onlineUser) { openDialog('profile-dialog'); return; } if (mode === 'custom' && !connected) { toast('사용자 대전 서버 연결을 기다려 주세요.', true); return; } $('room-browser-title').textContent = mode === 'custom' ? '열려 있는 사용자 대전 방' : '열려 있는 LAN 방'; $('room-browser-note').textContent = mode === 'custom' ? '연결된 온라인 서버의 사용자 방입니다. 점수·LP에는 반영하지 않습니다.' : '현재 LAN 서버에서 생성된 방입니다.'; send({ type: 'list' }); openDialog('rooms-dialog'); updateRooms(rooms); }
 $('nav-rooms').addEventListener('click', browseRooms); $('browse-rooms').addEventListener('click', browseRooms);
 $('room-browser-button').addEventListener('click', browseRooms);
 $('refresh-rooms').addEventListener('click', () => { if (send({ type: 'list' })) toast('방 목록을 새로고침했습니다.'); else toast('로컬 서버에 연결되어 있지 않습니다.', true); });
 document.querySelectorAll('[data-open]').forEach((button) => button.addEventListener('click', () => openDialog(button.dataset.open)));
-document.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', () => button.closest('dialog').close()));
-document.querySelectorAll('dialog').forEach((dialog) => dialog.addEventListener('click', (event) => { if (event.target === dialog) { const rect = dialog.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close(); } }));
 for (const key of ['sensitivity', 'fov', 'volume']) $(key).addEventListener('input', () => { settings[key] = Number($(key).value); updateSettings(); });
 $('quality').addEventListener('change', () => { settings.quality = $('quality').value; updateSettings(); });
 
@@ -758,20 +812,21 @@ setInterval(() => {
   send({ type: 'ping', sent: Date.now() });
   if (!game && !busy && transportKind !== 'online') send({ type: 'list' });
 }, 4000);
-setInterval(() => { if (!onlineApi || !usesOnlineServices()) return; if (!game) void connectOnlineServices(); else if (isOnlineRoom() && game.room.phase === 'ended' && onlineActiveMatch) void fetchOnlineReceipt(onlineActiveMatch); }, 5000);
+setInterval(() => { if (!onlineApi) return; if (!game && !roomSession) void connectOnlineServices(); else if (isOnlineRoom() && game.room.phase === 'ended' && onlineActiveMatch) void fetchOnlineReceipt(onlineActiveMatch); }, 5000);
 makeCollections(); updateSelections(); renderProfile();
 profileStore.addEventListener('change', renderProfile);
 profileStore.addEventListener('award', (event) => toast(`라운드 정산 완료 · +${event.award.points} LP`));
 window.addEventListener('storage', (event) => { if (event.key === PROFILE_KEY && !game) { profileStore.refreshLocal(); renderProfile(); } });
 if (profileStore.warning) toast(profileStore.warning, true);
 const tutorialActions = document.createElement('div'); tutorialActions.id = 'tutorial-actions'; tutorialActions.className = 'tutorial-actions'; tutorialActions.hidden = true;
+const returnRoom = document.createElement('button'); returnRoom.id = 'return-room-button'; returnRoom.textContent = '방 대기실로'; returnRoom.hidden = true; returnRoom.addEventListener('click', () => send({ type: 'room-return' })); $('leave-button').before(returnRoom);
 for (const [id, text] of [['tutorial-advance', '리스폰 시범 시작'], ['tutorial-retry', '튜토리얼 다시 시작'], ['tutorial-skip', '건너뛰기 · 혼자 연습으로']]) { const button = document.createElement('button'); button.id = id; button.className = 'secondary-button'; button.textContent = text; button.hidden = id === 'tutorial-advance'; tutorialActions.append(button); }
 document.querySelector('.pause-bottom').before(tutorialActions);
 $('tutorial-advance').addEventListener('click', () => { if (game?.requestTutorialAction()) game.lock(); });
 $('tutorial-retry').addEventListener('click', () => { send({ type: 'restart' }); game?.lock(); });
 $('tutorial-skip').addEventListener('click', () => { store('linkshot-tutorial-v1', stored('linkshot-tutorial-v1', 'dismissed')); leaveGame(); setMode('practice'); $('tutorial-recommendation').hidden = true; });
 $('tutorial-recommendation').hidden = !!stored('linkshot-tutorial-v1', '');
-const extraControls = document.createElement('p'); extraControls.className = 'controls-addition'; extraControls.textContent = `G: 가까운 바닥 총과 교체합니다. 들고 있던 총은 남은 탄약 그대로 바닥에 남습니다. 교체할 총이 없으면 아무 일도 일어나지 않으며, 총만 버리는 기능은 없습니다. 사망 시에도 사용하던 총을 떨어뜨립니다. 주운 총은 영구 해금이나 다음 부활 장비를 바꾸지 않습니다. 사망 후 E: ${WEAPONS.length}종 목록에서 다음 부활 무기 선택 (처음 10종은 숫자 1–9, 0). 숫자·휠로 생존 중 교체는 불가 · C / Ctrl: 앉기 (달리기·공중에서는 불가). 달리거나 공중에서 쏘면 탄이 크게 퍼집니다. 벽·바닥 탄흔은 약 1분 유지되며 무기·탄약은 우측 하단에만 표시합니다. 일반·랭크는 랜덤 맵 4인 개인전이며 전장 입장 전 5초를 셉니다. 일반은 AI 상대 성적도 레이팅에 반영합니다. 랭크는 현재 임시로 AI 보충을 허용하며 20종 무기를 경기 안에서만 허용합니다. LAN·사용자 방에서는 팀전도 선택할 수 있으며, 양 팀은 맵 반대편에서 부활합니다. 사용자 대전은 점수·전적·LP·영구 숙련도에 반영하지 않습니다. 온라인 계정과 기기 LP/구매 내역은 별개이며 일반·랭크 연결 종료 후 재접속 유예는 30초입니다.`; $('help-dialog').append(extraControls);
+const extraControls = document.createElement('p'); extraControls.className = 'controls-addition'; extraControls.textContent = `G: 가까운 바닥 총과 교체합니다. 들고 있던 총은 남은 탄약 그대로 바닥에 남습니다. 교체할 총이 없으면 아무 일도 일어나지 않으며, 총만 버리는 기능은 없습니다. 사망 시에도 사용하던 총을 떨어뜨립니다. 주운 총은 영구 해금이나 다음 부활 장비를 바꾸지 않습니다. 사망 후 E: ${WEAPONS.length}종 목록에서 다음 부활 무기 선택 (처음 10종은 숫자 1–9, 0). 숫자·휠로 생존 중 교체는 불가 · C / Ctrl: 앉기 (달리기·공중에서는 불가). 달리거나 공중에서 쏘면 탄이 크게 퍼집니다. 벽·바닥 탄흔은 약 1분 유지되며 무기·탄약은 우측 하단에만 표시합니다. 일반·랭크는 랜덤 맵 4인 개인전이며 전장 입장 전 5초를 셉니다. 일반은 AI 상대 성적도 레이팅에 반영합니다. 랭크는 현재 임시로 AI 보충을 허용하며 20종 무기를 경기 안에서만 허용합니다. LAN·사용자 방에서는 팀전도 선택할 수 있으며, 양 팀은 맵 반대편에서 부활합니다. 사용자 대전은 점수·전적·LP·영구 숙련도에 반영하지 않습니다. 온라인 계정과 기기 LP/구매 내역은 별개이며 일반·랭크 연결 종료 후 재접속 유예는 30초입니다.`; $('help-dialog').querySelector('.dialog-body').append(extraControls);
 if (SOLO) {
   document.body.classList.add('solo-edition'); document.title = 'LINKSHOT · 링크샷 — Solo combat';
   document.querySelector('.page-heading h1').textContent = '서버 없이 훈련하고, 함께 교전하세요.';
@@ -779,9 +834,6 @@ if (SOLO) {
   for (const id of ['join-section', 'copy-lan']) $(id).hidden = true;
   $('hero-player-note').textContent = 'SOLO / BOT COMBAT'; $('hud-connection-kind').textContent = 'LOCAL';
   document.querySelector('.build-tag').childNodes[1].textContent = ' SOLO EDITION ';
-  const card = document.querySelector('.network-info'); card.querySelector('.card-eyebrow').textContent = 'NO GAME SERVER REQUIRED';
-  card.querySelector('h3').textContent = '혼자서도, 어디서나.'; card.querySelector('p').textContent = '게임과 봇은 이 브라우저 안에서 실행됩니다.';
-  const badge = document.createElement('span'); badge.className = 'solo-network-badge'; badge.textContent = 'LOCAL SIMULATION · WEB WORKER'; card.querySelector('.info-copy').append(badge);
   const steps = $('help-dialog').querySelectorAll('.help-steps p span');
   for (const [i, text] of [`전장과 장비를 고르세요. ${MAPS.length}개 전장 · ${WEAPONS.length}종 중 1–4번은 무료, 나머지는 LP로 영구 해금합니다.`, '연습전 시작을 누르세요. 전적·무기 숙련도는 자동 저장되며 포인트는 라운드 완료 후 지급됩니다.', `목표 킬·시간을 설정하세요. 외형과 무기 숙련도는 능력치를 높이지 않습니다.`].entries()) steps[i].textContent = text;
   $('help-dialog').querySelector('.rooms-footnote').textContent = '튜토리얼과 혼자 연습은 서버 없이 실행됩니다. LAN대전은 로컬 서버 페이지로 접속하며, 일반·랭크는 별도의 중앙 온라인 서버가 필요합니다.';

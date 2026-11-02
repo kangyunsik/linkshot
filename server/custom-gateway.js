@@ -1,5 +1,6 @@
 import { WebSocket } from 'ws';
 import { RoomDirectory } from './room-directory.js';
+import { roomLobbyAction } from './room-lobby.js';
 import { isWeaponId } from '../shared/catalog.js';
 import { NETWORK_PROTOCOL } from '../shared/world.js';
 
@@ -21,6 +22,7 @@ export class CustomGateway {
     const room = this.directory.rooms.get(connection.roomCode);
     if (data.type === 'list') { this.send(connection.socket, { type: 'rooms', rooms: this.directory.list() }); return; }
     if (data.type === 'leave') { this.directory.leave(connection.account, connection.roomCode); connection.roomCode = null; this.send(connection.socket, { type: 'left' }); this.publishList(); return; }
+    if (roomLobbyAction(room, connection.account, data)) { this.publishList(); return; }
     if (data.type === 'input') { room?.setInput(connection.account, data); return; }
     if (data.type === 'equipment') { room?.interactEquipment(connection.account, data); return; }
     if (data.type === 'loadout') { room?.selectLoadout(connection.account, data); return; }
@@ -34,6 +36,7 @@ export class CustomGateway {
       if (connection.socket.readyState !== WebSocket.OPEN) { this.directory.discardEmpty(next); return; }
       const profile = connection.profile;
       next.addPlayer(profile.id, profile.callsign, false, { ownedWeapons: profile.ownedWeapons, weaponKills: profile.weaponKills, outfitId: profile.outfitId, characterId: profile.characterId, weaponId: isWeaponId(data.weaponId) ? data.weaponId : 'rifle', skinId: data.skinId });
+      if (next.staging && ['blue', 'red'].includes(data.teamId) && next.gameType === 'teams') next.team(profile.id, profile.id, data.teamId);
       connection.roomCode = next.code;
       this.send(connection.socket, { ...next.snapshot(false), type: 'joined', id: profile.id, events: [], impacts: next.impactHistory() }); this.publishList();
     } finally { connection.roomAction = false; }

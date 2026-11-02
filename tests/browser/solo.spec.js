@@ -26,7 +26,7 @@ test('static solo build supports loadout selection, scope, live weapon lock and 
   await page.getByRole('button', { name: '장비 저장', exact: true }).click();
   await page.reload(); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('sector07-loadout')))).toEqual({ mapId: 'redline', weaponId: 'sniper', skinId: 'arctic' });
-  await page.getByRole('button', { name: '봇 한 명 줄이기' }).click();
+  await page.locator('#deployment-settings-button').click(); await page.getByRole('button', { name: '봇 한 명 줄이기' }).click(); await page.locator('#room-create-confirm').click();
   await page.getByRole('button', { name: '연습전 시작', exact: true }).click(); await expect(page.locator('#pause-overlay')).toBeVisible();
   await expect(page.locator('#hud-map-name')).toHaveText('REDLINE 19'); await expect(page.locator('#hud-weapon-name')).toHaveText('SR–1'); await expect(page.locator('#hud-ammo')).toHaveText('05'); await expect(page.locator('#hud-skin-name')).toHaveText('ARCTIC GHOST');
   await page.getByRole('button', { name: '교전 시작', exact: true }).click();
@@ -88,7 +88,7 @@ for (const mapId of ['overgrowth', 'nightmarket']) test(`${mapId} selection surv
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.getByRole('button', { name: '봇 한 명 줄이기' }).click();
+  await page.locator('#deployment-settings-button').click(); await page.getByRole('button', { name: '봇 한 명 줄이기' }).click(); await page.locator('#room-create-confirm').click();
   await page.getByRole('button', { name: '연습전 시작', exact: true }).click(); await expect(page.locator('#pause-overlay')).toBeVisible();
   await expect(page.locator('#hud-map-name')).toHaveText(map.name);
   expect(await page.evaluate(() => window.__newMapState.room.mapId)).toBe(mapId);
@@ -115,7 +115,7 @@ test('solo worker preserves bot difficulty and E-selected weapon, then accepts m
     await route.fulfill({ response, body: code });
   });
   await page.goto('/'); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
-  await page.getByLabel('봇 난이도', { exact: true }).selectOption('advanced'); await page.reload();
+  await page.locator('#deployment-settings-button').click(); await page.getByLabel('봇 난이도', { exact: true }).selectOption('advanced'); await page.reload();
   await expect(page.getByLabel('봇 난이도', { exact: true })).toHaveValue('advanced');
   await page.getByRole('button', { name: '연습전 시작', exact: true }).click(); await expect(page.locator('#respawn-overlay')).toBeVisible();
   await page.keyboard.press('KeyE'); await expect(page.locator('#respawn-loadout')).toBeVisible();

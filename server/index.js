@@ -7,6 +7,7 @@ import { networkInterfaces } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { RoomDirectory } from './room-directory.js';
+import { roomLobbyAction } from './room-lobby.js';
 import { RULES, NETWORK_PROTOCOL } from '../shared/world.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -62,6 +63,7 @@ export function createGameServer({ port = Number(process.env.PORT) || 3000, host
   }
   function enter(client, room, name, loadout = {}) {
     room.addPlayer(client.id, name, false, loadout);
+    if (room.staging && ['blue', 'red'].includes(loadout.teamId) && room.gameType === 'teams') room.team(client.id, client.id, loadout.teamId);
     client.room = room.code;
     send(client.socket, { ...room.snapshot(false), type: 'joined', id: client.id, events: [], impacts: room.impactHistory() });
   }
@@ -88,6 +90,7 @@ export function createGameServer({ port = Number(process.env.PORT) || 3000, host
         if (data.type === 'ping') { send(socket, { type: 'pong', sent: data.sent }); return; }
         if (data.type === 'list') { send(socket, { type: 'rooms', rooms: roomList() }); return; }
         if (data.type === 'leave') { leave(client); send(socket, { type: 'left' }); return; }
+        if (roomLobbyAction(rooms.get(client.room), client.id, data)) return;
         if (data.type === 'input') { rooms.get(client.room)?.setInput(client.id, data); return; }
         if (data.type === 'loadout') { rooms.get(client.room)?.selectLoadout(client.id, data); return; }
         if (data.type === 'equipment') { rooms.get(client.room)?.interactEquipment(client.id, data); return; }

@@ -28,3 +28,17 @@ test('authenticated WAN users list password-protected team rooms, join with cano
   a.send(JSON.stringify({ type: 'restart' })); const barrier = frame(a, 'pong'); a.send(JSON.stringify({ type: 'ping' })); await barrier; assert.equal(room.phase, 'active'); assert.deepEqual(room.teamScores, { blue: 0, red: 0 });
   waiting = frame(a, 'left'); a.send(JSON.stringify({ type: 'leave' })); await waiting; assert.equal(room.hostId, f.profiles[1].id);
 });
+
+test('WAN staging keeps canonical accounts in a server-owned team lobby until readiness/start or explicit late entry', async (t) => {
+  const f = await fixture(t), a = await f.connect(f.profiles[0]), b = await f.connect(f.profiles[1]);
+  let waiting = frame(a, 'joined'); a.send(JSON.stringify({ type: 'create', staging: true, gameType: 'teams', bots: 0, fragLimit: 1 })); const first = await waiting, room = f.app.custom.directory.rooms.get(first.room.code);
+  assert.equal(first.room.phase, 'lobby'); assert.equal(first.players[0].roomStatus, 'waiting'); assert.equal(first.players[0].hp, 0);
+  waiting = frame(b, 'joined'); b.send(JSON.stringify({ type: 'join', code: room.code })); await waiting;
+  waiting = frame(b, 'error'); b.send(JSON.stringify({ type: 'room-start' })); assert.match((await waiting).message, /방장/);
+  waiting = frame(b, 'error'); b.send(JSON.stringify({ type: 'room-loadout', weaponId: 'm82' })); assert.match((await waiting).message, /보유/);
+  const barrier = (socket, data) => { const done = frame(socket, 'pong'); socket.send(JSON.stringify(data)); socket.send(JSON.stringify({ type: 'ping' })); return done; };
+  await barrier(b, { type: 'room-ready', ready: true }); await barrier(a, { type: 'room-start' }); assert.equal(room.phase, 'active');
+  const lateProfile = { ...f.profiles[0], id: randomUUID(), callsign: 'LATE' }, c = await f.connect(lateProfile);
+  waiting = frame(c, 'joined'); c.send(JSON.stringify({ type: 'join', code: room.code })); const late = await waiting; assert.equal(late.players.find((p) => p.id === lateProfile.id).roomStatus, 'waiting');
+  room.applyDamage(room.players.get(f.profiles[0].id), room.players.get(f.profiles[1].id), 100, false, {}, getWeapon('rifle'), Date.now()); assert.equal(room.phase, 'ended'); assert.equal(room.result.rewards[lateProfile.id], undefined); assert.ok(Object.values(room.result.rewards).every((reward) => reward.points === 0)); assert.equal(f.settlements.length, 0);
+});

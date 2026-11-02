@@ -34,7 +34,9 @@ async function onlinePage(context, apiUrl, origin, mode, index = 0) {
   const page = await context.newPage(), state = { latest: null, errors: [] };
   page.on('pageerror', (error) => state.errors.push(error.message)); page.on('websocket', (socket) => socket.on('framereceived', ({ payload }) => { try { const value = JSON.parse(payload.toString()); if (['state', 'joined'].includes(value.type)) state.latest = value; } catch {} }));
   await page.goto(origin); await page.getByRole('tab', { name: mode, exact: true }).click(); await expect(page.locator('#online-server-state')).toContainText('연결됨');
+  await page.locator('#profile-button').click();
   await page.locator('#online-username').fill('ui_' + randomBytes(7).toString('hex')); await page.locator('#online-password').fill('test-only-long-passphrase'); await page.locator('#online-callsign').fill(`PLAYER ${index}`); await page.getByRole('button', { name: '온라인 계정 만들기', exact: true }).click(); await expect(page.locator('#online-profile-summary')).toContainText(`PLAYER ${index} · 온라인 0 LP`);
+  await page.getByLabel('프로필 닫기').click(); await expect(page.locator('#profile-dialog')).toBeHidden();
   return { page, state };
 }
 
@@ -55,6 +57,7 @@ test('real Spring/PostgreSQL browser authentication is separate from device LP, 
     await context.route('**/runtime-config.js', (route) => route.fulfill({ contentType: 'text/javascript', body: `export const APP_MODE = 'solo'; export const PROFILE_STORAGE = 'browser'; export const ONLINE_SERVER_URL = ${JSON.stringify(apiUrl)};` }));
     const errors = []; page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(origin); await page.getByRole('tab', { name: '일반', exact: true }).click(); await expect(page.locator('#online-server-state')).toContainText('연결됨');
+    await page.locator('#profile-button').click();
     const username = 'ui_' + randomBytes(7).toString('hex'); await page.locator('#online-username').fill(username); await page.locator('#online-password').fill('test-only-long-passphrase'); await page.locator('#online-callsign').fill('ONLINE TESTER');
     await page.getByRole('button', { name: '온라인 계정 만들기', exact: true }).click(); await expect(page.locator('#online-profile-summary')).toContainText('ONLINE TESTER · 온라인 0 LP'); await expect(page.locator('#profile-points')).toHaveText('1,234'); await expect(page.locator('#online-password')).toHaveValue('');
     await expect(page.locator('#profile-casual-rating')).toHaveText('1,000'); await expect(page.locator('#profile-rank-tier')).toHaveText('배치 중'); await expect(page.locator('#profile-rank-progress')).toContainText('배치 0/10');
@@ -94,7 +97,7 @@ test('ranked can still be switched to human-only queues while temporary weapon a
   const origin = `http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}`, backend = await services(origin, { engine: true, rankedAi: false }), contexts = [], entrants = [];
   try {
     for (let i = 0; i < 4; i++) { const context = await browser.newContext({ viewport: { width: 1280, height: 800 } }); contexts.push(context); entrants.push(await onlinePage(context, backend.apiUrl, origin, '랭크', i)); }
-    await entrants[0].page.locator('#online-weapon-choice').selectOption('m82');
+    await entrants[0].page.locator('#online-loadout-button').click(); await entrants[0].page.locator('#online-weapon-choice').selectOption('m82'); await entrants[0].page.getByRole('button', { name: '장비 선택 완료' }).click();
     await entrants[0].page.getByRole('button', { name: '랭크 매칭', exact: true }).click(); await expect(entrants[0].page.locator('#online-cancel-queue')).toBeVisible(); await entrants[0].page.locator('#online-cancel-queue').click(); await expect(entrants[0].page.locator('#online-queue-panel')).toBeHidden();
     for (const entrant of entrants.slice(0, 3)) await entrant.page.getByRole('button', { name: '랭크 매칭', exact: true }).click();
     await expect(entrants[0].page.locator('#online-queue-detail')).toContainText('매칭 인원 3/4'); const started = Date.now();
@@ -105,7 +108,7 @@ test('ranked can still be switched to human-only queues while temporary weapon a
     const first = entrants[0], self = first.state.latest.players.find((player) => player.name === 'PLAYER 0'), matchId = first.state.latest.room.roundId;
     expect(self.weaponId).toBe('m82'); expect(self.ownedWeapons).toHaveLength(20);
     const canonical = await first.page.evaluate(async (base) => (await fetch(base + '/api/account', { credentials: 'include' })).json(), backend.apiUrl); expect(canonical.ownedWeapons).toHaveLength(4); expect(canonical.ownedWeapons).not.toContain('m82');
-    await first.page.reload(); await first.page.getByRole('tab', { name: '랭크', exact: true }).click(); await expect(first.page.locator('#online-reconnect')).toBeVisible(); await first.page.locator('#online-reconnect').click(); await expect(first.page.locator('#pause-overlay')).toBeVisible({ timeout: 20_000 });
+    await first.page.reload(); await first.page.getByRole('tab', { name: '랭크', exact: true }).click(); await first.page.locator('#queue-status-button').click(); await expect(first.page.locator('#online-reconnect')).toBeVisible(); await first.page.locator('#online-reconnect').click(); await expect(first.page.locator('#pause-overlay')).toBeVisible({ timeout: 20_000 });
     await expect.poll(() => first.state.latest?.players.find((player) => player.id === self.id)?.weaponId).toBe('m82');
     const restored = first.state.latest.players.find((player) => player.id === self.id); expect(restored.hp).toBe(self.hp); expect(restored.ammo).toBe(self.ammo); expect(restored.spawnCount).toBe(self.spawnCount); expect(first.state.latest.room.roundId).toBe(matchId);
     for (const entrant of entrants) expect(entrant.state.errors).toEqual([]);
@@ -117,7 +120,7 @@ test('temporary ranked matchmaking fills a solo account with labelled AI and sav
   test.skip(process.env.ONLINE_BROWSER_TEST !== '1', 'Optional online integration.'); test.setTimeout(150_000);
   const origin = `http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}`, backend = await services(origin, { engine: true }), context = await browser.newContext();
   try {
-    const { page, state } = await onlinePage(context, backend.apiUrl, origin, '랭크', 8); await page.locator('#online-weapon-choice').selectOption('m82'); await page.getByRole('button', { name: '랭크 매칭', exact: true }).click();
+    const { page, state } = await onlinePage(context, backend.apiUrl, origin, '랭크', 8); await page.locator('#online-loadout-button').click(); await page.locator('#online-weapon-choice').selectOption('m82'); await page.getByRole('button', { name: '장비 선택 완료' }).click(); await page.getByRole('button', { name: '랭크 매칭', exact: true }).click();
     await expect(page.locator('#pause-overlay')).toBeVisible({ timeout: 25_000 }); await expect.poll(() => state.latest?.room.phase).toBe('active'); expect(state.latest.room.mode).toBe('ranked'); expect(state.latest.players).toHaveLength(4); expect(state.latest.players.filter((player) => player.isBot)).toHaveLength(3); expect(state.latest.players.find((player) => !player.isBot).weaponId).toBe('m82');
     await expect(page.locator('#round-overlay')).toBeVisible({ timeout: 75_000 }); await expect(page.locator('#round-reward-status')).toContainText('온라인 서버에 저장됨', { timeout: 15_000 });
     const account = await page.evaluate(async (base) => (await fetch(base + '/api/account', { credentials: 'include' })).json(), backend.apiUrl); expect(account.placementsPlayed).toBe(1); expect(account.casualRating).toBe(1000); expect(account.ownedWeapons).toHaveLength(4); expect(account.ownedWeapons).not.toContain('m82'); await expect(page.locator('#profile-rank-progress')).toContainText('배치 1/10'); expect(state.errors).toEqual([]);

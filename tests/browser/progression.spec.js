@@ -95,10 +95,10 @@ test('an actual LAN kill persists mastery once and shows the killer gun level on
     await attackerContext.addInitScript((profile) => { localStorage.setItem('linkshot-profile-v1', JSON.stringify(profile)); }, profile);
     const attacker = await attackerContext.newPage(), victim = await victimContext.newPage();
     await attacker.goto(url); await expect(attacker.getByText('LAN SERVER ONLINE')).toBeVisible();
-    await attacker.getByRole('button', { name: '봇 한 명 줄이기' }).click(); await attacker.getByRole('button', { name: '봇 한 명 줄이기' }).click();
-    await attacker.getByRole('button', { name: '방 만들고 출격', exact: true }).click(); await expect(attacker.locator('#game-shell')).toBeVisible();
+    await attacker.locator('#create-button').click(); await attacker.getByRole('button', { name: '봇 한 명 줄이기' }).click(); await attacker.getByRole('button', { name: '봇 한 명 줄이기' }).click();
+    await attacker.locator('#room-create-confirm').click(); await expect(attacker.locator('#room-lobby-dialog')).toBeVisible(); await attacker.locator('#room-lobby-action').click(); await expect.poll(() => [...server.rooms.values()][0]?.phase).toBe('active'); server.broadcast(); await expect(attacker.locator('#pause-overlay')).toBeVisible();
     const room = [...server.rooms.values()][0], killer = [...room.players.values()][0];
-    await victim.goto(url); await expect(victim.getByText('LAN SERVER ONLINE')).toBeVisible(); await victim.getByLabel('참가할 방 코드').fill(room.code); await victim.getByRole('button', { name: '코드로 방 참가', exact: true }).click(); await expect(victim.locator('#game-shell')).toBeVisible();
+    await victim.goto(url); await expect(victim.getByText('LAN SERVER ONLINE')).toBeVisible(); await victim.locator('#room-browser-button').click(); await victim.getByLabel('참가할 방 코드').fill(room.code); await victim.getByRole('button', { name: '코드로 방 참가', exact: true }).click(); await expect(victim.locator('#room-lobby-dialog')).toBeVisible(); await victim.locator('#room-lobby-action').click(); await expect.poll(() => [...room.players.values()].filter((p) => p.roomStatus === 'playing').length).toBe(2); server.broadcast(); await expect(victim.locator('#pause-overlay')).toBeVisible();
     const target = [...room.players.values()].find((p) => p.id !== killer.id);
     Object.assign(killer, { x: 24, y: 0, z: 10, yaw: 0, pitch: 0, ammo: 30 }); Object.assign(target, { x: 24, y: 0, z: 0, hp: 1, protectedUntil: 0 });
     room.shoot(killer, Date.now(), true); server.broadcast();
@@ -106,6 +106,6 @@ test('an actual LAN kill persists mastery once and shows the killer gun level on
     await expect(victim.locator('#death-attacker')).toHaveText('MASTER'); await expect(victim.locator('#death-weapon')).toHaveText('VX–7'); await expect(victim.locator('#death-weapon-level')).toHaveText('Lv.1');
     room.finish(); server.broadcast(); await expect(attacker.locator('#profile-points')).toHaveText('170'); server.broadcast();
     const saved = await attacker.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1'))); expect(saved.kills).toBe(50); expect(saved.weaponKills.rifle).toBe(50); expect(saved.points).toBe(170);
-    await attacker.getByRole('button', { name: '로비로 돌아가기', exact: true }).click(); await attacker.getByRole('button', { name: '무기 및 스킨 선택', exact: true }).click(); await expect(attacker.locator('#armory-level')).toHaveText('Lv.1');
+    await attacker.locator('#room-lobby-leave').click(); await expect(attacker.locator('#room-lobby-dialog')).toBeHidden(); await attacker.getByRole('button', { name: '무기 및 스킨 선택', exact: true }).click(); await expect(attacker.locator('#armory-level')).toHaveText('Lv.1');
   } finally { await attackerContext.close(); await victimContext.close(); await server.close(); }
 });

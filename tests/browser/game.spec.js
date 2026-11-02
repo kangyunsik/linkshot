@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
+import { setCallsign, startCreatedRoom, joinRunningRoom } from './lobby-helpers.js';
 
 test.beforeEach(async ({ context }) => {
   await context.addInitScript(() => {
@@ -41,9 +42,9 @@ test('two browser clients share a room; pointer lock, movement, firing, reload, 
     try { const data = JSON.parse(String(payload)); if (data.type === 'state') state = data; } catch { /* Ignore non-JSON frames. */ }
   }));
   await page.goto('/'); await expect(page.getByText('LAN SERVER ONLINE')).toBeVisible();
-  await page.getByLabel('플레이어 콜사인').fill('ALPHA');
+  await setCallsign(page, 'ALPHA'); await page.locator('#create-button').click();
   await page.getByRole('button', { name: '봇 한 명 줄이기' }).click(); await page.getByRole('button', { name: '봇 한 명 줄이기' }).click();
-  await page.getByRole('button', { name: '방 만들고 출격' }).click();
+  await startCreatedRoom(page);
   await expect(page.locator('#game-shell')).toBeVisible(); await expect(page.locator('#pause-overlay')).toBeVisible();
   const code = await page.locator('#pause-room-code').textContent(); expect(code).toMatch(/^[A-Z2-9]{5}$/);
   await page.getByRole('button', { name: '교전 시작', exact: true }).click();
@@ -67,8 +68,7 @@ test('two browser clients share a room; pointer lock, movement, firing, reload, 
   const second = await context2.newPage(); second.on('pageerror', (error) => errors.push(error.message));
   try {
     await second.goto(new URL('/', page.url()).href); await expect(second.getByText('LAN SERVER ONLINE')).toBeVisible();
-    await second.getByLabel('플레이어 콜사인').fill('BRAVO'); await second.getByLabel('참가할 방 코드').fill(code);
-    await second.getByRole('button', { name: '코드로 방 참가' }).click();
+    await setCallsign(second, 'BRAVO'); await joinRunningRoom(second, code);
     await expect(second.locator('#game-shell')).toBeVisible(); await expect.poll(() => state?.players.length).toBe(2);
     await page.bringToFront(); await page.keyboard.down('Tab');
     await expect(page.locator('#scoreboard-table')).toContainText('ALPHA'); await expect(page.locator('#scoreboard-table')).toContainText('BRAVO');
@@ -81,7 +81,7 @@ test('two browser clients share a room; pointer lock, movement, firing, reload, 
 
 test('practice mode spawns bots and invalid room codes fail without trapping the UI', async ({ page }) => {
   await page.goto('/'); await expect(page.getByText('LAN SERVER ONLINE')).toBeVisible();
-  await page.getByLabel('참가할 방 코드').fill('ZZZZZ'); await page.getByRole('button', { name: '코드로 방 참가' }).click();
+  await page.locator('#room-browser-button').click(); await page.getByLabel('참가할 방 코드').fill('ZZZZZ'); await page.getByRole('button', { name: '코드로 방 참가' }).click();
   await expect(page.locator('.toast.error')).toContainText('방을 찾을 수 없습니다'); await expect(page.locator('#loading-overlay')).toBeHidden();
   await page.getByRole('tab', { name: '혼자 연습' }).click(); await page.getByRole('button', { name: '연습전 시작' }).click();
   await expect(page.locator('#pause-overlay')).toBeVisible(); await expect(page.locator('#copy-invite')).toBeHidden();
@@ -97,8 +97,8 @@ test('plain-HTTP LAN origin supports invite auto-join, clipboard fallback and po
   await context.addInitScript(() => { try { localStorage.setItem('sector07-settings', JSON.stringify({ sensitivity: 1, fov: 82, volume: 0, quality: 'normal' })); } catch { /* about:blank */ } });
   await page.goto(lan); await expect(page.getByText('LAN SERVER ONLINE')).toBeVisible();
   expect(await page.evaluate(() => window.isSecureContext)).toBe(false);
-  await page.getByRole('button', { name: '봇 한 명 줄이기' }).click(); await page.getByRole('button', { name: '봇 한 명 줄이기' }).click();
-  await page.getByRole('button', { name: '방 만들고 출격' }).click(); await expect(page.locator('#pause-overlay')).toBeVisible();
+  await page.locator('#create-button').click(); await page.getByRole('button', { name: '봇 한 명 줄이기' }).click(); await page.getByRole('button', { name: '봇 한 명 줄이기' }).click();
+  await startCreatedRoom(page);
   const code = await page.locator('#pause-room-code').textContent();
   await page.getByRole('button', { name: /친구 초대 링크 복사/ }).click();
   await expect(page.locator('.toast')).toContainText('초대 링크를 복사했습니다');
@@ -106,7 +106,7 @@ test('plain-HTTP LAN origin supports invite auto-join, clipboard fallback and po
   await invitedContext.addInitScript(() => { try { localStorage.setItem('sector07-settings', JSON.stringify({ sensitivity: 1, fov: 82, volume: 0, quality: 'low' })); } catch { /* about:blank */ } });
   try {
     const invited = await invitedContext.newPage(); invited.on('pageerror', (error) => errors.push(error.message));
-    await invited.goto(`${lan}/?room=${code}`); await expect(invited.locator('#pause-overlay')).toBeVisible();
+    await invited.goto(`${lan}/?room=${code}`); await expect(invited.locator('#room-lobby-dialog')).toBeVisible(); await invited.locator('#room-lobby-action').click(); await expect(invited.locator('#pause-overlay')).toBeVisible();
     await expect(invited.locator('#pause-room-code')).toHaveText(code);
     await page.bringToFront(); await page.getByRole('button', { name: '교전 시작', exact: true }).click();
     await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id)).toBe('game-canvas');
