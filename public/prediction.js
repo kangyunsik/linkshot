@@ -1,5 +1,11 @@
 import { RULES, WORLD, bounds, playerPose } from '../shared/world.js';
-import { supportHeight } from '../shared/movement.js';
+import { supportHeight, movePlayer, advanceTime } from '../shared/movement.js';
+
+export function advancePredictedMovement(player, input, elapsed, world = WORLD, now = Date.now()) {
+  // The old RAF path discarded everything above 33ms. At 15 FPS the client
+  // moved at half speed, then repeatedly snapped toward the 60Hz server.
+  advanceTime(elapsed, (dt, completed, duration) => movePlayer(player, input, dt, world, now - (duration - completed) * 1000));
+}
 
 export function reconcileMovement(predicted, local, world = WORLD) {
   if (Number.isFinite(local.hitSlowUntil)) predicted.hitSlowUntil = local.hitSlowUntil;

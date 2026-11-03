@@ -1,6 +1,10 @@
 export const TEAM_IDS = Object.freeze(['blue', 'red']);
 export const TEAM_COLORS = Object.freeze({ blue: '#79baff', red: '#ff817a' });
 export const TEAM_NAMES = Object.freeze({ blue: '블루팀', red: '레드팀' });
+export const TEAM_UNIFORMS = Object.freeze({
+  blue: Object.freeze({ suit: '#285da8', armor: '#347ac6', dark: '#1b2a3b', visor: '#a5dcff' }),
+  red: Object.freeze({ suit: '#a12e35', armor: '#c9474d', dark: '#3b2026', visor: '#ffd0ce' }),
+});
 export const sameTeam = (a, b) => TEAM_IDS.includes(a?.teamId) && a.teamId === b?.teamId;
 export const normalizeGameType = (value) => value === 'teams' ? 'teams' : 'ffa';
 

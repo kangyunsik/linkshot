@@ -1,6 +1,6 @@
 import { expandBuildings } from './buildings.js';
 import { addSpawnZones } from './spawns.js';
-export const NETWORK_PROTOCOL = 17;
+export const NETWORK_PROTOCOL = 18;
 export const BULLET_MARK_RULES = Object.freeze({ lifetimeMs: 60_000, fadeMs: 6000, maxMarks: 6144, historyLimit: 2048, cellScale: 40 });
 
 export const RULES = Object.freeze({

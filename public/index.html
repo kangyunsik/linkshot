@@ -80,6 +80,7 @@
             <span class="hero-corner"></span>
           </article>
 
+          <div class="operation-rail">
           <section class="deploy-card" aria-labelledby="deploy-title">
             <div class="card-eyebrow"><span id="deploy-title">DEPLOYMENT</span><button id="mode-information-button" class="mode-information-button" data-open="mode-info-dialog" aria-label="선택한 모드 안내"><svg><use href="#i-info"/></svg><span id="mode-service-status">모드 안내</span></button></div>
             <h2>다음 교전을 준비하세요</h2>
@@ -93,12 +94,12 @@
             <button id="queue-status-button" class="secondary-button" hidden>매칭 상태 보기</button>
             </div>
           </section>
-        </section>
-
         <section class="briefing-grid" aria-label="전장 정보">
           <button class="info-card map-info" id="map-card" aria-label="전장 선택"><div class="mini-map-decoration"><span></span><i></i><b></b><em></em></div><div class="info-copy"><span class="card-eyebrow">THE BATTLEGROUND / 08 MAPS</span><h3 id="map-card-name">FOUNDRY <span>07</span></h3><p id="map-card-description">56 × 46 M · 근접 교전</p><span class="text-link">다른 전장 선택 <svg><use href="#i-arrow"/></svg></span></div></button>
           <button class="info-card weapon-info" id="armory-button" aria-label="무기 및 스킨 선택"><div class="weapon-silhouette" aria-hidden="true"><div class="rifle-stock"></div><div class="rifle-body"></div><div class="rifle-rail"></div><div class="rifle-barrel"></div><div class="rifle-grip"></div><div class="rifle-mag"></div><div class="rifle-sight"></div></div><div class="info-copy"><span id="loadout-heading" class="card-eyebrow">YOUR LOADOUT / 07 WEAPONS</span><h3 id="loadout-weapon">VX–7 <span>ASSAULT</span></h3><p id="loadout-description">돌격소총 · 30발 · 무제한 재보급</p><div class="weapon-stat"><span id="loadout-skin">FIELD ISSUE · 장비 변경 ↗</span><i></i><i></i><i></i><i></i><i class="dim"></i></div></div></button>
           <button id="network-button" class="info-card network-info" data-open="network-dialog" aria-label="서버 연결 및 LAN 주소"><div class="info-copy"><span class="card-eyebrow"><i class="tiny-live"></i> CONNECTION CENTER</span><h3>서버 연결</h3><p>LAN 주소·온라인 접속 안내 ↗</p></div></button>
+        </section>
+          </div>
         </section>
 
         <div class="lobby-strip"><div class="lobby-strip-left"><span class="tiny-live"></span><span id="room-summary">네트워크를 확인하고 있습니다</span><button id="browse-rooms">열린 방 보기 <svg><use href="#i-arrow"/></svg></button></div><span class="desktop-note"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동 <span>·</span> 마우스 조준 <span>·</span> <kbd>R</kbd> 재장전</span></div>
@@ -170,6 +171,7 @@
   <dialog id="room-lobby-dialog" class="dialog room-lobby-dialog" data-persistent>
     <div class="dialog-heading"><div><span class="eyebrow">OPERATION ROOM / TEAM ASSEMBLY</span><h2 id="room-lobby-title">출격 대기실</h2></div><strong id="room-lobby-code"></strong></div>
     <p id="room-lobby-meta" class="gallery-note"></p><p id="room-lobby-result" class="room-lobby-result" role="status" hidden></p>
+    <section id="room-team-choice" class="room-team-choice" aria-label="입장할 팀 선택" hidden><div><strong id="room-team-choice-title">입장할 팀을 선택하세요</strong><p id="room-team-choice-note"></p></div><div class="room-team-buttons" role="group" aria-label="입장 팀"><button id="room-select-blue" type="button" data-team="blue" aria-pressed="false"><b>BLUE · 블루팀</b><span>이 팀으로 참가</span></button><button id="room-select-red" type="button" data-team="red" aria-pressed="false"><b>RED · 레드팀</b><span>이 팀으로 참가</span></button></div></section>
     <div id="room-lobby-roster" class="room-lobby-roster"></div>
     <div class="room-lobby-tools"><label for="lobby-bot-difficulty">추가 AI 난이도<select id="lobby-bot-difficulty"><option value="beginner">초급</option><option value="intermediate">중급</option><option value="advanced">고급</option></select></label><button id="room-lobby-weapon" class="secondary-button">출격 무기 선택</button><button id="room-lobby-invite" class="secondary-button">초대 링크 복사</button></div>
     <p id="room-lobby-status" class="rooms-footnote" role="status"></p><div class="dialog-footer"><button id="room-lobby-leave" class="text-button">방 나가기</button><button id="room-lobby-action" class="primary-button">경기 시작</button></div>

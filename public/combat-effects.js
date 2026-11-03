@@ -10,7 +10,7 @@ export class CombatEffects {
     if (this.warmup) return this.warmup;
     const group = new THREE.Group(), seen = new Set(); group.position.set(10000, 0, 10000);
     for (const player of players) {
-      const key = `${player.characterId}/${player.outfitId}/${player.skinId}`; if (seen.has(key)) continue; seen.add(key);
+      const key = `${player.characterId}/${player.outfitId}/${player.skinId}/${player.teamId || ''}`; if (seen.has(key)) continue; seen.add(key);
       const operator = createOperator(player, this.models); operator.weapon.visible = false; this.corpseMaterials(operator.group); group.add(operator.group);
     }
     group.add(new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3)), new THREE.PointsMaterial({ color: '#a62532', size: .045, transparent: true, opacity: .85, depthWrite: false })));

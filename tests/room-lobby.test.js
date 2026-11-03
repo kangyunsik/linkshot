@@ -7,6 +7,7 @@ import { getWeapon } from '../shared/catalog.js';
 function fixture(options = {}) {
   let now = 1000; const room = new LobbyRoom('LOBBY', { bots: 0, gameType: 'teams', clock: () => now, ...options });
   const host = room.addPlayer('host', 'HOST'), guest = room.addPlayer('guest', 'GUEST');
+  if (room.gameType === 'teams') room.team(guest.id, guest.id, guest.teamId);
   return { room, host, guest, advance(ms) { now += ms; room.tick(1 / 60); } };
 }
 test('staged rooms wait without combat, let users compose asymmetric teams and start only after human readiness', () => {
@@ -17,6 +18,13 @@ test('staged rooms wait without combat, let users compose asymmetric teams and s
   room.bot(host.id, { teamId: 'red', difficulty: 'advanced' }); const bot = [...room.players.values()].find((p) => p.isBot); assert.equal(bot.botDifficulty, 'advanced'); assert.equal(bot.teamId, 'red');
   room.start(host.id); assert.equal(room.phase, 'active'); assert.ok([...room.players.values()].every((p) => p.roomStatus === 'playing' && p.hp === 100)); assert.ok(host.x < bot.x);
   assert.throws(() => room.team(host.id, null, 'red'), /교전 중/); assert.throws(() => room.bot(host.id, { teamId: 'red' }), /경기 시작 전/);
+});
+
+test('a team-room guest must explicitly confirm a team before readiness or late entry; host reassignment requires confirmation again', () => {
+  const room = new LobbyRoom('TEAMS', { bots: 0, gameType: 'teams' }), host = room.addPlayer('host','HOST'), guest = room.addPlayer('guest','GUEST');
+  assert.equal(guest.teamConfirmed, false); assert.throws(() => roomLobbyAction(room,guest.id,{ type: 'room-ready', ready: true }), /팀을 먼저/); assert.throws(() => room.start(host.id), /팀을 먼저/);
+  room.team(guest.id,guest.id,'red'); assert.equal(guest.teamConfirmed,true); room.team(host.id,guest.id,'blue'); assert.equal(guest.teamConfirmed,false);
+  room.team(guest.id,guest.id,'red'); guest.ready = true; room.start(host.id); const late = room.addPlayer('late','LATE'); assert.throws(() => room.enter(late.id), /팀을 먼저/); room.team(late.id,late.id,'red'); room.enter(late.id); assert.equal(late.roomStatus,'playing');
 });
 test('late members cannot move, shoot, respawn or claim completion before explicitly entering; existing players are not reset', () => {
   const { room, host, guest, advance } = fixture({ fragLimit: 1 }); guest.ready = true; room.start(host.id); const deadline = room.endsAt, life = host.spawnCount; host.ammo = 7; host.hp = 63;

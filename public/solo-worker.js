@@ -1,5 +1,6 @@
 import { Room } from '/shared/simulation.js';
 import { RULES } from '/shared/world.js';
+import { advanceTime } from '/shared/movement.js';
 import { TutorialSession } from '/shared/tutorial.js';
 
 const playerId = 'local-operator';
@@ -16,7 +17,7 @@ function start(data) {
   }
   send({ ...snapshot(), type: 'joined', id: playerId, events: [], impacts: room.impactHistory() });
   previousTick = performance.now();
-  tickTimer = setInterval(() => { const now = performance.now(); (tutorial || room)?.tick(Math.min((now - previousTick) / 1000, 1 / 30)); previousTick = now; }, 1000 / RULES.tickRate);
+  tickTimer = setInterval(() => { const now = performance.now(); advanceTime((now - previousTick) / 1000, (dt) => (tutorial || room)?.tick(dt)); previousTick = now; }, 1000 / RULES.tickRate);
   snapshotTimer = setInterval(() => { if (room) send(snapshot()); }, 1000 / RULES.snapshotRate);
 }
 self.addEventListener('message', ({ data }) => {

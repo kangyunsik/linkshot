@@ -569,7 +569,7 @@ export class Room {
   snapshot(flushEvents = true) {
     const now = this.clock();
     const result = {
-      type: 'state', serverTime: now,
+      type: 'state', serverTime: now, sequence: this.snapshotSequence = (this.snapshotSequence || 0) + 1,
       room: { protocolVersion: NETWORK_PROTOCOL, code: this.code, roundId: this.roundId, result: this.result, mapId: this.world.id, gameType: this.gameType, teamScores: { ...this.teamScores }, name: this.roomName, botDifficulty: this.botDifficulty, mode: this.mode, hostId: this.hostId, phase: this.phase, timeLeft: Math.max(0, Math.ceil((this.endsAt - now) / 1000)), fragLimit: this.fragLimit, roundSeconds: this.roundSeconds },
       players: [...this.players.values()].map((p) => ({
         id: p.id, name: p.name, isBot: p.isBot, teamId: p.teamId, x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yaw: p.yaw, pitch: p.pitch,

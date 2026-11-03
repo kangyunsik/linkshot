@@ -2,12 +2,15 @@ import * as THREE from '/vendor/three.module.js';
 import { RULES, getMap, hasLineOfSight, playerPose, damageBearing } from '/shared/world.js';
 import { WEAPONS, EQUIPMENT, getWeapon, getSkin, shotSpread, ownsWeapon } from '/shared/catalog.js';
 import { nearestDroppedWeapon } from '/shared/equipment.js';
-import { EMPTY_INPUT, movePlayer, clamp, angleDelta } from '/shared/movement.js';
+import { EMPTY_INPUT, clamp, angleDelta } from '/shared/movement.js';
 import { drawTacticalMap } from './map.js';
 import { WeaponModels, disposeModel } from './weapon-model.js';
 import { createOperator, poseOperator } from './operator-model.js';
 import { getOutfit, getCharacter } from '/shared/outfits.js';
-import { reconcileMovement } from './prediction.js';
+import { reconcileMovement, advancePredictedMovement } from './prediction.js';
+import { SnapshotOrder } from './snapshot-order.js';
+import { LookInput } from './look-input.js';
+import { applyViewmodelUniform } from './team-uniform.js';
 import { drawBuildings } from './building-view.js';
 import { CombatEffects } from './combat-effects.js';
 import { AimRecoil } from './aim-recoil.js';
@@ -69,6 +72,7 @@ export class FPSGame {
     this.send = send; this.onMenu = onMenu; this.onFatal = onFatal;
     this.abort = new AbortController(); this.keys = new Set(); this.remote = new Map(); this.effects = [];
     this.players = []; this.selfId = null; this.local = null; this.predicted = null; this.room = null;
+    this.snapshotOrder = new SnapshotOrder(); this.lookInput = new LookInput(); this.uniformTeam = null;
     this.aimRecoil = new AimRecoil();
     this.localSteps = new FootstepTracker();
     this.shotFeedback = new ShotFeedback(); this.fireSeq = 0; this.localShotIndex = 0; this.seenKills = new Set();
@@ -300,6 +304,7 @@ export class FPSGame {
       this.weapon.remove(previous);
       if (this.graphicsPreparing) this.retiredGraphics.push(() => disposeModel(previous)); else disposeModel(previous);
       const replacement = this.models.create(id, skinId, true, this.outfitId, this.characterId, this.skinId);
+      applyViewmodelUniform(replacement, this.uniformTeam);
       replacement.traverse((object) => object.layers.set(VIEWMODEL_LAYER)); this.weapon.add(replacement); this.weaponModels.set(id, replacement);
     }
     for (const [weaponId, model] of this.weaponModels) model.visible = weaponId === this.activeWeaponId;
@@ -356,13 +361,14 @@ export class FPSGame {
 
   bindInput() {
     const options = { signal: this.abort.signal };
-    window.addEventListener('resize', () => this.resize(), options);
+    window.addEventListener('resize', () => { this.lookInput.transition(performance.now()); this.resize(); }, options);
     document.addEventListener('mousemove', (event) => {
       if (!this.locked) return;
+      const delta = this.lookInput.delta(event, innerWidth, innerHeight, performance.now()); if (!delta) return;
       const sensitivity = this.settings.sensitivity * 0.0020 * (this.ads ? getWeapon(this.activeWeaponId).type === 'SNIPER' ? Math.max(0.25, getWeapon(this.activeWeaponId).zoom) : 0.67 : 1);
-      this.yaw -= event.movementX * sensitivity;
+      this.yaw -= delta.x * sensitivity;
       this.yaw = Math.atan2(Math.sin(this.yaw), Math.cos(this.yaw));
-      this.aimRecoil.move(-event.movementY * sensitivity);
+      this.aimRecoil.move(-delta.y * sensitivity);
     }, options);
     document.addEventListener('mousedown', (event) => {
       if (!this.locked || this.local?.hp <= 0 || !this.local || this.room?.phase !== 'active') return;
@@ -407,6 +413,7 @@ export class FPSGame {
     }, options);
     document.addEventListener('keyup', (event) => { this.keys.delete(event.code); if (event.code === 'Tab') $('scoreboard-overlay').hidden = true; }, options);
     document.addEventListener('pointerlockchange', () => {
+      this.lookInput.transition(performance.now());
       if (!this.locked) this.clearInput();
       if (this.room?.phase !== 'ended' && !this.loadoutOpen && this.local?.hp > 0) this.onMenu(!this.locked);
     }, options);
@@ -467,7 +474,8 @@ export class FPSGame {
   }
 
   applySnapshot(data, id = this.selfId) {
-    if (this.disposed) return;
+    if (this.disposed || !this.snapshotOrder.accept(data)) return;
+    const changedRound = !!this.room && this.room.roundId !== data.room.roundId;
     this.selfId = id; this.room = data.room; this.players = data.players;
     this.online = data.online;
     this.tutorial = data.tutorial;
@@ -476,7 +484,7 @@ export class FPSGame {
     this.serverOffset = data.serverTime - Date.now();
     const local = data.players.find((p) => p.id === id);
     if (!local) return;
-    const respawned = !this.local || this.local.spawnCount !== local.spawnCount || (this.local.hp <= 0 && local.hp > 0) || data.events.some((e) => e.type === 'restart');
+    const respawned = !this.local || this.local.spawnCount !== local.spawnCount || changedRound;
     const equipmentChanged = this.local && (this.local.equipmentSeq !== local.equipmentSeq || this.local.weaponId !== local.weaponId);
     if (this.local?.hp > 0 && local.hp <= 0) {
       this.deathAt = performance.now(); this.clearInput(); this.recoil = 0; this.muzzleUntil = 0;
@@ -496,6 +504,8 @@ export class FPSGame {
       reconcileMovement(this.predicted, local, this.world);
     }
     this.local = local;
+    const team = this.room.gameType === 'teams' ? local.teamId : null;
+    if (this.uniformTeam !== team) { this.uniformTeam = team; for (const model of this.weaponModels.values()) applyViewmodelUniform(model, team); }
     if (equipmentChanged && !respawned) {
       this.requestedWeaponId = local.weaponId; this.cancelAttack(); this.send(this.input());
       this.localNextFire = performance.now() + Math.max(0, local.nextFireAt - this.serverNow);
@@ -523,7 +533,10 @@ export class FPSGame {
     for (const [remoteId, avatar] of this.remote) if (!present.has(remoteId)) { this.scene.remove(avatar.group); this.disposeObject(avatar.group, false); this.remote.delete(remoteId); }
     this.syncDroppedWeapons(data.droppedWeapons || []); this.updateHud();
     if (Array.isArray(data.impacts)) for (const impact of data.impacts) this.bulletMarks.add(impact, null, performance.now() - Math.max(0, this.serverNow - impact.at));
-    for (const event of data.events) this.handleEvent(event);
+    for (const event of data.events) {
+      if (event.type === 'restart') { if (this.restartRound === data.room.roundId) continue; this.restartRound = data.room.roundId; }
+      this.handleEvent(event);
+    }
     if (data.room.phase === 'ended') {
       this.closeLoadout(false);
       this.clearInput(); if (this.locked) document.exitPointerLock();
@@ -763,12 +776,12 @@ export class FPSGame {
   animate(now) {
     if (this.disposed) return;
     this.frameId = requestAnimationFrame(this.animate);
-    const dt = Math.min((now - this.previousFrame) / 1000, 1 / 30); this.previousFrame = now;
+    const elapsed = Math.max(0, (now - this.previousFrame) / 1000), dt = Math.min(elapsed, 1 / 30); this.previousFrame = now;
     this.aimRecoil.update(now);
     const input = this.input();
     if (now - this.lastSend >= 1000 / 30 && this.local) { this.send(input); this.lastSend = now; }
     if (this.predicted && this.local) {
-      if (this.local.hp > 0 && this.room.phase === 'active') movePlayer(this.predicted, input, dt, this.world, this.serverNow);
+      if (this.local.hp > 0 && this.room.phase === 'active') advancePredictedMovement(this.predicted, input, elapsed, this.world, this.serverNow);
       const sprinting = this.predicted.sprinting;
       const step = this.localSteps.update(this.predicted, now, { active: this.local.hp > 0 && this.room.phase === 'active' && this.locked });
       if (step) this.audio.step(step.sprint, step.crouched, { foot: step.foot, volume: 1, pan: step.foot ? 0.06 : -0.06, distance: 0, remote: false, playerId: this.selfId });

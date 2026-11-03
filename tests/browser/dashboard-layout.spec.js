@@ -19,6 +19,8 @@ for (const edition of ['LAN', 'SOLO']) test(`${edition} dashboard fits every mod
         return { pageHeight: document.documentElement.scrollHeight, pageWidth: document.documentElement.scrollWidth, outside, clipped, overflowing };
       });
       expect(layout, `${edition} ${width}×${height} ${mode}`).toEqual({ pageHeight: height, pageWidth: width, outside: [], clipped: [], overflowing: [] });
+      const spacing = await page.evaluate(() => { const description = document.getElementById('mode-description').getBoundingClientRect(), actions = document.querySelector('.deployment-actions').getBoundingClientRect(), rail = document.querySelector('.operation-rail').getBoundingClientRect(), card = document.querySelector('.deploy-card').getBoundingClientRect(), tools = document.querySelector('.briefing-grid').getBoundingClientRect(); return { deadGap: actions.top - description.bottom, railFits: card.top >= rail.top - 1 && tools.bottom <= rail.bottom + 1 }; });
+      expect(spacing.deadGap).toBeLessThan(34); expect(spacing.railFits, `${edition} ${width}×${height}`).toBe(true);
     }
   }
   await mkdir('artifacts', { recursive: true }); await page.setViewportSize({ width: 1366,height: 768 }); await page.screenshot({ path: `artifacts/dashboard-one-screen-${edition.toLowerCase()}.png` }); expect(errors).toEqual([]);

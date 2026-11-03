@@ -4,7 +4,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Room } from '../shared/simulation.js';
 import { NETWORK_PROTOCOL, RULES, MAPS } from '../shared/world.js';
 import { isWeaponId, ownsWeapon, WEAPONS } from '../shared/catalog.js';
-import { EMPTY_INPUT } from '../shared/movement.js';
+import { EMPTY_INPUT, advanceTime } from '../shared/movement.js';
 import { roundReward } from '../shared/progression.js';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -199,7 +199,7 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
   });
   let previous = performance.now();
   if (loop) {
-    timers.push(setInterval(() => { const now = performance.now(); tick(Math.min((now - previous) / 1000, 1 / 30)); previous = now; }, 1000 / RULES.tickRate), setInterval(broadcast, 1000 / RULES.snapshotRate), setInterval(() => { void sync(); }, 1000));
+    timers.push(setInterval(() => { const now = performance.now(); advanceTime((now - previous) / 1000, tick); previous = now; }, 1000 / RULES.tickRate), setInterval(broadcast, 1000 / RULES.snapshotRate), setInterval(() => { void sync(); }, 1000));
     timers.push(setInterval(() => { for (const connection of connections) { if (!connection.alive) connection.socket.terminate(); else { connection.alive = false; connection.socket.ping(); } } }, 15_000));
   }
   return {

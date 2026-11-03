@@ -4,6 +4,15 @@ import { DEFAULT_WEAPON, isWeaponId, getWeapon } from './catalog.js';
 export const EMPTY_INPUT = Object.freeze({ forward: 0, strafe: 0, yaw: 0, pitch: 0, jump: false, sprint: false, crouch: false, fire: false, reload: false, ads: false, weaponId: DEFAULT_WEAPON });
 export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 export const angleDelta = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+
+// Share bounded catch-up between authoritative timers and render prediction.
+// Never discard ordinary slow frames or simulate an unbounded background pause.
+export function advanceTime(elapsed, tick) {
+  const duration = Math.min(.25, Math.max(0, Number.isFinite(elapsed) ? elapsed : 0));
+  const steps = Math.max(1, Math.ceil(duration * 60)), dt = duration / steps;
+  for (let step = 0; step < steps && dt > 0; step++) tick(dt, (step + 1) * dt, duration);
+  return duration;
+}
 const CONTACT_EPSILON = 0.00001;
 const overlaps = (player, b) => player.x > b.minX + CONTACT_EPSILON && player.x < b.maxX - CONTACT_EPSILON && player.z > b.minZ + CONTACT_EPSILON && player.z < b.maxZ - CONTACT_EPSILON;
 const colliderCache = new WeakMap();

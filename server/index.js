@@ -9,6 +9,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { RoomDirectory } from './room-directory.js';
 import { roomLobbyAction } from './room-lobby.js';
 import { RULES, NETWORK_PROTOCOL } from '../shared/world.js';
+import { advanceTime } from '../shared/movement.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8', '.webp': 'image/webp', '.ico': 'image/x-icon', '.glb': 'model/gltf-binary', '.wav': 'audio/wav' };
@@ -111,9 +112,9 @@ export function createGameServer({ port = Number(process.env.PORT) || 3000, host
   });
   let previousTick = performance.now();
   const tick = () => {
-    const now = performance.now(), dt = Math.min((now - previousTick) / 1000, 1 / 30);
+    const now = performance.now(), elapsed = (now - previousTick) / 1000;
     previousTick = now;
-    for (const room of rooms.values()) room.tick(dt);
+    advanceTime(elapsed, (dt) => { for (const room of rooms.values()) room.tick(dt); });
   };
   const broadcast = () => {
     for (const room of rooms.values()) {

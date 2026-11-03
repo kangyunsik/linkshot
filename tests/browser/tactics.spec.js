@@ -131,3 +131,48 @@ test('a quick Space tap is sent immediately and survives the next network input 
     expect(await page.evaluate(() => window.__tacticalTest.game.predicted.y)).toBe(0);
   } finally { await disposeComponent(page); }
 });
+
+test('duplicate restart events and delayed old-life snapshots cannot teleport the camera or reset mouse aim', async ({ page }) => {
+  await componentGame(page);
+  try {
+    const result = await page.evaluate(() => {
+      const { game,room,player } = window.__tacticalTest; cancelAnimationFrame(game.frameId);
+      const old = room.snapshot(); room.restart(player.id); const restarted = room.snapshot(false); game.applySnapshot(restarted);
+      player.x += .4; game.predicted.x = player.x; game.yaw = .63; game.pitch = -.12;
+      const current = room.snapshot(false); game.applySnapshot(current); const afterDuplicate = { yaw: game.yaw, pitch: game.pitch, x: game.predicted.x };
+      game.applySnapshot(old); game.applySnapshot(restarted); game.applySnapshot(current);
+      return { afterDuplicate, final: { yaw: game.yaw, pitch: game.pitch, x: game.predicted.x, life: game.local.spawnCount, round: game.room.roundId }, expected: { x: player.x, life: player.spawnCount, round: room.roundId } };
+    });
+    expect(result.afterDuplicate.yaw).toBeCloseTo(.63,8); expect(result.afterDuplicate.pitch).toBeCloseTo(-.12,8); expect(result.afterDuplicate.x).toBeCloseTo(result.expected.x,6);
+    expect(result.final).toEqual({ yaw: .63, pitch: -.12, ...result.expected });
+  } finally { await disposeComponent(page); }
+});
+
+test('the actual render loop keeps full movement speed at 15 FPS without repeated authoritative catch-up jumps', async ({ page }) => {
+  await componentGame(page);
+  try {
+    const result = await page.evaluate(async () => {
+      const { RULES } = await import('/shared/world.js'), { getWeapon } = await import('/shared/catalog.js');
+      const { game,player } = window.__tacticalTest; cancelAnimationFrame(game.frameId);
+      game.world = { ...game.world, width: 200,depth: 200,obstacles: [],buildings: [] }; game.predicted = { ...player,x: 0,y: 0,z: 0,vy: 0,vx: 0,vz: 0,grounded: true }; game.yaw = 0; game.keys.add('KeyW');
+      const base = performance.now(); game.previousFrame = base;
+      for (let frame = 1; frame <= 15; frame++) { game.animate(base + frame * 1000 / 15); cancelAnimationFrame(game.frameId); }
+      return { distance: -game.predicted.z, expected: RULES.walkSpeed * getWeapon(player.weaponId).walkMultiplier };
+    });
+    expect(result.distance).toBeCloseTo(result.expected,6);
+  } finally { await disposeComponent(page); }
+});
+
+test('a fullscreen/pointer-lock cursor warp is ignored without limiting an intentional 180-degree flick', async ({ page }) => {
+  await componentGame(page);
+  try {
+    const result = await page.evaluate(() => {
+      const { game } = window.__tacticalTest; game.yaw = .4; window.dispatchEvent(new Event('resize'));
+      document.dispatchEvent(new MouseEvent('mousemove', { movementX: innerWidth, movementY: 0 })); const afterWarp = game.yaw;
+      document.dispatchEvent(new MouseEvent('mousemove', { movementX: 10, movementY: -5 })); const afterSmall = game.yaw;
+      game.lookInput.transitionUntil = 0; const flick = new MouseEvent('mousemove', { movementX: Math.PI / .002, movementY: 0 }); document.dispatchEvent(flick);
+      return { afterWarp, afterSmall, turn: Math.atan2(Math.sin(game.yaw - afterSmall),Math.cos(game.yaw - afterSmall)), expectedTurn: Math.abs(Math.atan2(Math.sin(flick.movementX * .002),Math.cos(flick.movementX * .002))) };
+    });
+    expect(result.afterWarp).toBeCloseTo(.4,8); expect(result.afterSmall).toBeCloseTo(.38,8); expect(result.expectedTurn).toBeGreaterThan(3.13); expect(Math.abs(result.turn)).toBeCloseTo(result.expectedTurn,8);
+  } finally { await disposeComponent(page); }
+});

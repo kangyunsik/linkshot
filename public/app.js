@@ -12,6 +12,7 @@ import { CustomConnection } from './custom-connection.js';
 import { MatchIntro } from './match-intro.js';
 import { DialogMotion } from './dialog-motion.js';
 import { RoomLobbyView } from './room-lobby.js';
+import { SnapshotOrder } from './snapshot-order.js';
 import { ProfileStore, PROFILE_KEY } from './profile.js';
 import { profileStats, POINT_RULES, weaponMastery } from '/shared/progression.js';
 import { OUTFITS, getOutfit, CHARACTERS, getCharacter } from '/shared/outfits.js';
@@ -181,11 +182,15 @@ function connect(kind = getPlayMode(mode).transport) {
   bindConnection(connection, kind);
 }
 function bindConnection(connection, kind) {
+  const snapshots = new SnapshotOrder();
   const expectedOnlineAccount = ['online', 'custom'].includes(kind) ? onlineUser?.id : null;
   connection.addEventListener('message', (event) => {
     if (socket !== connection) return;
     let data; try { data = JSON.parse(event.data); } catch { return; }
     if (!data || typeof data !== 'object') return;
+    if (['joined', 'state'].includes(data.type) && data.room?.protocolVersion !== NETWORK_PROTOCOL) { send({ type: 'leave' }); setBusy(false); toast('서버를 재시작하고 페이지를 새로고침해 주세요. 전투 버전이 일치하지 않습니다.', true); connection.close(4001, 'Protocol mismatch'); return; }
+    if (data.type === 'joined' && (!selfSessionId || snapshots.code !== data.room?.code)) snapshots.reset();
+    if (['joined', 'state'].includes(data.type) && !snapshots.accept(data)) return;
     if (kind === 'online' && ['joined', 'state'].includes(data.type) && (!isOnlineRoom(data.room) || data.online?.matchId !== connection.matchId || !Array.isArray(data.players) || !data.players.some((player) => player?.id === expectedOnlineAccount) || data.type === 'joined' && data.id !== expectedOnlineAccount)) { connection.close(); setBusy(false); toast('온라인 경기 배정 정보가 일치하지 않습니다.', true); return; }
     if (kind === 'custom' && ['joined', 'state'].includes(data.type) && (data.room?.mode !== 'custom' || !data.players?.some((player) => player.id === expectedOnlineAccount) || data.type === 'joined' && data.id !== expectedOnlineAccount)) { connection.close(); setBusy(false); toast('사용자 대전 계정 정보를 확인하세요.', true); return; }
     if (data.type === 'hello') {
@@ -223,7 +228,7 @@ function bindConnection(connection, kind) {
     }
     if (wasPlaying) { leaveGame(false); toast(kind === 'local' ? '브라우저 시뮬레이션이 중단되었습니다. 다시 시작해 주세요.' : '서버 연결이 끊겼습니다. 튜토리얼/혼자 연습은 서버 없이 이용할 수 있습니다.', true); }
     selfSessionId = null;
-    reconnectTimeout = setTimeout(() => connect(kind), reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 1.5, 8000);
+    if (event.code !== 4001) { reconnectTimeout = setTimeout(() => connect(kind), reconnectDelay); reconnectDelay = Math.min(reconnectDelay * 1.5, 8000); }
   });
   connection.addEventListener('error', () => { /* close handles recovery. */ });
 }
@@ -575,6 +580,7 @@ function updateSelections() {
   $('hero-operation').textContent = `OPERATION ${String(index).padStart(3, '0')}`; $('hero-description').textContent = world.description;
   document.querySelector('.hero-art').style.backgroundImage = `linear-gradient(90deg,#0e151bdf 0%,#0e151b68 45%,#0d161b00 100%),linear-gradient(0deg,#0e141aef,#10202a00 45%,#17212e33),url('/assets/${world.image}')`;
   $('map-card-name').textContent = world.name; $('map-card-description').textContent = `${world.width} × ${world.depth} M · ${world.tag}`;
+  $('map-card').style.backgroundImage = `linear-gradient(90deg,#17232bed,#17232b80),url('/assets/${world.image}')`;
   $('loadout-weapon').replaceChildren(document.createTextNode(`${equipped.name} `));
   const type = document.createElement('span'); type.textContent = equipped.type; $('loadout-weapon').append(type);
   $('loadout-description').textContent = `${equipped.label} · ${equipped.magazine}발 · 사망 후 E로 변경`;

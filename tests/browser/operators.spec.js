@@ -112,3 +112,24 @@ test('both character models render all five outfits with distinct styled hair an
     await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/operators-male-female.png' });
   } finally { await page.evaluate(async () => { const { disposeModel } = await import('/weapon-model.js'), f = window.__bothCharacters; f.operators.forEach((operator) => disposeModel(operator.group)); f.models.dispose(); f.renderer.dispose(); f.host.remove(); delete window.__bothCharacters; }); }
 });
+
+test('team uniforms color clothing, vests and local sleeves without changing skin, weapons, body geometry or saved cosmetics', async ({ page }) => {
+  await page.goto('/'); await expect(page.getByText('LAN SERVER ONLINE')).toBeVisible();
+  const result = await page.evaluate(async () => {
+    const [{ createOperator },{ WeaponModels,disposeModel },{ applyViewmodelUniform },{ OUTFITS,CHARACTERS }] = await Promise.all([import('/operator-model.js'),import('/weapon-model.js'),import('/team-uniform.js'),import('/shared/outfits.js')]);
+    const models = new WeaponModels(), checks = [];
+    for (const character of CHARACTERS) for (const outfit of OUTFITS) {
+      const operators = [null,'blue','red'].map((teamId) => createOperator({ characterId: character.id,outfitId: outfit.id,skinId: 'arctic',weaponId: 'rifle',teamId },models));
+      const bodies = operators.map((operator) => operator.group.getObjectByName(character.bodyMesh));
+      checks.push({ skinSame: bodies.every((body) => body.material[0].color.equals(bodies[0].material[0].color)), geometrySame: bodies.every((body) => body.geometry === bodies[0].geometry), blue: bodies[1].material[1].color.b > bodies[1].material[1].color.r * 2, red: bodies[2].material[1].color.r > bodies[2].material[1].color.b * 2, identities: operators.every((operator) => operator.group.userData.outfitId === outfit.id && operator.group.userData.skinId === 'arctic') });
+      operators.forEach((operator) => disposeModel(operator.group));
+    }
+    const gun = models.create('rifle','arctic',true), sleeve = gun.getObjectByName('right-sleeve').material, bare = gun.getObjectByName('palm').material.map((material) => material.color.getHex()), original = sleeve.color.getHex(), colors = [];
+    gun.userData.firearmBody.traverse((object) => { if (object.material?.color) colors.push([object.material,object.material.color.getHex()]); });
+    applyViewmodelUniform(gun,'blue'); const blueSleeve = sleeve.color.b > sleeve.color.r * 2; applyViewmodelUniform(gun,'red'); const redSleeve = sleeve.color.r > sleeve.color.b * 2;
+    const untouched = colors.every(([material,color]) => material.color.getHex() === color) && gun.getObjectByName('palm').material.every((material,index) => material.color.getHex() === bare[index]); applyViewmodelUniform(gun,null); const restored = sleeve.color.getHex() === original;
+    disposeModel(gun); models.dispose(); return { checks,blueSleeve,redSleeve,untouched,restored };
+  });
+  for (const check of result.checks) expect(Object.values(check).every(Boolean)).toBe(true);
+  expect(result.blueSleeve && result.redSleeve && result.untouched && result.restored).toBe(true);
+});

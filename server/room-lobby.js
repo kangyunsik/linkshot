@@ -15,7 +15,7 @@ export class LobbyRoom extends Room {
     player.roomStatus = 'waiting'; player.ready = false; player.hp = 0; player.respawnAt = Infinity;
     player.input = { forward: 0, strafe: 0, yaw: player.yaw, pitch: player.pitch }; player.pendingShot = null; player.burstLeft = 0; player.history = [];
   }
-  addPlayer(...args) { const player = super.addPlayer(...args); this.park(player); return player; }
+  addPlayer(...args) { const owner = !this.hostId, player = super.addPlayer(...args); this.park(player); player.teamConfirmed = this.gameType !== 'teams' || player.isBot || owner; return player; }
   host(id) { if (id !== this.hostId) throw new Error('방장만 방 구성을 변경할 수 있습니다.'); }
   member(id) { const player = this.players.get(id); if (!player || player.isBot) throw new Error('방 참가자를 확인해 주세요.'); return player; }
   team(id, targetId, teamId) {
@@ -23,7 +23,7 @@ export class LobbyRoom extends Room {
     if (!player || actor.id !== player.id && id !== this.hostId) throw new Error('자신 또는 방장이 대기 중인 참가자의 팀을 변경할 수 있습니다.');
     if (player.roomStatus !== 'waiting') throw new Error('교전 중에는 팀을 변경할 수 없습니다. 대기실로 돌아와 주세요.');
     if (this.gameType !== 'teams' || !['blue', 'red'].includes(teamId)) throw new Error('블루팀 또는 레드팀을 선택해 주세요.');
-    player.teamId = teamId; player.ready = false;
+    player.teamId = teamId; player.teamConfirmed = player.isBot || actor.id === player.id; player.ready = false;
   }
   bot(id, data) {
     this.host(id); if (this.phase === 'active') throw new Error('AI 구성은 경기 시작 전에 변경해 주세요.');
@@ -36,13 +36,14 @@ export class LobbyRoom extends Room {
   }
   start(id) {
     this.host(id); if (!['lobby', 'ended'].includes(this.phase)) throw new Error('이미 교전 중입니다.');
+    if ([...this.players.values()].some((p) => !p.isBot && !p.teamConfirmed)) throw new Error('입장할 팀을 먼저 선택·확정해 주세요.');
     if ([...this.players.values()].some((p) => !p.isBot && p.id !== id && !p.ready)) throw new Error('참가자들이 준비를 마칠 때까지 기다려 주세요.');
     if (this.gameType === 'teams' && ['blue', 'red'].some((team) => ![...this.players.values()].some((p) => p.teamId === team))) throw new Error('양 팀에 플레이어나 AI를 배치해 주세요.');
     for (const player of this.players.values()) { player.roomStatus = 'playing'; player.ready = false; }
     super.restart(id);
   }
   restart(id) { this.start(id); }
-  enter(id) { const player = this.member(id); if (this.phase !== 'active' || player.roomStatus !== 'waiting') throw new Error('입장할 수 있는 교전을 확인해 주세요.'); player.roomStatus = 'playing'; player.ready = false; this.spawn(player); }
+  enter(id) { const player = this.member(id); if (this.phase !== 'active' || player.roomStatus !== 'waiting') throw new Error('입장할 수 있는 교전을 확인해 주세요.'); if (!player.teamConfirmed) throw new Error('입장할 팀을 먼저 선택·확정해 주세요.'); player.roomStatus = 'playing'; player.ready = false; this.spawn(player); }
   returnToLobby(id) { const player = this.member(id); if (player.roomStatus === 'playing' && this.phase === 'active' && player.hp > 0) { this.dropWeapon(player); player.deaths++; } this.park(player); }
   loadout(id, data) {
     const player = this.member(id); if (player.roomStatus !== 'waiting') throw new Error('대기실에서만 출격 장비를 변경할 수 있습니다.');
@@ -53,7 +54,7 @@ export class LobbyRoom extends Room {
   summary() { return { ...super.summary(), staging: true, playing: [...this.players.values()].filter((p) => !p.isBot && p.roomStatus === 'playing').length }; }
   snapshot(...args) {
     const state = super.snapshot(...args); state.room.staging = true;
-    for (const player of state.players) { const member = this.players.get(player.id); Object.assign(player, { roomStatus: member.roomStatus, ready: member.ready, botDifficulty: member.botDifficulty || this.botDifficulty }); }
+    for (const player of state.players) { const member = this.players.get(player.id); Object.assign(player, { roomStatus: member.roomStatus, ready: member.ready, teamConfirmed: member.teamConfirmed, botDifficulty: member.botDifficulty || this.botDifficulty }); }
     return state;
   }
 }
@@ -66,7 +67,7 @@ export function roomLobbyAction(room, id, data) {
   else if (data.type === 'room-start') room.start(id);
   else if (data.type === 'room-enter') room.enter(id);
   else if (data.type === 'room-return') room.returnToLobby(id);
-  else if (data.type === 'room-ready') { const player = room.member(id); if (player.roomStatus !== 'waiting' || room.phase === 'active') throw new Error('대기 중인 경기에서 준비해 주세요.'); player.ready = data.ready === true; }
+  else if (data.type === 'room-ready') { const player = room.member(id); if (player.roomStatus !== 'waiting' || room.phase === 'active') throw new Error('대기 중인 경기에서 준비해 주세요.'); if (!player.teamConfirmed) throw new Error('입장할 팀을 먼저 선택·확정해 주세요.'); player.ready = data.ready === true; }
   else if (data.type === 'room-loadout') room.loadout(id, data);
   else throw new Error('지원하지 않는 대기실 요청입니다.');
   return true;

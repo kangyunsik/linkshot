@@ -5,6 +5,7 @@ import { getSkin } from '/shared/catalog.js';
 import { getOutfit, getCharacter, CHARACTERS } from '/shared/outfits.js';
 import { NETWORK_PROTOCOL } from '/shared/world.js';
 import { HumanParts } from './human-model.js';
+import { TEAM_UNIFORMS } from '/shared/teams.js';
 
 const loader = new GLTFLoader();
 const assets = new Map(await Promise.all(CHARACTERS.map(async (character) => [character.id, await Promise.all([loader.loadAsync(`/assets/models/${character.model}?v=${NETWORK_PROTOCOL}`), loader.loadAsync(`/assets/models/${character.hair}?v=${NETWORK_PROTOCOL}`), character.helmetHair ? loader.loadAsync(`/assets/models/${character.helmetHair}?v=${NETWORK_PROTOCOL}`) : null])])));
@@ -90,7 +91,7 @@ function twoBone(upper, lower, end, target, pole) {
 
 export function createOperator(player, models) {
   const character = getCharacter(player.characterId), female = character.id === 'female', [bodyAsset, standardHair, helmetHair] = assets.get(character.id);
-  const outfit = getOutfit(player.outfitId), finish = getSkin(player.skinId), palette = outfit.id === 'field' ? { suit: finish.suit, armor: finish.color, dark: finish.dark, visor: finish.visor } : outfit;
+  const outfit = getOutfit(player.outfitId), finish = getSkin(player.skinId), palette = Object.hasOwn(TEAM_UNIFORMS,player.teamId) ? TEAM_UNIFORMS[player.teamId] : (outfit.id === 'field' ? { suit: finish.suit, armor: finish.color, dark: finish.dark, visor: finish.visor } : outfit);
   const hairAsset = helmetHair && ['runner', 'hazmat', 'orbital'].includes(outfit.id) ? helmetHair : standardHair;
   const group = new THREE.Group(), visual = clone(bodyAsset.scene); group.add(visual);
   visual.traverse((mesh) => { if (mesh.isMesh) { if (mesh.name !== character.bodyMesh) mesh.geometry = models.sharedOperatorGeometry(`body-${mesh.geometry.uuid}`, mesh.geometry); mesh.material = localMaterial(mesh.material, models); if (mesh.name === 'Eyebrows') { mesh.material.color.set('#b9a69a'); mesh.material.normalScale.setScalar(0.25); } mesh.castShadow = mesh.receiveShadow = true; } });
@@ -155,6 +156,7 @@ export function createOperator(player, models) {
   const footRotations = ['l', 'r'].map((side) => group.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(bones[`foot_${side}`].getWorldQuaternion(new THREE.Quaternion())));
   const headTop = 1.8 - group.worldToLocal(bones.Head.getWorldPosition(new THREE.Vector3())).y;
   group.userData.outfitId = outfit.id; group.userData.characterId = character.id; group.userData.skinId = finish.id; group.userData.rig = 'human-v3'; group.userData.engineMaterials = ['operator-fabric.png', 'operator-armor.png', 'operator-jacket.png'];
+  group.userData.teamId = Object.hasOwn(TEAM_UNIFORMS,player.teamId) ? player.teamId : null;
   const operator = { group, visual, bones, rest, feet, footRotations, headTop, scale, weapon, legs: [bones.thigh_l, bones.thigh_r], crouchParts: [], crouchAmount: 0 };
   poseOperator(operator, 0); return operator;
 }
