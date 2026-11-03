@@ -11,7 +11,7 @@ for (const edition of ['LAN', 'SOLO']) test(`${edition} dashboard fits every mod
     for (const mode of ['튜토리얼','혼자 연습','LAN 대전','일반','랭크','사용자 대전']) {
       await page.getByRole('tab', { name: mode, exact: true }).click();
       const layout = await page.evaluate(() => {
-        const selectors = ['#profile-button','#nav-play','#nav-armory','#mode-information-button','#create-button','#armory-button','#network-button','#profile-casual-rating','#profile-rank-tier', '.mode-switch'];
+        const selectors = ['#profile-button','#nav-play','#nav-armory','#mode-information-button','#create-button','#rank-card','#armory-button','#network-button','#profile-casual-rating','#profile-rank-tier', '.mode-switch'];
         const outside = selectors.filter((selector) => { const rect = document.querySelector(selector).getBoundingClientRect(); return rect.width <= 0 || rect.height <= 0 || rect.left < -1 || rect.right > innerWidth + 1 || rect.top < -1 || rect.bottom > innerHeight + 1; });
         const card = document.querySelector('.deploy-card').getBoundingClientRect();
         const clipped = [...document.querySelectorAll('.deploy-card button')].filter((node) => node.checkVisibility()).filter((node) => { const rect = node.getBoundingClientRect(); return rect.top < card.top - 1 || rect.bottom > card.bottom + 1; }).map((node) => node.id);
@@ -21,6 +21,8 @@ for (const edition of ['LAN', 'SOLO']) test(`${edition} dashboard fits every mod
       expect(layout, `${edition} ${width}×${height} ${mode}`).toEqual({ pageHeight: height, pageWidth: width, outside: [], clipped: [], overflowing: [] });
       const spacing = await page.evaluate(() => { const description = document.getElementById('mode-description').getBoundingClientRect(), actions = document.querySelector('.deployment-actions').getBoundingClientRect(), rail = document.querySelector('.operation-rail').getBoundingClientRect(), card = document.querySelector('.deploy-card').getBoundingClientRect(), tools = document.querySelector('.briefing-grid').getBoundingClientRect(); return { deadGap: actions.top - description.bottom, railFits: card.top >= rail.top - 1 && tools.bottom <= rail.bottom + 1 }; });
       expect(spacing.deadGap).toBeLessThan(34); expect(spacing.railFits, `${edition} ${width}×${height}`).toBe(true);
+      const tiles = await page.locator('.briefing-grid > button').evaluateAll((nodes) => nodes.map((node) => ({ width: node.getBoundingClientRect().width,height: node.getBoundingClientRect().height })));
+      expect(tiles).toHaveLength(3); expect(Math.max(...tiles.map((tile) => tile.width)) - Math.min(...tiles.map((tile) => tile.width))).toBeLessThanOrEqual(1); expect(Math.max(...tiles.map((tile) => tile.height)) - Math.min(...tiles.map((tile) => tile.height))).toBeLessThanOrEqual(1);
     }
   }
   await mkdir('artifacts', { recursive: true }); await page.setViewportSize({ width: 1366,height: 768 }); await page.screenshot({ path: `artifacts/dashboard-one-screen-${edition.toLowerCase()}.png` }); expect(errors).toEqual([]);
@@ -38,4 +40,6 @@ test('modal headers and actions stay reachable on short screens, background scro
   await page.setViewportSize({ width: 360,height: 640 }); await page.getByRole('button', { name: '플레이 방법', exact: true }).click(); await expect(page.locator('#help-dialog')).toBeVisible();
   await page.locator('#help-dialog .dialog-body').evaluate((node) => { node.scrollTop = node.scrollHeight; }); await page.mouse.move(2,2); await page.mouse.wheel(0,700);
   expect(await page.evaluate(() => scrollY)).toBe(0); await expect(page.getByLabel('도움말 닫기')).toBeInViewport(); await page.keyboard.press('Escape'); await expect(page.locator('#help-dialog')).toBeHidden(); expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(640);
+  await page.getByRole('tab',{ name: '혼자 연습',exact: true }).click(); await page.getByRole('button',{ name: '전장 변경',exact: true }).click(); await expect(page.locator('#maps-dialog')).toBeVisible(); await page.getByRole('button',{ name: '레드라인 전장 선택',exact: true }).click(); await expect(page.locator('#maps-dialog')).toBeHidden();
+  await page.locator('#rank-card').click(); await expect(page.locator('#rank-dialog')).toBeVisible(); expect(await page.evaluate(() => JSON.parse(localStorage.getItem('sector07-loadout')).mapId)).toBe('redline'); await page.keyboard.press('Escape'); await expect(page.locator('#rank-card')).toBeFocused();
 });

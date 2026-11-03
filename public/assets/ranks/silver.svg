@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <title>Silver · twin-wing shield</title>
+  <defs><linearGradient id="metal" x1="31" y1="18" x2="98" y2="106" gradientUnits="userSpaceOnUse"><stop stop-color="#f4fbff"/><stop offset=".48" stop-color="#aebfce"/><stop offset="1" stop-color="#516f89"/></linearGradient><linearGradient id="core" x1="64" y1="25" x2="64" y2="105" gradientUnits="userSpaceOnUse"><stop stop-color="#405b70"/><stop offset="1" stop-color="#172a3a"/></linearGradient></defs>
+  <path d="m11 34 26 10 5 39-13-9-9-18 17 8-2-10-18-9Zm106 0L91 44l-5 39 13-9 9-18-17 8 2-10 18-9Z" fill="url(#metal)"/>
+  <path d="m64 10 32 18-4 53-28 34-28-34-4-53Z" fill="#152430" stroke="#486378" stroke-width="2"/>
+  <path d="m64 17 25 15-4 46-21 26-21-26-4-46Z" fill="url(#core)" stroke="url(#metal)" stroke-width="4"/>
+  <path d="m45 48 19-14 19 14v11L64 46 45 59Zm2 22 17-12 17 12v11L64 69 47 81Z" fill="url(#metal)"/>
+  <path d="m61 91 3-4 3 4-3 4Z" fill="#e3f5ff"/>
+</svg>

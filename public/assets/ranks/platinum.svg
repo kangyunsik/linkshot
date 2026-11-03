@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <title>Platinum · four-blade crest</title>
+  <defs><linearGradient id="metal" x1="30" y1="16" x2="97" y2="113" gradientUnits="userSpaceOnUse"><stop stop-color="#e3fff5"/><stop offset=".44" stop-color="#80dfca"/><stop offset="1" stop-color="#368b91"/></linearGradient><linearGradient id="gem" x1="48" y1="40" x2="82" y2="88" gradientUnits="userSpaceOnUse"><stop stop-color="#b5ffec"/><stop offset="1" stop-color="#1c6c81"/></linearGradient></defs>
+  <path d="m64 8 9 24-9 11-9-11Zm0 112-9-24 9-11 9 11ZM8 55l25-14 10 18-14 19Zm112 0L95 41 85 59l14 19Z" fill="url(#metal)"/>
+  <path d="m64 20 35 29-3 36-32 28-32-28-3-36Z" fill="#13303c" stroke="#357c86" stroke-width="2"/>
+  <path d="m64 29 28 24-4 29-24 22-24-22-4-29Z" fill="#214b54" stroke="url(#metal)" stroke-width="4"/>
+  <path d="m64 40 24 24-24 30-24-30Z" fill="url(#gem)" stroke="#d2fff0" stroke-width="2"/>
+  <path d="m64 40-8 24 8 30 8-30ZM40 64h48" stroke="#b7ffed" stroke-width="2"/>
+</svg>

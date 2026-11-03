@@ -87,7 +87,6 @@ html:has(dialog[open]) { overflow: hidden; }
   .dashboard { grid-template-rows: auto auto minmax(0,1fr) 22px; }.operation-rail { height: 100%; min-height: 0; }.operation-rail .deploy-card { height: auto; }.operation-rail .briefing-grid { height: 50px; }
 }
 @media(max-width:650px) { .room-team-choice { padding: 12px; }.room-team-buttons { gap: 8px; }.room-team-buttons button { padding: 12px; }.room-team-buttons b { font-size: 12px; } }
-.map-info { background-size: cover; background-position: center; }
 @media(min-width:1051px) and (min-height:761px) {
   .operation-rail { grid-template-rows: auto minmax(0,1fr); align-content: stretch; }
   .operation-rail .briefing-grid { height: auto; grid-template-columns: 1fr; grid-template-rows: repeat(3,minmax(0,1fr)); gap: 10px; }
@@ -95,4 +94,19 @@ html:has(dialog[open]) { overflow: hidden; }
   .operation-rail .info-copy h3 { font-size: 17px !important; margin: 4px 0; }.operation-rail .info-copy p { font-size: 10px; }
   .operation-rail .mini-map-decoration { opacity: .32; right: 12px; }.operation-rail .weapon-silhouette { opacity: .38; right: 18px; }
   .operation-rail .network-info:after { content: '↗'; position: absolute; right: 24px; top: 50%; transform: translateY(-50%); font-size: 32px; color: #a3dbc9; opacity: .6; }
+}
+
+.rank-info,.rank-dialog { --rank-ink: #a8bfce; }
+[data-tier=BRONZE] { --rank-ink: #e1ac7c; }[data-tier=SILVER] { --rank-ink: #daeaf6; }[data-tier=GOLD] { --rank-ink: #ffda7b; }[data-tier=PLATINUM] { --rank-ink: #8ce9d3; }[data-tier=DIAMOND] { --rank-ink: #b0d5ff; }[data-tier=CHALLENGER] { --rank-ink: #ffdf9a; }
+.briefing-grid .rank-info { display: flex; align-items: center; background: radial-gradient(ellipse at 85% 50%,#2a3c4a80,transparent 70%),#191f25; }
+.rank-info:hover { border-color: var(--rank-ink); background-color: #20303b; }.rank-info .info-copy { min-width: 0; width: 100%; padding-right: 84px; }.rank-info .info-copy h3 { color: var(--rank-ink); }.rank-info .info-copy p { color: #a3bac6; }
+.rank-emblem { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); display: block; width: 76px; height: calc(100% - 8px); max-height: 84px; object-fit: contain; filter: drop-shadow(0 2px 7px #0007); transition: transform .2s ease; }.rank-info:hover .rank-emblem { transform: translateY(calc(-50% - 2px)); }
+.rank-dialog { width: min(620px,calc(100vw - 32px)); }.rank-detail { display: grid; grid-template-columns: 144px minmax(0,1fr); align-items: center; gap: 24px; padding: 5px 0 20px; }.rank-detail > img { display: block; width: 144px; height: 144px; filter: drop-shadow(0 8px 18px #0007); }.rank-detail h3 { color: var(--rank-ink); font-size: 29px; margin: 9px 0; }.rank-detail p { color: #bfd3db; font-size: 13px; margin: 0 0 14px; }
+.rank-detail-track { height: 5px; border-radius: 2px; overflow: hidden; background: #7095a43b; }.rank-detail-track i { display: block; height: 100%; background: var(--rank-ink); }.rank-ladder-title { font-size: 12px; margin: 20px 0 12px; color: #a6bec9; }.rank-ladder { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 9px; }.rank-ladder li { display: grid; justify-items: center; gap: 6px; padding: 12px 6px; border: 1px solid #536b783d; border-radius: 3px; background: #11202a; }.rank-ladder img { width: 72px; height: 72px; }.rank-ladder span { color: var(--rank-ink); font-size: 10px; }.rank-ladder [aria-current=step] { border-color: var(--rank-ink); background: #233642; }.rank-dialog .dialog-footer { gap: 10px; }.rank-dialog .dialog-footer > button { width: auto; }.rank-dialog .dialog-footer .primary-button { min-width: 90px; justify-content: center; }
+.compact-map-button { display: none; }
+@media(max-width:1050px), (max-height:760px) { .rank-emblem { right: 1px; width: 44px; max-height: 52px; opacity: .22; }.rank-info .info-copy { padding-right: 0; }.rank-info:hover .rank-emblem { transform: translateY(-50%); } }
+@media(max-width:740px) {
+  .deployment-actions > .compact-map-button { display: flex; }
+  .deployment-actions > #online-loadout-button { display: none; } /* The weapon card opens the same selector. */
+  .rank-detail { grid-template-columns: 94px minmax(0,1fr); gap: 14px; }.rank-detail > img { width: 94px; height: 94px; }.rank-detail h3 { font-size: 21px; }.rank-detail p { font-size: 11px; }.rank-ladder img { width: 58px; height: 58px; }.rank-dialog .dialog-footer .secondary-button { font-size: 10px; min-width: 0; }
 }

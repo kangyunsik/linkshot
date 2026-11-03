@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <title>Diamond · prismatic star</title>
+  <defs><linearGradient id="metal" x1="24" y1="19" x2="101" y2="111" gradientUnits="userSpaceOnUse"><stop stop-color="#f4f5ff"/><stop offset=".42" stop-color="#9dd3ff"/><stop offset="1" stop-color="#7868cc"/></linearGradient><linearGradient id="gem" x1="44" y1="37" x2="84" y2="94" gradientUnits="userSpaceOnUse"><stop stop-color="#dcffff"/><stop offset=".45" stop-color="#76bdff"/><stop offset="1" stop-color="#6356b7"/></linearGradient></defs>
+  <path d="m64 5 12 25 24-13-2 28 25 19-25 18 2 29-24-13-12 25-12-25-24 13 2-29L5 64l25-19-2-28 24 13Z" fill="#1a2940" stroke="#496187" stroke-width="2"/>
+  <path d="m64 15 9 25 17-13-4 24 25 13-25 12 4 25-17-13-9 25-9-25-17 13 4-25-25-12 25-13-4-24 17 13Z" fill="url(#metal)"/>
+  <path d="m64 30 29 34-29 38-29-38Z" fill="#1e3559" stroke="#d4e9ff" stroke-width="2"/>
+  <path d="m64 38 21 26-21 29-21-29Z" fill="url(#gem)"/>
+  <path d="m64 38-7 26 7 29 7-29ZM43 64h42" stroke="#e2faff" stroke-width="2"/>
+  <path d="m64 51 5 13-5 17-5-17Z" fill="#d9f4ff"/>
+</svg>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <title>Bronze · forged shield</title>
+  <defs><linearGradient id="metal" x1="32" y1="20" x2="94" y2="107" gradientUnits="userSpaceOnUse"><stop stop-color="#ffdbad"/><stop offset=".42" stop-color="#ce8a57"/><stop offset="1" stop-color="#75452f"/></linearGradient><linearGradient id="core" x1="64" y1="35" x2="64" y2="99" gradientUnits="userSpaceOnUse"><stop stop-color="#764c36"/><stop offset="1" stop-color="#2d2626"/></linearGradient></defs>
+  <path d="m64 12 38 17-5 51-33 35-33-35-5-51Z" fill="#1c242a" stroke="#654733" stroke-width="2"/>
+  <path d="m64 19 31 14-5 44-26 29-26-29-5-44Z" fill="url(#core)" stroke="url(#metal)" stroke-width="5"/>
+  <path d="m40 55 24-18 24 18v16L64 54 40 71Z" fill="url(#metal)"/>
+  <path d="m48 82 16 13 16-13" stroke="#edb27c" stroke-width="3"/>
+  <path d="m18 46 9 5 2 25-9-9Zm92 0-9 5-2 25 9-9Z" fill="#a16b47"/>
+  <path d="m61 25 3-4 3 4-3 4Z" fill="#ffe0b9"/>
+</svg>

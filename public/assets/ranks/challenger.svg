@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <title>Challenger · sovereign wings</title>
+  <defs><linearGradient id="metal" x1="25" y1="16" x2="101" y2="112" gradientUnits="userSpaceOnUse"><stop stop-color="#fff6d1"/><stop offset=".4" stop-color="#f4ce76"/><stop offset="1" stop-color="#ae7237"/></linearGradient><linearGradient id="gem" x1="45" y1="37" x2="82" y2="97" gradientUnits="userSpaceOnUse"><stop stop-color="#f5d6ff"/><stop offset=".46" stop-color="#bc85e6"/><stop offset="1" stop-color="#5b3b9f"/></linearGradient></defs>
+  <path d="m7 40 29 5 9 41-13-5-18-16 21 5-3-10-19-8Zm114 0-29 5-9 41 13-5 18-16-21 5 3-10 19-8Z" fill="url(#metal)"/>
+  <path d="m64 5 10 19 17-10-5 25H42l-5-25 17 10Z" fill="url(#metal)" stroke="#ffe7ad" stroke-width="1.5"/>
+  <path d="m64 27 32 21-6 39-26 33-26-33-6-39Z" fill="#312638" stroke="#9b7547" stroke-width="2"/>
+  <path d="m64 34 24 18-5 31-19 25-19-25-5-31Z" fill="url(#gem)" stroke="url(#metal)" stroke-width="4"/>
+  <path d="m64 43 6 18 17 8-17 8-6 22-6-22-17-8 17-8Z" fill="url(#metal)"/>
+  <path d="m64 57 8 12-8 14-8-14Z" fill="#fff4dc"/>
+  <path d="m26 88 16 7m60-7-16 7m-35 14 13 13 13-13" stroke="#d9b96a" stroke-width="3"/>
+</svg>

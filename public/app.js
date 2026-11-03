@@ -13,6 +13,7 @@ import { MatchIntro } from './match-intro.js';
 import { DialogMotion } from './dialog-motion.js';
 import { RoomLobbyView } from './room-lobby.js';
 import { SnapshotOrder } from './snapshot-order.js';
+import { rankPresentation, renderRankView } from './rank-view.js';
 import { ProfileStore, PROFILE_KEY } from './profile.js';
 import { profileStats, POINT_RULES, weaponMastery } from '/shared/progression.js';
 import { OUTFITS, getOutfit, CHARACTERS, getCharacter } from '/shared/outfits.js';
@@ -343,7 +344,7 @@ function setMode(value) {
   const settingsVisible = mode === 'practice' || roomMode;
   for (const selector of ['.bot-row', '.bot-level-row', '.match-options']) document.querySelector(selector).hidden = !settingsVisible;
   $('choose-map').disabled = mode === 'tutorial' || selected.transport === 'online';
-  $('map-card').disabled = $('choose-map').disabled;
+  $('compact-choose-map').hidden = mode === 'tutorial' || selected.transport === 'online';
   document.querySelector('label[for="frag-limit"]').firstChild.textContent = roomMode && $('room-game-type').value === 'teams' ? '팀 합산 목표 킬' : '목표 킬 수';
   if (mode === 'practice' && botCount === 0) botCount = 1;
   if (socket && transportKind !== selected.transport || !socket && (selected.transport === 'local' || selected.transport === 'custom' && onlineUser && onlineCapabilities.customRooms || selected.transport === 'lan' && !SOLO)) connect(selected.transport);
@@ -380,12 +381,13 @@ function renderOnlineAccount() {
 }
 function rankText(tier, division = 5, points = 0, placements = 0) { return tier === 'UNRANKED' ? `배치 ${placements || 0}/10` : tier === 'CHALLENGER' ? 'CHALLENGER' : `${tier} ${['', 'I', 'II', 'III', 'IV', 'V'][division]} · ${points} 승급점수`; }
 function renderOnlineProfileStats() {
-  const user = onlineUser, tierNames = { BRONZE: '브론즈', SILVER: '실버', GOLD: '골드', PLATINUM: '플래티넘', DIAMOND: '다이아', CHALLENGER: '챌린저' };
+  const user = onlineUser, rank = rankPresentation(user);
   $('profile-casual-rating').textContent = user ? user.casualRating.toLocaleString('ko-KR') : '—';
   $('profile-casual-status').textContent = user ? `${user.callsign} · 온라인 일반 점수` : onlineApi ? '일반 점수 · 온라인 로그인 필요' : '일반 점수 · 온라인 서버 미연결';
-  $('profile-rank-tier').textContent = !user ? '—' : user.rankTier === 'UNRANKED' ? '배치 중' : user.rankTier === 'CHALLENGER' ? tierNames.CHALLENGER : `${tierNames[user.rankTier] || user.rankTier} ${['', 'I', 'II', 'III', 'IV', 'V'][user.rankDivision] || ''}`;
-  $('profile-rank-progress').textContent = !user ? '랭크 티어 · 온라인 로그인 필요' : user.rankTier === 'UNRANKED' ? `배치 ${user.placementsPlayed || 0}/10판 · ${user.placementWins || 0}승` : `온라인 · ${user.rankPoints} 승급점수`;
+  $('profile-rank-tier').textContent = user ? rank.label : '—';
+  $('profile-rank-progress').textContent = user ? rank.detail : '랭크 티어 · 온라인 로그인 필요';
   $('profile-rank-tier').title = user ? rankText(user.rankTier, user.rankDivision, user.rankPoints, user.placementsPlayed) : '온라인 계정의 랭크 티어';
+  renderRankView(user);
 }
 async function connectOnlineServices() {
   if (!onlineApi || onlineServicePolling) return;
@@ -573,14 +575,11 @@ function updateSelections() {
   const world = getMap(loadout.mapId), weapon = getWeapon(selectedWeaponId), equipped = getWeapon(loadout.weaponId), skin = getSkin(loadout.skinId);
   const index = MAPS.indexOf(world) + 1;
   $('choose-map').querySelector('span').textContent = `${MAPS.length} MAPS ↗`;
-  $('map-card').querySelector('.card-eyebrow').textContent = `THE BATTLEGROUND / ${String(MAPS.length).padStart(2, '0')} MAPS`;
   document.querySelector('.hero-index i').textContent = `/ ${String(MAPS.length).padStart(2, '0')}`;
   $('hero-map-title').textContent = `${world.title}.`; $('hero-map-title').style.fontSize = world.title.length > 8 ? '.78em' : '';
   $('hero-map-name').textContent = world.name; $('hero-map-index').textContent = String(index).padStart(2, '0');
   $('hero-operation').textContent = `OPERATION ${String(index).padStart(3, '0')}`; $('hero-description').textContent = world.description;
   document.querySelector('.hero-art').style.backgroundImage = `linear-gradient(90deg,#0e151bdf 0%,#0e151b68 45%,#0d161b00 100%),linear-gradient(0deg,#0e141aef,#10202a00 45%,#17212e33),url('/assets/${world.image}')`;
-  $('map-card-name').textContent = world.name; $('map-card-description').textContent = `${world.width} × ${world.depth} M · ${world.tag}`;
-  $('map-card').style.backgroundImage = `linear-gradient(90deg,#17232bed,#17232b80),url('/assets/${world.image}')`;
   $('loadout-weapon').replaceChildren(document.createTextNode(`${equipped.name} `));
   const type = document.createElement('span'); type.textContent = equipped.type; $('loadout-weapon').append(type);
   $('loadout-description').textContent = `${equipped.label} · ${equipped.magazine}발 · 사망 후 E로 변경`;
@@ -768,7 +767,7 @@ $('sound-button').addEventListener('click', async () => {
   store('sector07-muted', String(audio.muted)); await audio.unlock(); audio.updateVolume(); updateSoundButton();
 });
 $('briefing-button').addEventListener('click', () => openDialog('briefing-dialog'));
-$('map-card').addEventListener('click', () => openDialog('maps-dialog'));
+$('compact-choose-map').addEventListener('click', () => openDialog('maps-dialog'));
 $('choose-map').addEventListener('click', () => openDialog('maps-dialog'));
 $('armory-button').addEventListener('click', chooseDeploymentWeapon);
 $('nav-armory').addEventListener('click', () => openDialog('armory-dialog'));
