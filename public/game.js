@@ -22,6 +22,8 @@ import { VIEWMODEL_LAYER, compileViewmodelPrograms, renderViewmodelFrame } from 
 import { updateTutorialView } from './tutorial-view.js';
 import { BulletMarks } from './bullet-marks.js';
 import { TEAM_COLORS, TEAM_NAMES, sameTeam } from '/shared/teams.js';
+import { AvatarPoseSchedule, FrameStats, qualityPreset } from './performance.js';
+import { batchStaticBoxes } from './static-scenery.js';
 
 const $ = (id) => document.getElementById(id);
 const lerp = THREE.MathUtils.lerp;
@@ -93,16 +95,18 @@ export class FPSGame {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.scene = new THREE.Scene(); this.scene.background = new THREE.Color(this.world.sky); this.scene.fog = new THREE.FogExp2(this.world.sky, 0.48 / Math.max(this.world.width, this.world.depth));
     this.camera = new THREE.PerspectiveCamera(settings.fov, 1, 0.04, Math.max(this.world.width, this.world.depth) * 3); this.camera.rotation.order = 'YXZ'; this.scene.add(this.camera);
+    this.poseFrustum = new THREE.Frustum(); this.poseMatrix = new THREE.Matrix4(); this.poseSphere = new THREE.Sphere(new THREE.Vector3(), 2);
+    this.frameStats = new FrameStats(); this.performanceStats = this.frameStats.summary();
     this.boxGeometry = new THREE.BoxGeometry(1, 1, 1);
     this.materials = {};
-    this.makeWorld(); this.scene.updateMatrixWorld(true);
+    this.makeWorld(); this.sceneryStats = batchStaticBoxes(this.scene, this.boxGeometry); this.scene.updateMatrixWorld(true);
     const impactMeshes = []; this.scene.traverse((object) => { if (object.isMesh) impactMeshes.push(object); });
     this.makeWeapon(); this.applySettings(); this.resize(); this.bindInput();
     this.combat = new CombatEffects(this.scene, this.models, this.world);
     this.bulletMarks = new BulletMarks(this.scene, impactMeshes);
     if (this.world.id === 'training') { this.trainingMarker = new THREE.Mesh(new THREE.TorusGeometry(.6, .045, 6, 32), new THREE.MeshBasicMaterial({ color: '#b4f0cf', depthWrite: false })); this.trainingMarker.rotation.x = -Math.PI / 2; this.trainingMarker.visible = false; this.scene.add(this.trainingMarker); }
     this.graphicsReady = false; this.graphicsPromise = null; this.graphicsPreparing = false; this.retiredGraphics = [];
-    this.previousFrame = performance.now(); this.fpsTime = this.previousFrame; this.fpsFrames = 0;
+    this.previousFrame = performance.now(); this.fpsTime = this.previousFrame;
     this.animate = this.animate.bind(this); this.frameId = requestAnimationFrame(this.animate);
   }
 
@@ -130,6 +134,7 @@ export class FPSGame {
         for (const [id, model] of this.weaponModels) model.visible = id === this.activeWeaponId;
         this.graphicsPreparing = false;
         this.bulletMarks.finishWarmup();
+        this.combat.finishWarmup();
         // compileAsync keeps material/program references while the driver
         // finishes linking. A departing peer must not invalidate those refs.
         const retired = this.retiredGraphics.splice(0); for (const dispose of retired) dispose();
@@ -356,7 +361,7 @@ export class FPSGame {
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture, transparent: true, opacity: 0.8, depthWrite: false })); label.position.y = 2.15; label.scale.set(2.6, 0.325, 1); group.add(label);
     group.position.set(player.x, player.y, player.z); group.rotation.y = player.yaw; this.scene.add(group);
     const shield = new THREE.Mesh(new THREE.TorusGeometry(0.43, 0.02, 8, 32), new THREE.MeshBasicMaterial({ color: '#82d9ff', transparent: true, opacity: 0.75, depthWrite: false })); shield.rotation.x = -Math.PI / 2; shield.position.y = 0.035; shield.name = 'spawn-shield'; group.add(shield);
-    return { ...operator, label, shield, target: player, lastX: player.x, lastZ: player.z, flashUntil: 0, steps: new FootstepTracker() };
+    return { ...operator, label, shield, target: player, lastX: player.x, lastZ: player.z, flashUntil: 0, steps: new FootstepTracker(), poseSchedule: new AvatarPoseSchedule() };
   }
 
   bindInput() {
@@ -461,10 +466,14 @@ export class FPSGame {
   }
 
   applySettings() {
-    this.renderer.setPixelRatio(this.settings.quality === 'low' ? 0.75 : Math.min(window.devicePixelRatio, 1.65));
-    this.renderer.shadowMap.enabled = this.settings.quality !== 'low';
-    this.sun.castShadow = this.settings.quality !== 'low';
-    for (const lamp of this.lamps) lamp.visible = this.settings.quality !== 'low';
+    const quality = qualityPreset(this.settings.quality), shadow = this.sun.shadow;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality.pixelRatio));
+    if (!quality.shadowSize || shadow.mapSize.x !== quality.shadowSize) {
+      shadow.dispose(); shadow.map = null; shadow.mapPass = null;
+      if (quality.shadowSize) shadow.mapSize.set(quality.shadowSize, quality.shadowSize);
+    }
+    this.renderer.shadowMap.enabled = this.sun.castShadow = quality.shadowSize > 0;
+    for (const lamp of this.lamps) lamp.visible = quality.lamps;
     this.resize();
   }
 
@@ -775,6 +784,7 @@ export class FPSGame {
 
   animate(now) {
     if (this.disposed) return;
+    const frameStarted = performance.now(); let poseUpdates = 0, viewTime = Infinity;
     this.frameId = requestAnimationFrame(this.animate);
     const elapsed = Math.max(0, (now - this.previousFrame) / 1000), dt = Math.min(elapsed, 1 / 30); this.previousFrame = now;
     this.aimRecoil.update(now);
@@ -839,13 +849,15 @@ export class FPSGame {
       this.hud['protection-hint'].hidden = this.local.hp <= 0 || this.local.protectedUntil < this.serverNow;
       if (this.local.hp <= 0) this.hud['respawn-count'].textContent = Math.max(1, Math.ceil((this.local.respawnAt - this.serverNow) / 1000));
     }
+    this.camera.updateWorldMatrix(true, false); this.poseFrustum.setFromProjectionMatrix(this.poseMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse));
     for (const avatar of this.remote.values()) {
       const target = avatar.target, position = avatar.group.position;
       avatar.group.visible = target.hp > 0;
       avatar.shield.visible = target.hp > 0 && target.protectedUntil > this.serverNow;
-      const teleport = position.distanceTo(new THREE.Vector3(target.x, target.y, target.z)) > 6;
+      const teleport = (position.x - target.x) ** 2 + (position.y - target.y) ** 2 + (position.z - target.z) ** 2 > 36;
       const smoothing = teleport ? 1 : Math.min(1, dt * 15);
       avatar.renderTime = lerp(avatar.renderTime, avatar.targetTime, smoothing);
+      if (target.hp > 0) viewTime = Math.min(viewTime, avatar.renderTime);
       position.x = lerp(position.x, target.x, smoothing); position.y = lerp(position.y, target.y, smoothing); position.z = lerp(position.z, target.z, smoothing);
       avatar.group.rotation.y += angleDelta(target.yaw, avatar.group.rotation.y) * smoothing;
       avatar.weapon.rotation.x = target.pitch + (target.weaponId === 'knife' ? Math.sin(clamp((avatar.swingUntil - now) / 360, 0, 1) * Math.PI) * .6 || 0 : 0);
@@ -853,6 +865,9 @@ export class FPSGame {
       const crouchTarget = target.crouchAmount ?? (target.crouching ? 1 : 0), crouchStep = dt / RULES.crouchSeconds;
       avatar.crouchAmount += clamp(crouchTarget - avatar.crouchAmount, -crouchStep, crouchStep);
       avatar.label.position.y = 2.15 - avatar.crouchAmount * 0.7;
+      // Keep interpolation/rewind time current through death, but skip hidden IK
+      // and reset footsteps so a respawn cannot play queued movement sounds.
+      if (target.hp <= 0) { avatar.steps.reset(); avatar.poseSchedule.reset(); avatar.lastX = position.x; avatar.lastZ = position.z; continue; }
       const source = { x: position.x, y: position.y, z: position.z, hp: target.hp, grounded: target.grounded, moveSpeed: target.moveSpeed, stepDistance: target.stepDistance, spawnCount: target.spawnCount, crouching: target.crouching, sprinting: target.sprinting };
       const step = avatar.steps.update(source, now, { active: this.room?.phase === 'active', teleport });
       if (step && this.predicted) {
@@ -866,13 +881,15 @@ export class FPSGame {
       }
       const speed = Math.hypot(position.x - avatar.lastX, position.z - avatar.lastZ) / Math.max(dt, 0.001);
       const stride = Math.sin(now * 0.011) * Math.min(0.5, speed * 0.08) * (1 - avatar.crouchAmount * 0.65);
-      poseOperator(avatar, avatar.crouchAmount, stride);
+      this.poseSphere.center.set(position.x, position.y + .9, position.z);
+      if (avatar.poseSchedule.update(now, this.poseFrustum.intersectsSphere(this.poseSphere), position.distanceToSquared(this.camera.position), avatar.crouchAmount, stride, avatar.weapon.rotation.x, avatar.weapon)) {
+        poseOperator(avatar, avatar.crouchAmount, stride); poseUpdates++;
+      }
       avatar.lastX = position.x; avatar.lastZ = position.z;
     }
-    const viewTimes = [...this.remote.values()].filter((avatar) => avatar.target.hp > 0).map((avatar) => avatar.renderTime);
     for (const item of this.groundItems.values()) item.group.position.y = lerp(item.group.position.y, item.target.y, Math.min(1, dt * 20));
     this.updateEquipmentPrompt();
-    this.viewTime = viewTimes.length ? Math.min(...viewTimes) : this.serverNow;
+    this.viewTime = Number.isFinite(viewTime) ? viewTime : this.serverNow;
     if (now - this.lastMap > 100 && this.predicted) {
       const origin = { x: this.predicted.x, y: this.predicted.y + playerPose(this.predicted).eyeHeight, z: this.predicted.z };
       const visible = this.players.filter((p) => p.id !== this.selfId && p.hp > 0 && (sameTeam(p, this.local) || Math.hypot(p.x - origin.x, p.z - origin.z) < 25 && hasLineOfSight(origin, { x: p.x, y: p.y + playerPose(p).eyeHeight, z: p.z }, this.world)));
@@ -892,17 +909,23 @@ export class FPSGame {
       const effect = this.effects[i]; this.scene.remove(effect.object); effect.object.geometry.dispose(); effect.object.material.dispose(); this.effects.splice(i, 1);
     }
     this.dust.rotation.y = Math.sin(now / 50000) * 0.03;
-    this.fpsFrames++;
-    if (now - this.fpsTime > 1000) { this.hud['hud-fps'].textContent = `${Math.round(this.fpsFrames * 1000 / (now - this.fpsTime))} FPS`; this.fpsFrames = 0; this.fpsTime = now; }
     if (this.graphicsReady && (this.locked || !this.lastRender || now - this.lastRender > 1000 / 10)) {
       this.renderFrame(); this.lastRender = now;
+      this.frameStats.record(now, performance.now() - frameStarted, this.renderer.info.render, poseUpdates);
+    }
+    if (now - this.fpsTime > 1000) {
+      const stats = this.performanceStats = this.frameStats.summary(), display = this.hud['hud-fps'];
+      display.textContent = `${stats.fps} FPS`;
+      display.title = `프레임 p95 ${stats.frameP95Ms.toFixed(1)}ms · CPU p95 ${stats.cpuP95Ms.toFixed(1)}ms · ${stats.calls} draw calls · ${stats.triangles} triangles`;
+      this.fpsTime = now;
     }
   }
 
   disposeObject(object, all = true) {
     if (this.graphicsPreparing) { this.retiredGraphics.push(() => this.disposeObject(object, all)); return; }
-    const geometries = new Set(), materials = new Set(), textures = new Set();
+    const geometries = new Set(), materials = new Set(), textures = new Set(), instances = [];
     object.traverse((child) => {
+      if (child.isInstancedMesh) instances.push(child);
       if (child.geometry && !child.geometry.userData.operatorShared && (all || child.geometry !== this.boxGeometry)) geometries.add(child.geometry);
       const items = child.material ? (Array.isArray(child.material) ? child.material : [child.material]) : [];
       for (const material of items) {
@@ -911,7 +934,7 @@ export class FPSGame {
         for (const value of Object.values(material)) if (value?.isTexture && (all || ![...this.models.textures.values()].includes(value))) textures.add(value);
       }
     });
-    geometries.forEach((geometry) => geometry.dispose()); materials.forEach((material) => material.dispose()); textures.forEach((texture) => texture.dispose());
+    instances.forEach((mesh) => mesh.dispose()); geometries.forEach((geometry) => geometry.dispose()); materials.forEach((material) => material.dispose()); textures.forEach((texture) => texture.dispose());
   }
 
   dispose() {

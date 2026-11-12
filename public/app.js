@@ -21,6 +21,7 @@ import { OperatorPreview } from './operator-model.js';
 import { BOT_DIFFICULTIES, getBotDifficulty } from '/shared/simulation.js';
 import { PLAY_MODES, getPlayMode, recordsLocalProgress } from './play-modes.js';
 import { TRAINING_WORLD } from '/shared/training-world.js';
+import { normalizeQuality } from './performance.js';
 
 const $ = (id) => document.getElementById(id);
 const { APP_MODE, PROFILE_STORAGE, ONLINE_SERVER_URL = '' } = runtime;
@@ -34,7 +35,7 @@ const inRange = (value, min, max, fallback) => typeof value === 'number' && Numb
 const settings = {
   sensitivity: inRange(saved.sensitivity, 0.3, 2.5, defaults.sensitivity),
   fov: inRange(saved.fov, 65, 105, defaults.fov), volume: inRange(saved.volume, 0, 100, defaults.volume),
-  quality: saved.quality === 'low' ? 'low' : 'normal',
+  quality: normalizeQuality(saved.quality),
 };
 const SOLO = APP_MODE === 'solo';
 let savedLoadout = {}; try { savedLoadout = JSON.parse(stored('sector07-loadout', '{}')) || {}; } catch { /* Use catalog defaults. */ }

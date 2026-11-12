@@ -13,6 +13,7 @@
     "package:windows": "npm run build && node scripts/package-windows.mjs",
     "test": "node --test tests/*.test.js",
     "test:e2e": "npm run build && playwright test",
+    "benchmark:performance": "node scripts/benchmark-performance.mjs",
     "security:check": "node scripts/security-audit.mjs",
     "online:config": "node scripts/create-online-env.mjs",
     "online:dev": "node --env-file=online-server/.env scripts/run-online-dev.mjs",

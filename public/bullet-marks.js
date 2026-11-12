@@ -1,6 +1,7 @@
 import * as THREE from '/vendor/three.module.js';
 import { BULLET_MARK_RULES } from '/shared/world.js';
 import { getWeapon } from '/shared/catalog.js';
+import { ImpactIndex } from './impact-index.js';
 
 let atlasCanvas;
 const hash = (text) => { let value = 2166136261; for (const character of text) value = Math.imul(value ^ character.charCodeAt(0), 16777619); return value >>> 0; };
@@ -31,9 +32,8 @@ function atlas() {
 export class BulletMarks {
   constructor(scene, worldMeshes) {
     this.scene = scene;
-    // Do not raycast every triangle of a merged arena for every shotgun pellet.
-    // Small local details refine the hit; large batches use the exact collider.
-    this.worldMeshes = worldMeshes.filter((mesh) => (mesh.geometry.index?.count || mesh.geometry.getAttribute('position').count) / 3 <= 2500).map((mesh) => ({ mesh, bounds: new THREE.Box3().setFromObject(mesh) }));
+    this.impactIndex = new ImpactIndex(worldMeshes); this.worldMeshes = this.impactIndex.entries;
+    this.nearby = []; this.hits = []; this.instanceHits = []; this.instanceMatrix = new THREE.Matrix4();
     this.items = []; this.cells = new Map(); this.seen = new Map(); this.now = { value: 0 }; this.caster = new THREE.Raycaster();
     this.geometry = new THREE.PlaneGeometry(1, 1);
     for (const [name, size] of [['markBorn', 1], ['markTile', 2], ['markMin', 3], ['markMax', 3]]) { const attribute = new THREE.InstancedBufferAttribute(new Float32Array(BULLET_MARK_RULES.maxMarks * size), size); attribute.setUsage(THREE.DynamicDrawUsage); this.geometry.setAttribute(name, attribute); }
@@ -49,6 +49,7 @@ export class BulletMarks {
     };
     this.material.customProgramCacheKey = () => 'instanced-bullet-scars-v1';
     this.mesh = new THREE.InstancedMesh(this.geometry, this.material, BULLET_MARK_RULES.maxMarks); this.mesh.name = 'persistent-bullet-scars'; this.mesh.count = 0; this.mesh.frustumCulled = false; this.mesh.renderOrder = 1; this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); this.mesh.setMatrixAt(0, new THREE.Matrix4().makeTranslation(10000, -10000, 10000)); scene.add(this.mesh);
+    this.instanceProxy = new THREE.Mesh(this.geometry, this.material); this.instanceProxy.matrixAutoUpdate = false;
   }
 
   prepareWarmup() { this.mesh.count = Math.max(1, this.items.length); }
@@ -58,8 +59,18 @@ export class BulletMarks {
     let point = new THREE.Vector3(surface.point.x, surface.point.y, surface.point.z), normal = new THREE.Vector3(surface.normal.x, surface.normal.y, surface.normal.z).normalize();
     const incoming = origin ? point.clone().sub(new THREE.Vector3(origin.x, origin.y, origin.z)).normalize() : normal.clone().negate();
     this.caster.set(point.clone().addScaledVector(incoming, -.14), incoming); this.caster.near = 0; this.caster.far = .28;
-    const nearby = this.worldMeshes.filter((entry) => entry.bounds.distanceToPoint(point) < .18).map((entry) => entry.mesh);
-    for (const hit of this.caster.intersectObjects(nearby, false)) {
+    this.hits.length = 0;
+    for (const entry of this.impactIndex.nearby(point, .18, this.nearby)) {
+      this.instanceHits.length = 0;
+      if (entry.instanceId !== null) {
+        const proxy = this.instanceProxy; proxy.geometry = entry.mesh.geometry; proxy.material = entry.mesh.material;
+        entry.mesh.getMatrixAt(entry.instanceId, this.instanceMatrix); proxy.matrixWorld.multiplyMatrices(entry.mesh.matrixWorld, this.instanceMatrix);
+        proxy.raycast(this.caster, this.instanceHits);
+      } else entry.mesh.raycast(this.caster, this.instanceHits);
+      for (const hit of this.instanceHits) { hit.object = entry.mesh; hit.instanceId = entry.instanceId; hit.impactOrder = entry.order; this.hits.push(hit); }
+    }
+    this.hits.sort((a, b) => a.distance - b.distance || a.impactOrder - b.impactOrder);
+    for (const hit of this.hits) {
       const material = Array.isArray(hit.object.material) ? hit.object.material[hit.face.materialIndex] : hit.object.material;
       if (material?.transparent && material.opacity < .5) continue;
       const transform = hit.object.matrixWorld.clone();
@@ -78,7 +89,7 @@ export class BulletMarks {
     const { point, normal } = this.refine(surface, origin); if (normal.lengthSq() < .9) return false;
     const key = `${surface.surfaceId}/${surface.normal.x},${surface.normal.y},${surface.normal.z}/${Math.round(point.x * BULLET_MARK_RULES.cellScale)},${Math.round(point.y * BULLET_MARK_RULES.cellScale)},${Math.round(point.z * BULLET_MARK_RULES.cellScale)}`;
     const existing = this.cells.get(key);
-    if (existing && existing.normal.dot(normal) > .95) { existing.born = born; this.geometry.getAttribute('markBorn').setX(existing.index, born); this.geometry.getAttribute('markBorn').needsUpdate = true; return true; }
+    if (existing && existing.normal.dot(normal) > .95) { existing.born = born; const attribute = this.geometry.getAttribute('markBorn'); attribute.setX(existing.index, born); attribute.addUpdateRange(existing.index, 1); attribute.needsUpdate = true; return true; }
     if (this.items.length >= BULLET_MARK_RULES.maxMarks) { let oldest = 0; for (let i = 1; i < this.items.length; i++) if (this.items[i].born < this.items[oldest].born) oldest = i; this.removeAt(oldest); }
     const seed = hash(surface.id), weapon = getWeapon(surface.weaponId), size = (weapon.type === 'SHOTGUN' ? .07 : weapon.type === 'SNIPER' ? .14 : weapon.type === 'SIDEARM' ? .09 : .115) * (.92 + seed % 17 / 100);
     const rotation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), seed / 0xffffffff * Math.PI * 2));
@@ -90,9 +101,9 @@ export class BulletMarks {
   }
 
   write(item) {
-    this.mesh.setMatrixAt(item.index, item.matrix); this.mesh.instanceMatrix.needsUpdate = true;
+    this.mesh.setMatrixAt(item.index, item.matrix); this.mesh.instanceMatrix.addUpdateRange(item.index * 16, 16); this.mesh.instanceMatrix.needsUpdate = true;
     this.geometry.getAttribute('markBorn').setX(item.index, item.born); this.geometry.getAttribute('markTile').setXY(item.index, item.tile % 4 / 4, (1 - Math.floor(item.tile / 4)) / 2); this.geometry.getAttribute('markMin').setXYZ(item.index, ...item.min); this.geometry.getAttribute('markMax').setXYZ(item.index, ...item.max);
-    for (const name of ['markBorn', 'markTile', 'markMin', 'markMax']) this.geometry.getAttribute(name).needsUpdate = true;
+    for (const name of ['markBorn', 'markTile', 'markMin', 'markMax']) { const attribute = this.geometry.getAttribute(name); attribute.addUpdateRange(item.index * attribute.itemSize, attribute.itemSize); attribute.needsUpdate = true; }
   }
   removeAt(index) {
     const item = this.items[index], last = this.items.pop(); if (this.cells.get(item.key) === item) this.cells.delete(item.key);
@@ -104,6 +115,6 @@ export class BulletMarks {
     for (let i = this.items.length - 1; i >= 0; i--) if (now - this.items[i].born >= BULLET_MARK_RULES.lifetimeMs) this.removeAt(i);
     for (const [id, at] of this.seen) { if (now - at > BULLET_MARK_RULES.lifetimeMs + 1500) this.seen.delete(id); else break; }
   }
-  clear() { this.items.length = 0; this.cells.clear(); this.seen.clear(); this.mesh.count = 0; }
-  dispose() { this.clear(); this.worldMeshes.length = 0; this.scene.remove(this.mesh); this.mesh.dispose(); this.geometry.dispose(); this.material.dispose(); this.texture.dispose(); }
+  clear() { this.items.length = 0; this.cells.clear(); this.seen.clear(); this.mesh.count = 0; this.mesh.instanceMatrix.clearUpdateRanges(); for (const name of ['markBorn', 'markTile', 'markMin', 'markMax']) this.geometry.getAttribute(name).clearUpdateRanges(); }
+  dispose() { this.clear(); this.impactIndex.clear(); this.nearby.length = this.hits.length = this.instanceHits.length = 0; this.instanceProxy.geometry = this.geometry; this.instanceProxy.material = this.material; this.scene.remove(this.mesh); this.mesh.dispose(); this.geometry.dispose(); this.material.dispose(); this.texture.dispose(); }
 }

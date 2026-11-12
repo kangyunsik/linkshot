@@ -3,20 +3,44 @@ import { createOperator, poseOperator } from './operator-model.js';
 import { disposeModel } from './weapon-model.js';
 import { bounds } from '/shared/world.js';
 
+const corpseKey = (player) => `${player.characterId}/${player.outfitId}/${player.skinId}/${player.teamId || ''}/${player.weaponId}/${player.weaponSkinId || player.skinId}`;
+const CORPSE_LIMIT = 8;
+
 export class CombatEffects {
-  constructor(scene, models, world) { this.scene = scene; this.models = models; this.world = world; this.bursts = []; this.stains = []; this.corpses = []; }
+  constructor(scene, models, world) { this.scene = scene; this.models = models; this.world = world; this.bursts = []; this.stains = []; this.corpses = []; this.corpsePool = []; this.warmupCorpses = []; }
 
   prepareWarmup(players) {
     if (this.warmup) return this.warmup;
     const group = new THREE.Group(), seen = new Set(); group.position.set(10000, 0, 10000);
     for (const player of players) {
-      const key = `${player.characterId}/${player.outfitId}/${player.skinId}/${player.teamId || ''}`; if (seen.has(key)) continue; seen.add(key);
-      const operator = createOperator(player, this.models); operator.weapon.visible = false; this.corpseMaterials(operator.group); group.add(operator.group);
+      const key = corpseKey(player); if (seen.has(key)) continue; seen.add(key);
+      const corpse = this.createCorpse(player); group.add(corpse.pivot); this.warmupCorpses.push(corpse);
     }
     group.add(new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3)), new THREE.PointsMaterial({ color: '#a62532', size: .045, transparent: true, opacity: .85, depthWrite: false })));
     group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 1, 0)]), new THREE.LineBasicMaterial({ color: '#ffdf9c', transparent: true, opacity: .8, depthWrite: false })));
     group.add(new THREE.Mesh(new THREE.SphereGeometry(.045, 4, 4), new THREE.MeshBasicMaterial({ color: '#ffc17d', transparent: true, opacity: .8 })));
-    group.traverse((object) => { object.frustumCulled = false; }); this.warmup = group; return group;
+    group.traverse((object) => { object.userData.warmupFrustumCulled = object.frustumCulled; object.frustumCulled = false; }); this.warmup = group; return group;
+  }
+
+  finishWarmup() {
+    for (const corpse of this.warmupCorpses) {
+      corpse.pivot.traverse((object) => { object.frustumCulled = object.userData.warmupFrustumCulled; delete object.userData.warmupFrustumCulled; });
+      this.retireCorpse(corpse);
+    }
+    this.warmupCorpses.length = 0;
+  }
+
+  createCorpse(player) {
+    const operator = createOperator(player, this.models), pivot = new THREE.Group(); pivot.name = 'corpse'; pivot.rotation.order = 'YXZ';
+    operator.weapon.visible = false; this.corpseMaterials(operator.group); pivot.add(operator.group);
+    const materials = new Set();
+    pivot.traverse((object) => { if (object.isMesh) for (const material of Array.isArray(object.material) ? object.material : [object.material]) materials.add(material); });
+    return { key: corpseKey(player), operator, pivot, materials: [...materials].map((material) => ({ material, opacity: material.opacity })) };
+  }
+
+  retireCorpse(corpse) {
+    corpse.pivot.removeFromParent(); this.corpsePool.push(corpse);
+    while (this.corpsePool.length > CORPSE_LIMIT) disposeModel(this.corpsePool.shift().pivot);
   }
 
   corpseMaterials(group) {
@@ -54,14 +78,15 @@ export class CombatEffects {
   }
 
   death(player) {
-    const operator = createOperator(player, this.models), pivot = new THREE.Group(); pivot.name = 'corpse'; pivot.rotation.order = 'YXZ'; pivot.rotation.y = player.yaw;
-    this.corpseMaterials(operator.group);
-    pivot.position.set(player.x, player.y, player.z); operator.weapon.visible = false; pivot.add(operator.group); this.scene.add(pivot);
+    const key = corpseKey(player), index = this.corpsePool.findIndex((corpse) => corpse.key === key);
+    const corpse = index < 0 ? this.createCorpse(player) : this.corpsePool.splice(index, 1)[0], { operator, pivot } = corpse;
+    for (const { material, opacity } of corpse.materials) material.opacity = opacity;
+    pivot.rotation.set(0, player.yaw, 0); pivot.position.set(player.x, player.y, player.z); this.scene.add(pivot); poseOperator(operator, 0);
     const sign = Math.random() < 0.65 ? 1 : -1, x = player.x + Math.sin(player.yaw) * sign * 0.75, z = player.z + Math.cos(player.yaw) * sign * 0.75;
     const floor = this.floor(x, z, player.y);
-    this.corpses.push({ operator, pivot, born: performance.now(), startY: player.y, floor, sign, roll: (Math.random() - 0.5) * 0.12 });
+    Object.assign(corpse, { born: performance.now(), startY: player.y, floor, sign, roll: (Math.random() - 0.5) * 0.12, settled: false }); this.corpses.push(corpse);
     this.stain(x, floor, z, 0.3);
-    while (this.corpses.length > 8) this.remove(this.corpses.shift().pivot);
+    while (this.corpses.length > CORPSE_LIMIT) this.retireCorpse(this.corpses.shift());
   }
 
   update(now, dt) {
@@ -78,18 +103,18 @@ export class CombatEffects {
     }
     for (let i = this.corpses.length - 1; i >= 0; i--) {
       const corpse = this.corpses[i], age = now - corpse.born, t = Math.min(1, age / 950), ease = t * t * (3 - 2 * t);
-      if (age > 10000) { this.remove(corpse.pivot); this.corpses.splice(i, 1); continue; }
+      if (age > 10000) { this.retireCorpse(corpse); this.corpses.splice(i, 1); continue; }
       if (t < 1 || !corpse.settled) {
         corpse.pivot.rotation.x = corpse.sign * Math.PI / 2 * ease; corpse.pivot.rotation.z = corpse.roll * ease;
         corpse.pivot.position.y = THREE.MathUtils.lerp(corpse.startY, corpse.floor + 0.30, ease);
         poseOperator(corpse.operator, Math.sin(t * Math.PI) * 0.55);
         if (t === 1) corpse.settled = true;
       }
-      if (age > 8500) corpse.pivot.traverse((object) => { if (object.isMesh) for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.opacity = Math.min(material.opacity, (10000 - age) / 1500); });
+      if (age > 8500) for (const { material, opacity } of corpse.materials) material.opacity = opacity * (10000 - age) / 1500;
     }
   }
 
   remove(object) { this.scene.remove(object); disposeModel(object); }
-  clear() { for (const burst of this.bursts) this.remove(burst.object); for (const stain of this.stains) this.remove(stain.object); for (const corpse of this.corpses) this.remove(corpse.pivot); this.bursts.length = this.stains.length = this.corpses.length = 0; }
-  dispose() { this.clear(); if (this.warmup) { disposeModel(this.warmup); this.warmup = null; } }
+  clear() { for (const burst of this.bursts) this.remove(burst.object); for (const stain of this.stains) this.remove(stain.object); for (const corpse of this.corpses) this.retireCorpse(corpse); this.bursts.length = this.stains.length = this.corpses.length = 0; }
+  dispose() { this.clear(); this.finishWarmup(); for (const corpse of this.corpsePool) disposeModel(corpse.pivot); this.corpsePool.length = 0; if (this.warmup) { disposeModel(this.warmup); this.warmup = null; } }
 }
