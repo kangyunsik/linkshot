@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAPS, WORLD, RULES, playerPose, damageBearing } from '../shared/world.js';
+import { MATCHMAKING_MAPS as MAPS, WORLD, RULES, playerPose, damageBearing } from '../shared/world.js';
 import { EMPTY_INPUT, movePlayer, sanitizeInput, movementSpeed, canStand } from '../shared/movement.js';
 import { Room, traceShot } from '../shared/simulation.js';
 import { WEAPONS } from '../shared/catalog.js';
@@ -8,10 +8,10 @@ import { WEAPONS } from '../shared/catalog.js';
 const player = (extra = {}) => ({ id: 'p', x: 24, y: 0, z: 18, yaw: 0, pitch: 0, vy: 0, grounded: true, hp: 100, protectedUntil: 0, weaponId: 'rifle', ...extra });
 const input = (extra = {}) => ({ ...EMPTY_INPUT, ...extra });
 
-test('crouch lowers the eye/hitbox, slows movement, blocks sprint and releases normally', () => {
+test('crouch lowers the eye/hitbox, slows movement and releases normally', () => {
   const p = player();
   for (let i = 0; i < 60; i++) movePlayer(p, input({ forward: 1, crouch: true }), 1 / 60);
-  assert.equal(p.crouching, true); assert.ok(18 - p.z >= RULES.crouchSpeed && 18 - p.z < RULES.crouchSpeed + (RULES.walkSpeed - RULES.crouchSpeed) * RULES.crouchSeconds);
+  assert.equal(p.crouching, true); assert.ok(18 - p.z >= RULES.crouchSpeed && 18 - p.z < RULES.crouchSpeed + (RULES.runSpeed - RULES.crouchSpeed) * RULES.crouchSeconds);
   assert.equal(playerPose(p).height, RULES.crouchHeight); assert.equal(playerPose(p).eyeHeight, RULES.crouchEyeHeight);
   for (let i = 0; i < 6; i++) movePlayer(p, input(), 1 / 60); assert.equal(p.crouching, false); assert.equal(playerPose(p).eyeHeight, RULES.eyeHeight);
   const sanitized = sanitizeInput({ crouch: 'true', crouching: true, height: 0.01 });
@@ -55,13 +55,14 @@ test('low cover hides a crouching player while elevated sightlines can see over 
   assert.equal(traceShot(shooter, [shooter, target], 1000).victim, target);
 });
 
-test('seven weapons have distinct weight, sprint and ADS movement penalties', () => {
+test('weapons retain weight/ADS penalties; Shift halves normal speed and legacy sprint never boosts it', () => {
   const walk = Object.fromEntries(WEAPONS.map((weapon) => [weapon.id, movementSpeed(player({ weaponId: weapon.id }), input({ forward: 1 }))]));
   assert.ok(walk.pistol > walk.smg && walk.smg > walk.rifle && walk.rifle > walk.dmr && walk.dmr > walk.sniper && walk.sniper > walk.lmg);
   for (const weapon of WEAPONS) {
     const p = player({ weaponId: weapon.id });
-    assert.ok(movementSpeed(p, input({ forward: 1, sprint: true })) > walk[weapon.id]);
-    assert.ok(movementSpeed(p, input({ forward: 1, ads: true, sprint: true })) < walk[weapon.id]);
+    assert.equal(movementSpeed(p, input({ forward: 1, sprint: true })), walk[weapon.id]);
+    assert.equal(movementSpeed(p, input({ forward: 1, walk: true })), walk[weapon.id] / 2);
+    assert.ok(movementSpeed(p, input({ forward: 1, ads: true, walk: true })) < walk[weapon.id] / 2);
     p.crouching = true;
     assert.equal(movementSpeed(p, input({ forward: 1, sprint: true })), RULES.crouchSpeed * weapon.walkMultiplier);
   }

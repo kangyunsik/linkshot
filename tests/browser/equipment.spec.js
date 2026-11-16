@@ -62,7 +62,7 @@ test('the static solo worker keeps the current gun when G has nothing to swap wi
   await page.evaluate(() => document.exitPointerLock()); await expect(page.locator('#pause-overlay')).toBeVisible(); await page.getByRole('button', { name: '로비로 나가기', exact: true }).click(); expect(sockets).toEqual([]); expect(apis).toEqual([]); expect(errors).toEqual([]);
 });
 
-test('real LAN movement snapshots produce audible remote Web Audio steps and stop after the source dies', async ({ page }) => {
+test('real LAN footsteps stop during silent walking, resume on release and stop after death', async ({ page }) => {
   const app = createGameServer({ port: 0, host: '127.0.0.1' }), info = await app.listen();
   try {
     await page.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: '' })); await page.goto(`http://127.0.0.1:${info.port}`);
@@ -77,7 +77,7 @@ test('real LAN movement snapshots produce audible remote Web Audio steps and sto
       document.getElementById('lobby').hidden = true; document.getElementById('game-shell').hidden = false;
       const game = new FPSGame({ canvas: document.getElementById('game-canvas'), minimap: document.getElementById('minimap'), mapId: 'foundry', settings: { sensitivity: 1, fov: 82, quality: 'low' }, audio, send(data) { a.send(JSON.stringify(data)); }, onMenu() {}, onFatal(message) { throw new Error(message); } });
       game.applySnapshot(first, first.id); a.addEventListener('message', (event) => { const data = JSON.parse(event.data); if (data.type === 'state') game.applySnapshot(data); }); await game.prepareGraphics();
-      let tick = 0; const timer = setInterval(() => b.send(JSON.stringify({ type: 'input', forward: ++tick % 3 === 0 ? 0 : .65, yaw: 0 })), 1000 / 30);
+      let tick = 0; const timer = setInterval(() => b.send(JSON.stringify({ type: 'input', forward: ++tick % 3 === 0 ? 0 : .65, yaw: 0, walk: window.__lanSteps?.silent === true })), 1000 / 30);
       window.__lanSteps = { a, b, game, audio, steps, timer }; return { code: first.room.code, a: first.id, b: second.id };
     });
     const room = app.rooms.get(ids.code); room.world = { ...room.world, width: 100, depth: 100, obstacles: [] };
@@ -86,6 +86,12 @@ test('real LAN movement snapshots produce audible remote Web Audio steps and sto
     await page.evaluate(() => { window.__lanSteps.game.yaw = 0; window.__lanSteps.steps.length = 0; });
     await expect.poll(() => page.evaluate(() => window.__lanSteps.steps.length), { timeout: 8000 }).toBeGreaterThanOrEqual(3);
     const steps = await page.evaluate(() => window.__lanSteps.steps); expect(steps.every((step) => step.gain > .03 && step.pan < 0)).toBe(true);
+    await page.evaluate(() => { window.__lanSteps.silent = true; });
+    await expect.poll(() => page.evaluate(() => window.__lanSteps.game.remote.values().next().value.target.walking)).toBe(true);
+    const quietCount = await page.evaluate(() => window.__lanSteps.steps.length), quietAt = Date.now(), travel = room.players.get(ids.b).stepDistance;
+    await expect.poll(async () => { expect(await page.evaluate(() => window.__lanSteps.steps.length)).toBe(quietCount); return Date.now() - quietAt; }, { timeout: 2500 }).toBeGreaterThan(900);
+    expect(room.players.get(ids.b).stepDistance).toBe(travel); await page.evaluate(() => { window.__lanSteps.silent = false; });
+    await expect.poll(() => page.evaluate(() => window.__lanSteps.steps.length)).toBeGreaterThan(quietCount);
     Object.assign(room.players.get(ids.b), { hp: 0, respawnAt: Date.now() + 10_000 });
     await expect.poll(() => page.evaluate(() => window.__lanSteps.game.remote.values().next().value.target.hp)).toBe(0);
     const count = await page.evaluate(() => window.__lanSteps.steps.length); await expect.poll(async () => { expect(await page.evaluate(() => window.__lanSteps.steps.length)).toBe(count); return Date.now() - room.players.get(ids.b).lastInput; }, { timeout: 2000 }).toBeGreaterThan(500);

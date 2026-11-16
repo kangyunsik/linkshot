@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="720" viewBox="0 0 1000 720" role="img" aria-labelledby="title desc">
+  <title id="title">SUMP 원형 지하 저수조 — 1차 평면 배치도</title>
+  <desc id="desc">서쪽과 동쪽 스폰에서 원형 순환로를 시계 및 반시계 방향으로 이동한다. 중앙의 낮은 배수판 A와 북쪽 펌프 구역 B, 남쪽 정비 구역 C가 거점 후보이며, 네 경사 연결과 남쪽의 앉기 우회 통로가 있다.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 10 5 0 10Z" fill="#e7b875"/></marker>
+    <style>
+      text { font-family: system-ui, sans-serif; fill: #d9e6e6; text-anchor: middle; }
+      .small { font-size: 13px; fill: #a5bdc5; }
+      .label { font-size: 17px; font-weight: 650; }
+      .ramp { fill: none; stroke: #e7b875; stroke-width: 5; marker-start: url(#arrow); marker-end: url(#arrow); }
+      .cover { fill: #293e49; stroke: #9eb4b4; stroke-width: 2; }
+      .site { fill: #d9a95f; fill-opacity: .16; stroke: #f0c37f; stroke-width: 3; }
+    </style>
+  </defs>
+  <rect width="1000" height="720" fill="#101c26"/>
+  <text x="40" y="48" style="text-anchor:start;font-size:30px;font-weight:750">SUMP / 원형 지하 저수조</text>
+  <text x="40" y="78" class="small" style="text-anchor:start">DESIGN 01 · 약 68 × 68m · 최대 8인 · 실제 게임 구현 전 동선 설계</text>
+  <rect x="40" y="108" width="920" height="510" rx="18" fill="#1b2a32" stroke="#435a65"/>
+  <ellipse cx="500" cy="354" rx="250" ry="184" fill="none" stroke="#516a72" stroke-width="74"/>
+  <ellipse cx="500" cy="354" rx="250" ry="184" fill="none" stroke="#9aafb0" stroke-width="2" stroke-dasharray="9 9"/>
+  <ellipse cx="500" cy="354" rx="165" ry="111" fill="#25423f" stroke="#83a7a0" stroke-width="3"/>
+  <path d="M187 354H250M750 354H813" stroke="#8aa3a6" stroke-width="32"/>
+  <path class="ramp" d="M268 354H332M668 354H732M500 199V242M500 465V509"/>
+  <path d="M292 478Q330 594 500 588Q670 594 708 478" fill="none" stroke="#83cfb9" stroke-width="10" stroke-linecap="round" stroke-dasharray="14 11"/>
+  <path d="M80 301 153 289 201 323 201 386 149 412 80 397Z" fill="#20466b" stroke="#79baff" stroke-width="3"/>
+  <path d="M920 301 847 289 799 323 799 386 851 412 920 397Z" fill="#65333c" stroke="#ff817a" stroke-width="3"/>
+  <text x="134" y="345" class="label" style="fill:#a9d4ff">BLUE</text><text x="134" y="371" class="small">서쪽 진입부</text>
+  <text x="866" y="345" class="label" style="fill:#ffb9b1">RED</text><text x="866" y="371" class="small">동쪽 진입부</text>
+  <path class="cover" d="M333 222Q351 202 377 199L385 222Q364 225 351 240Z"/>
+  <path class="cover" d="M667 222Q649 202 623 199L615 222Q636 225 649 240Z"/>
+  <path class="cover" d="M272 300Q281 270 304 251L322 267Q304 288 298 308Z"/>
+  <path class="cover" d="M728 300Q719 270 696 251L678 267Q696 288 702 308Z"/>
+  <path class="cover" d="M322 467Q345 488 377 494L370 520Q337 510 306 487Z"/>
+  <path class="cover" d="M678 467Q655 488 623 494L630 520Q663 510 694 487Z"/>
+  <rect x="477" y="311" width="46" height="84" rx="15" fill="#25353e" stroke="#a2b9ad" stroke-width="3"/>
+  <path class="cover" d="M382 327 410 316 424 339 403 354 380 345Z"/>
+  <path class="cover" d="M618 382 590 393 576 370 597 355 620 364Z"/>
+  <circle cx="500" cy="354" r="39" class="site"/><text x="500" y="362" class="label" style="fill:#f6d8a6;font-size:26px">A</text>
+  <circle cx="500" cy="170" r="29" class="site"/><text x="500" y="178" class="label" style="fill:#f6d8a6;font-size:23px">B</text>
+  <circle cx="500" cy="538" r="29" class="site"/><text x="500" y="546" class="label" style="fill:#f6d8a6;font-size:23px">C</text>
+  <text x="500" y="132" class="label">北 · 펌프 구역</text>
+  <text x="500" y="282" class="label">중앙 배수판 · 0m</text>
+  <text x="500" y="433" class="small">중앙 차폐 구조물 / 바닥 이동 가능</text>
+  <text x="290" y="427" class="small">외곽 순환로</text><text x="710" y="427" class="small">+2.4m</text>
+  <text x="500" y="604" class="small">南 · 정비 구역 / 아래쪽 앉기 통로 H 1.25m</text>
+  <text x="870" y="145" class="small">N ↑</text>
+  <path d="M65 653H112" stroke="#e7b875" stroke-width="4" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="199" y="659" class="small">높이 연결 경사로</text>
+  <path d="M328 653H379" stroke="#83cfb9" stroke-width="8" stroke-dasharray="10 7"/>
+  <text x="459" y="659" class="small">낮은 정비 우회로</text>
+  <circle cx="599" cy="653" r="13" class="site"/><text x="709" y="659" class="small">A/B/C = 목표 위치 후보</text>
+  <text x="500" y="696" class="small">시계 / 반시계 우회 · 중앙 낙하 후 경사로 복귀 · 미끄러짐/속도 변화 없음</text>
+</svg>

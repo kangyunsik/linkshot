@@ -10,10 +10,10 @@ const input = (overrides = {}) => ({ ...EMPTY_INPUT, ...overrides });
 test('movement is normalized, frame-rate independent, and cannot cross cover', () => {
   const p = player();
   for (let i = 0; i < 60; i++) movePlayer(p, input({ forward: 1 }), 1 / 60);
-  assert.ok(Math.abs(p.z - (18 - RULES.walkSpeed)) < 0.001);
+  assert.ok(Math.abs(p.z - (18 - RULES.runSpeed)) < 0.001);
   const diagonal = player({ x: 21, z: 19 });
   movePlayer(diagonal, input({ forward: 1, strafe: 1 }), 1 / 60);
-  assert.ok(Math.abs(Math.hypot(diagonal.x - 21, diagonal.z - 19) - RULES.walkSpeed / 60) < 0.001);
+  assert.ok(Math.abs(Math.hypot(diagonal.x - 21, diagonal.z - 19) - RULES.runSpeed / 60) < 0.001);
   const cover = player({ x: 0, z: -12 });
   const coverWorld = { ...WORLD, obstacles: [WORLD.obstacles.find((box) => box.id === 'low-n')] };
   for (let i = 0; i < 120; i++) movePlayer(cover, input({ forward: 1 }), 1 / 60, coverWorld);

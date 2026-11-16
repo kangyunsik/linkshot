@@ -10,16 +10,17 @@ const hash = (signal) => createHash('sha256').update(Buffer.from(signal.buffer))
 
 test('footsteps follow grounded travel distance at 30–144Hz and running is faster than crouching', () => {
   const counts = {};
-  for (const [mode, speed] of [['walk', 5.7], ['sprint', 8.55], ['crouch', 2.565]]) for (const hz of [30, 60, 144]) {
+  for (const [mode, speed] of [['run', 5.7], ['quiet', 2.85], ['crouch', 2.565]]) for (const hz of [30, 60, 144]) {
     const tracker = new FootstepTracker(), steps = [];
     for (let frame = 0; frame <= hz * 3; frame++) {
-      const step = tracker.update(player({ z: -speed * frame / hz, moveSpeed: speed, sprinting: mode === 'sprint', crouching: mode === 'crouch' }), frame * 1000 / hz);
+      const step = tracker.update(player({ z: -speed * frame / hz, moveSpeed: speed, walking: mode === 'quiet', crouching: mode === 'crouch' }), frame * 1000 / hz);
       if (step) steps.push(step);
     }
-    assert.ok(steps.length > 4); assert.ok(steps.every((step, i) => step.foot === i % 2)); counts[`${mode}/${hz}`] = steps.length;
+    if (mode === 'quiet') assert.equal(steps.length, 0); else assert.ok(steps.length > 4);
+    assert.ok(steps.every((step, i) => step.foot === i % 2)); counts[`${mode}/${hz}`] = steps.length;
   }
-  for (const mode of ['walk', 'sprint', 'crouch']) assert.ok(Math.max(...[30, 60, 144].map((hz) => counts[`${mode}/${hz}`])) - Math.min(...[30, 60, 144].map((hz) => counts[`${mode}/${hz}`])) <= 1);
-  assert.ok(counts['sprint/60'] > counts['walk/60'] && counts['walk/60'] > counts['crouch/60']);
+  for (const mode of ['run', 'quiet', 'crouch']) assert.ok(Math.max(...[30, 60, 144].map((hz) => counts[`${mode}/${hz}`])) - Math.min(...[30, 60, 144].map((hz) => counts[`${mode}/${hz}`])) <= 1);
+  assert.ok(counts['run/60'] > counts['crouch/60']);
 });
 
 test('standing, death, blocked movement and air travel never create queued or phantom footsteps', () => {
@@ -63,7 +64,7 @@ test('nearby footsteps are panned with the camera, attenuated by distance/height
   assert.ok(right.volume > footstepMix(listener, player({ x: 12 })).volume);
   assert.ok(right.volume > footstepMix(listener, player({ x: 4, y: 6 })).volume);
   const covered = footstepMix(listener, player({ x: 4 }), 0, true); assert.ok(covered.volume > 0 && covered.volume < right.volume);
-  assert.equal(footstepMix(listener, player({ x: 27 })).volume, 0); assert.ok(footstepMix(listener, player({ x: 27, sprinting: true })).volume > 0);
+  assert.equal(footstepMix(listener, player({ x: 27 })).volume, 0); assert.equal(footstepMix(listener, player({ x: 4, walking: true })).volume, 0);
   assert.equal(footstepMix(listener, player({ x: 15, crouching: true })).volume, 0); assert.equal(footstepMix({}, player()).volume, 0);
 });
 

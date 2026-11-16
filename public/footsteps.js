@@ -12,7 +12,7 @@ export class FootstepTracker {
     const travelElapsed = now - (this.travelAt ?? now);
     if (this.travel !== travel || !previous) this.travelAt = now;
     const authoritative = this.travel !== null && travel !== null;
-    const moving = active && player.hp > 0 && player.grounded === true && (authoritative || player.moveSpeed > 0.1);
+    const moving = active && player.hp > 0 && player.grounded === true && player.walking !== true && (authoritative || player.moveSpeed > 0.1);
     if (!previous || lifeChanged || teleport || elapsed <= 0 || elapsed > 250) { this.distance = 0; this.moving = moving; return null; }
     this.moving = moving;
     if (!moving) { this.distance = 0; return null; }
@@ -23,18 +23,17 @@ export class FootstepTracker {
     if (moved < .0001) { if (now - this.lastMovedAt > 350) this.distance = 0; return null; }
     this.lastMovedAt = now;
     this.distance += Math.min(moved, expected * 1.1 + 0.02);
-    const crouched = player.crouching === true, sprint = player.sprinting === true && !crouched;
-    const stride = crouched ? 1.2 : sprint ? 1.9 : 1.65;
-    if (this.distance < stride || now - this.lastStepAt < (sprint ? 125 : 160)) return null;
+    const crouched = player.crouching === true, stride = crouched ? 1.2 : 1.65;
+    if (this.distance < stride || now - this.lastStepAt < 160) return null;
     this.distance %= stride; this.lastStepAt = now; const foot = this.foot; this.foot = 1 - foot;
-    return { sprint, crouched, foot };
+    return { sprint: false, crouched, foot };
   }
 }
 
 export function footstepMix(listener, source, yaw = 0, occluded = false) {
   if (![listener?.x, listener?.y, listener?.z, source?.x, source?.y, source?.z, yaw].every(Number.isFinite)) return { volume: 0, pan: 0, distance: Infinity, occluded };
   const dx = source.x - listener.x, dz = source.z - listener.z, horizontal = Math.hypot(dx, dz), distance = Math.hypot(dx, source.y - listener.y, dz);
-  const range = source.crouching ? 14 : source.sprinting ? 34 : 26;
-  const volume = distance >= range ? 0 : (1 - distance / range) ** 1.35 / (1 + distance / 16) * (occluded ? 0.6 : 1);
+  const range = source.crouching ? 14 : 26;
+  const volume = source.walking === true || distance >= range ? 0 : (1 - distance / range) ** 1.35 / (1 + distance / 16) * (occluded ? 0.6 : 1);
   return { volume, pan: clamp((dx * Math.cos(yaw) - dz * Math.sin(yaw)) / Math.max(0.1, horizontal), -1, 1), distance, occluded };
 }

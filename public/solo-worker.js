@@ -12,7 +12,7 @@ function start(data) {
   stop();
   if (data.mode === 'tutorial') { tutorial = new TutorialSession(playerId, data.name, data); room = tutorial.room; }
   else {
-    room = new Room('SOLO7', { mode: 'practice', mapId: data.mapId, bots: Math.max(1, Number(data.bots) || 2), botDifficulty: data.botDifficulty, fragLimit: data.fragLimit, roundSeconds: data.roundSeconds });
+    room = new Room('SOLO7', { mode: 'practice', mapId: data.mapId, gameType: data.gameType, scoreLimit: data.scoreLimit, waves: data.waves, bots: data.gameType === 'defense' ? Math.max(0, Math.min(3, Number.isInteger(data.bots) ? data.bots : 2)) : Math.max(1, Number(data.bots) || 2), botDifficulty: data.botDifficulty, fragLimit: data.fragLimit, roundSeconds: data.roundSeconds });
     room.addPlayer(playerId, data.name, false, data);
   }
   send({ ...snapshot(), type: 'joined', id: playerId, events: [], impacts: room.impactHistory() });

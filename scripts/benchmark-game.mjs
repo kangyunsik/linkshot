@@ -4,8 +4,10 @@ import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createGameServer } from '../server/index.js';
 import { getMap } from '../shared/world.js';
+import { normalizeGameType, assertMapGameType } from '../shared/game-types.js';
 
 const mapId = getMap(process.env.BENCH_MAP).id, seconds = Math.max(3, Math.min(120, Number(process.env.BENCH_SECONDS) || 10));
+const gameType = normalizeGameType(process.env.BENCH_GAME_TYPE || getMap(mapId).gameTypes?.[0] || 'ffa'); assertMapGameType(getMap(mapId), gameType);
 const tag = String(process.env.BENCH_TAG || '').replace(/[^A-Za-z0-9-]/g, '');
 const server = createGameServer({ port: 0, host: '127.0.0.1', loop: false }); let browser;
 try {
@@ -14,7 +16,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   await page.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: '' }));
   await page.goto(`http://127.0.0.1:${info.port}`);
-  await page.evaluate(async (mapId) => {
+  await page.evaluate(async ({ mapId, gameType }) => {
     const [{ FPSGame }, { GameAudio }, { SoloConnection }] = await Promise.all([import('/game.js'), import('/audio.js'), import('/solo-connection.js')]);
     document.getElementById('lobby').hidden = true; document.getElementById('game-shell').hidden = false;
     const connection = new SoloConnection(), settings = { sensitivity: 1, fov: 82, volume: 0, quality: 'normal' }, audio = new GameAudio(settings);
@@ -22,7 +24,7 @@ try {
     function timed(object, method, array) { const original = object[method].bind(object); object[method] = (...args) => { const start = performance.now(); const value = original(...args); array.push(performance.now() - start); return value; }; }
     connection.addEventListener('message', ({ data: raw }) => {
       const data = JSON.parse(raw);
-      if (data.type === 'hello') connection.send(JSON.stringify({ type: 'create', name: 'BENCHMARK', mapId, mode: 'practice', bots: 7, botDifficulty: 'advanced', fragLimit: 200, roundSeconds: 3600 }));
+      if (data.type === 'hello') connection.send(JSON.stringify({ type: 'create', name: 'BENCHMARK', mapId, gameType, mode: 'practice', bots: gameType === 'defense' ? 3 : 7, botDifficulty: 'advanced', fragLimit: 200, roundSeconds: 3600 }));
       if (data.type === 'joined') {
         game = new FPSGame({ canvas: document.getElementById('game-canvas'), minimap: document.getElementById('minimap'), settings, audio, mapId, send: (data) => connection.send(JSON.stringify(data)), onMenu: (show) => { document.getElementById('pause-overlay').hidden = !show; }, onFatal: (message) => { throw new Error(message); } });
         timed(game, 'applySnapshot', measure.snapshot); timed(game, 'makeAvatar', measure.avatar); timed(game.combat, 'death', measure.death); timed(game, 'renderFrame', measure.render);
@@ -32,8 +34,10 @@ try {
       }
       if (data.type === 'state' && game) { game.applySnapshot(data); measure.events += data.events.length; }
     });
-  }, mapId);
-  await page.waitForFunction(() => window.__benchmark?.game.graphicsReady); await page.getByRole('button', { name: '교전 시작', exact: true }).click(); await page.evaluate(() => window.__benchmark.reset());
+  }, { mapId, gameType });
+  await page.waitForFunction(() => window.__benchmark?.game.graphicsReady); await page.getByRole('button', { name: '교전 시작', exact: true }).click();
+  if (gameType === 'defense') await page.waitForFunction(() => window.__benchmark.game.room.objective?.phase === 'wave' && window.__benchmark.game.room.objective.aliveEnemies >= 3);
+  await page.evaluate(() => window.__benchmark.reset());
   const cdp = await page.context().newCDPSession(page); await cdp.send('Profiler.enable'); await cdp.send('Profiler.start');
   await page.waitForTimeout(seconds * 1000); const profile = (await cdp.send('Profiler.stop')).profile;
   const result = await page.evaluate(() => {
@@ -46,5 +50,5 @@ try {
   const root = new URL('../artifacts/', import.meta.url); await mkdir(root, { recursive: true });
   await writeFile(new URL(`benchmark-${mapId}${tag ? `-${tag}` : ''}.cpuprofile`, root), JSON.stringify(profile)); await writeFile(new URL(`benchmark-${mapId}${tag ? `-${tag}` : ''}.json`, root), JSON.stringify(result, null, 2) + '\n');
   const top = [...profile.nodes].filter((node) => node.hitCount).sort((a, b) => b.hitCount - a.hitCount).slice(0, 12).map((node) => ({ fn: node.callFrame.functionName, hits: node.hitCount, file: node.callFrame.url.split('/').at(-1) }));
-  console.log(JSON.stringify({ mapId, seconds, ...result, top }, null, 2));
+  console.log(JSON.stringify({ mapId, gameType, seconds, ...result, top }, null, 2));
 } finally { await browser?.close(); await server.close(); }

@@ -1,4 +1,5 @@
 import { bounds, hasLineOfSight } from './world.js';
+import { topHeight, horizontalOverlap } from './terrain.js';
 
 export const EQUIPMENT_RULES = Object.freeze({ pickupRange: 1.8, pickupHeight: 1.25, equipMs: 350, actionMs: 350, lifetimeMs: 60_000, maxDrops: 32 });
 
@@ -23,7 +24,8 @@ export function settleDroppedWeapon(drop, dt, world) {
   let floor = 0;
   for (const obstacle of world.obstacles) {
     const b = bounds(obstacle);
-    if (drop.x > b.minX && drop.x < b.maxX && drop.z > b.minZ && drop.z < b.maxZ && b.maxY <= previous + .00001 && b.maxY >= drop.y) floor = Math.max(floor, b.maxY);
+    const top = topHeight(b, drop);
+    if (horizontalOverlap(drop, b) && top <= previous + .00001 && top >= drop.y) floor = Math.max(floor, top);
   }
   if (drop.y <= floor) { drop.y = floor; drop.vy = 0; drop.grounded = true; }
 }

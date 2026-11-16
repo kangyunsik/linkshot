@@ -3,6 +3,7 @@ import { RoomDirectory } from './room-directory.js';
 import { roomLobbyAction } from './room-lobby.js';
 import { isWeaponId } from '../shared/catalog.js';
 import { NETWORK_PROTOCOL } from '../shared/world.js';
+import { isTeamGame } from '../shared/game-types.js';
 
 export class CustomGateway {
   constructor({ send, clock, capacity }) {
@@ -36,7 +37,7 @@ export class CustomGateway {
       if (connection.socket.readyState !== WebSocket.OPEN) { this.directory.discardEmpty(next); return; }
       const profile = connection.profile;
       next.addPlayer(profile.id, profile.callsign, false, { ownedWeapons: profile.ownedWeapons, weaponKills: profile.weaponKills, outfitId: profile.outfitId, characterId: profile.characterId, weaponId: isWeaponId(data.weaponId) ? data.weaponId : 'rifle', skinId: data.skinId });
-      if (next.staging && ['blue', 'red'].includes(data.teamId) && next.gameType === 'teams') next.team(profile.id, profile.id, data.teamId);
+      if (next.staging && ['blue', 'red'].includes(data.teamId) && isTeamGame(next.gameType) && next.gameType !== 'defense') next.team(profile.id, profile.id, data.teamId);
       connection.roomCode = next.code;
       this.send(connection.socket, { ...next.snapshot(false), type: 'joined', id: profile.id, events: [], impacts: next.impactHistory() }); this.publishList();
     } finally { connection.roomAction = false; }

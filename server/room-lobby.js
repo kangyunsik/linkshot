@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { Room, getBotDifficulty } from '../shared/simulation.js';
+import { Room, getBotDifficulty, BOT_DIFFICULTIES } from '../shared/simulation.js';
 import { RULES } from '../shared/world.js';
 import { isWeaponId, ownsWeapon, getSkin } from '../shared/catalog.js';
+import { isTeamGame } from '../shared/game-types.js';
 
 // Waiting members share the roster, but never have a combat body or respawn.
 export class LobbyRoom extends Room {
   constructor(code, options = {}) {
     super(code, { ...options, bots: 0 }); this.phase = 'lobby'; this.staging = true;
-    const count = Number.isInteger(options.bots) ? Math.max(0, Math.min(7, options.bots)) : 2;
+    const count = Number.isInteger(options.bots) ? Math.max(0, Math.min(this.gameType === 'defense' ? 3 : 7, options.bots)) : 2;
     this.botSerial = count;
     for (let i = 0; i < count; i++) this.addPlayer(`bot-${randomUUID()}`, `AI ${i + 1}`, true);
   }
@@ -15,30 +16,39 @@ export class LobbyRoom extends Room {
     player.roomStatus = 'waiting'; player.ready = false; player.hp = 0; player.respawnAt = Infinity;
     player.input = { forward: 0, strafe: 0, yaw: player.yaw, pitch: player.pitch }; player.pendingShot = null; player.burstLeft = 0; player.history = [];
   }
-  addPlayer(...args) { const owner = !this.hostId, player = super.addPlayer(...args); this.park(player); player.teamConfirmed = this.gameType !== 'teams' || player.isBot || owner; return player; }
+  addPlayer(...args) { const owner = !this.hostId, player = super.addPlayer(...args); if (player.isWaveEnemy) { player.roomStatus = 'playing'; player.teamConfirmed = true; return player; } this.park(player); if (player.isBot) player.botDifficulty = this.botDifficulty; player.teamConfirmed = !isTeamGame(this.gameType) || this.gameType === 'defense' || player.isBot || owner; return player; }
   host(id) { if (id !== this.hostId) throw new Error('방장만 방 구성을 변경할 수 있습니다.'); }
   member(id) { const player = this.players.get(id); if (!player || player.isBot) throw new Error('방 참가자를 확인해 주세요.'); return player; }
   team(id, targetId, teamId) {
     const actor = this.member(id), player = this.players.get(targetId || id);
     if (!player || actor.id !== player.id && id !== this.hostId) throw new Error('자신 또는 방장이 대기 중인 참가자의 팀을 변경할 수 있습니다.');
     if (player.roomStatus !== 'waiting') throw new Error('교전 중에는 팀을 변경할 수 없습니다. 대기실로 돌아와 주세요.');
-    if (this.gameType !== 'teams' || !['blue', 'red'].includes(teamId)) throw new Error('블루팀 또는 레드팀을 선택해 주세요.');
+    if (this.gameType === 'defense') throw new Error('협동 방어전은 모든 참가자가 같은 수비팀입니다.');
+    if (!isTeamGame(this.gameType) || !['blue', 'red'].includes(teamId)) throw new Error('블루팀 또는 레드팀을 선택해 주세요.');
     player.teamId = teamId; player.teamConfirmed = player.isBot || actor.id === player.id; player.ready = false;
   }
   bot(id, data) {
     this.host(id); if (this.phase === 'active') throw new Error('AI 구성은 경기 시작 전에 변경해 주세요.');
     if (data.remove === true) { const player = this.players.get(data.id); if (!player?.isBot) throw new Error('제거할 AI를 확인해 주세요.'); this.removePlayer(player.id); return; }
+    const difficulty = data.difficulty ?? this.botDifficulty;
+    if (!BOT_DIFFICULTIES.some((level) => level.id === difficulty)) throw new Error('초급·중급·고급 중 AI 난이도를 선택해 주세요.');
+    if (data.id !== undefined) {
+      const player = this.players.get(data.id); if (!player?.isBot) throw new Error('변경할 AI를 확인해 주세요.');
+      player.botDifficulty = difficulty; return;
+    }
     if (this.players.size >= RULES.maxPlayers) throw new Error('방이 가득 찼습니다.');
-    if (this.gameType === 'teams' && !['blue', 'red'].includes(data.teamId)) throw new Error('AI의 팀을 선택해 주세요.');
+    if (this.gameType === 'defense' && [...this.players.values()].filter((p) => p.teamId === 'blue').length >= 4) throw new Error('수비팀은 사람과 지원 AI를 합쳐 최대 4명입니다.');
+    if (isTeamGame(this.gameType) && !['blue', 'red'].includes(data.teamId)) throw new Error('AI의 팀을 선택해 주세요.');
+    if (this.gameType === 'defense' && data.teamId !== 'blue') throw new Error('공세 AI는 웨이브가 자동 구성합니다.');
     const player = this.addPlayer(`bot-${randomUUID()}`, `AI ${++this.botSerial}`, true);
-    if (this.gameType === 'teams') player.teamId = data.teamId;
-    const difficulty = getBotDifficulty(data.difficulty); player.botDifficulty = difficulty.id;
+    if (isTeamGame(this.gameType)) player.teamId = data.teamId;
+    player.botDifficulty = getBotDifficulty(difficulty).id;
   }
   start(id) {
     this.host(id); if (!['lobby', 'ended'].includes(this.phase)) throw new Error('이미 교전 중입니다.');
     if ([...this.players.values()].some((p) => !p.isBot && !p.teamConfirmed)) throw new Error('입장할 팀을 먼저 선택·확정해 주세요.');
     if ([...this.players.values()].some((p) => !p.isBot && p.id !== id && !p.ready)) throw new Error('참가자들이 준비를 마칠 때까지 기다려 주세요.');
-    if (this.gameType === 'teams' && ['blue', 'red'].some((team) => ![...this.players.values()].some((p) => p.teamId === team))) throw new Error('양 팀에 플레이어나 AI를 배치해 주세요.');
+    if (isTeamGame(this.gameType) && this.gameType !== 'defense' && ['blue', 'red'].some((team) => ![...this.players.values()].some((p) => p.teamId === team))) throw new Error('양 팀에 플레이어나 AI를 배치해 주세요.');
     for (const player of this.players.values()) { player.roomStatus = 'playing'; player.ready = false; }
     super.restart(id);
   }

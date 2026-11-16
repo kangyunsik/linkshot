@@ -34,7 +34,7 @@ test('walking off a deck releases support and falls without sideways teleports',
     const p = player({ x: 2.29, y: 1.8, z: 0 });
     for (let i = 0; i < hz; i++) {
       const x = p.x; movePlayer(p, input({ strafe: 1 }), 1 / hz, world);
-      assert.ok(p.x >= x && p.x - x <= RULES.walkSpeed / hz + 0.00001);
+      assert.ok(p.x >= x && p.x - x <= RULES.runSpeed / hz + 0.00001);
       assert.ok(clearBody(p, world));
     }
     assert.equal(p.y, 0); assert.equal(p.grounded, true);
@@ -118,14 +118,14 @@ test('upward collision uses the full footprint and cannot pass through a ceiling
   }
 });
 
-test('airborne direction and speed remain fixed despite WASD, mouse turns, sprint and ADS changes', () => {
-  for (const hz of rates) for (const sprint of [false, true]) {
+test('airborne direction and speed remain fixed despite WASD, mouse turns, silent walk and ADS changes', () => {
+  for (const hz of rates) for (const walk of [false, true]) {
     const world = { width: 100, depth: 100, obstacles: [] }, p = player({ x: 0, z: 0 });
-    movePlayer(p, input({ jump: true, forward: 1, sprint }), 1 / hz, world);
+    movePlayer(p, input({ jump: true, forward: 1, walk }), 1 / hz, world);
     const vx = p.vx, vz = p.vz, speed = Math.hypot(vx, vz);
     for (let frame = 0; frame < hz / 2; frame++) {
       const before = { x: p.x, z: p.z };
-      movePlayer(p, input({ yaw: frame % 2 ? Math.PI / 2 : Math.PI, pitch: 0.4, forward: frame % 3 - 1, strafe: frame % 2 ? -1 : 1, sprint: !sprint, ads: true }), 1 / hz, world);
+      movePlayer(p, input({ yaw: frame % 2 ? Math.PI / 2 : Math.PI, pitch: 0.4, forward: frame % 3 - 1, strafe: frame % 2 ? -1 : 1, walk: !walk, ads: true }), 1 / hz, world);
       assert.equal(p.grounded, false); assert.equal(p.vx, vx); assert.equal(p.vz, vz);
       assert.ok(Math.abs(p.x - before.x - vx / hz) < 1e-9); assert.ok(Math.abs(p.z - before.z - vz / hz) < 1e-9);
       assert.ok(Math.abs(p.moveSpeed - speed) < 1e-9); assert.equal(p.pitch, 0.4, 'aiming is independent of the locked trajectory');

@@ -2,14 +2,14 @@ import { test, expect } from '@playwright/test';
 
 test.use({ deviceScaleFactor: 2 });
 
-async function fixture(page) {
+async function fixture(page, quality = 'low') {
   await page.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: '' })); await page.goto('/');
-  await page.evaluate(async () => {
+  await page.evaluate(async (quality) => {
     const [{ FPSGame }, { Room }] = await Promise.all([import('/game.js'), import('/shared/simulation.js')]);
     const room = new Room('PERF', { bots: 0 }), player = room.addPlayer('viewer', 'VIEWER'); room.addPlayer('other', 'OTHER'); room.events.length = 0;
-    const game = new FPSGame({ canvas: document.getElementById('game-canvas'), minimap: document.getElementById('minimap'), settings: { sensitivity: 1, fov: 82, quality: 'low' }, audio: { step() {}, stopReload() {} }, send() {}, onMenu() {}, onFatal(message) { throw new Error(message); } });
+    const game = new FPSGame({ canvas: document.getElementById('game-canvas'), minimap: document.getElementById('minimap'), settings: { sensitivity: 1, fov: 82, quality }, audio: { step() {}, stopReload() {} }, send() {}, onMenu() {}, onFatal(message) { throw new Error(message); } });
     game.applySnapshot(room.snapshot(), player.id); await game.prepareGraphics(); cancelAnimationFrame(game.frameId); window.__performance = { game, room, player };
-  });
+  }, quality);
 }
 
 test('balanced quality survives saved settings and browser reloads', async ({ page }) => {
@@ -95,6 +95,24 @@ test('impact refinement only raycasts nearby instances and preserves transformed
   });
   expect(result.casts).toBeLessThanOrEqual(2); expect(result.indexed).toBe(2000); expect(result.error).toBeLessThan(1e-6); expect(result.normal).toBeGreaterThan(.999999);
   expect(result.matrixRange).toEqual({ start: 0, count: 16 }); expect(result.birthRange).toEqual({ start: 0, count: 1 }); expect(result.cleared).toBe(true);
+});
+
+test('every world gun and both skin-map variants reuse precompiled wall-clipping programs after weapon changes', async ({ page }) => {
+  await fixture(page, 'normal');
+  const result = await page.evaluate(async () => {
+    const [{ EQUIPMENT }, { poseOperator }] = await Promise.all([import('/shared/catalog.js'), import('/operator-model.js')]);
+    const { game, room } = window.__performance, player = room.players.get('other');
+    Object.assign(player, { x: 24, y: 0, z: 6, yaw: 0, pitch: 0 }); game.camera.position.set(21, 1.4, 8); game.camera.lookAt(24, 1.2, 6);
+    const before = game.renderer.info.programs.length; let maximum = before, checked = 0;
+    for (const weapon of EQUIPMENT) for (const skin of ['standard', 'circuit']) {
+      player.weaponId = weapon.id; player.weaponSkinId = skin; game.applySnapshot(room.snapshot()); const avatar = game.remote.get(player.id);
+      avatar.group.position.set(player.x, player.y, player.z); avatar.group.rotation.y = 0; poseOperator(avatar, 0); avatar.weapon.userData.flash.visible = true; avatar.weaponWall.update(game.world, avatar.group.position, 0);
+      game.renderFrame(); maximum = Math.max(maximum, game.renderer.info.programs.length); checked++;
+    }
+    const retained = game.combat.warmup.children.filter((object) => object.userData.worldWeaponWarmup).length;
+    await game.dispose(); delete window.__performance; return { before, maximum, checked, retained };
+  });
+  expect(result.checked).toBe(42); expect(result.retained).toBe(42); expect(result.maximum).toBe(result.before);
 });
 
 test('static scenery batching reduces draw calls while retaining transforms, shadows and rendered silhouettes', async ({ page }) => {

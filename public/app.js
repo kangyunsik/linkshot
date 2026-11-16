@@ -22,10 +22,13 @@ import { BOT_DIFFICULTIES, getBotDifficulty } from '/shared/simulation.js';
 import { PLAY_MODES, getPlayMode, recordsLocalProgress } from './play-modes.js';
 import { TRAINING_WORLD } from '/shared/training-world.js';
 import { normalizeQuality } from './performance.js';
+import { normalizeGameType, isTeamGame, gameTypeName, supportsGameType } from '/shared/game-types.js';
+import { objectiveOptions } from '/shared/objectives.js';
+import { normalizeWeaponHand } from './viewmodel-renderer.js';
 
 const $ = (id) => document.getElementById(id);
-const { APP_MODE, PROFILE_STORAGE, ONLINE_SERVER_URL = '' } = runtime;
-const defaults = { sensitivity: 1, fov: 82, volume: 65, quality: 'normal' };
+const { APP_MODE, PROFILE_STORAGE, ONLINE_SERVER_URL = '', FRONTEND_URL = '' } = runtime;
+const defaults = { sensitivity: 1, fov: 82, volume: 65, quality: 'normal', weaponHand: 'right' };
 // Retain prototype storage keys so existing names, settings and loadouts survive the LINKSHOT rename.
 function stored(key, fallback) { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } }
 function store(key, value) { try { localStorage.setItem(key, value); } catch { /* Private browsing can disable storage. */ } }
@@ -36,6 +39,7 @@ const settings = {
   sensitivity: inRange(saved.sensitivity, 0.3, 2.5, defaults.sensitivity),
   fov: inRange(saved.fov, 65, 105, defaults.fov), volume: inRange(saved.volume, 0, 100, defaults.volume),
   quality: normalizeQuality(saved.quality),
+  weaponHand: normalizeWeaponHand(saved.weaponHand),
 };
 const SOLO = APP_MODE === 'solo';
 let savedLoadout = {}; try { savedLoadout = JSON.parse(stored('sector07-loadout', '{}')) || {}; } catch { /* Use catalog defaults. */ }
@@ -57,6 +61,7 @@ let onlineApi = null, onlineUser = null, onlineAvailable = false, onlineBusy = f
 let onlineCapabilities = { matchmaking: false }, onlineQueueState = null, onlineAutoJoin = false, onlinePolling = false, onlineQueueTimer = null, onlineHeartbeatAt = 0, onlineSelectedWeapon = 'rifle';
 let onlineReceipt = null, onlineResultPending = null, onlineResultNextAt = 0, onlineActiveMatch = null, onlineReconnectUntil = 0;
 let onlineServicePolling = false, onlineAuthGeneration = 0;
+let usernameCheckGeneration = 0, usernameChecking = false;
 let pendingJoinCode = null, onlineEntering = false;
 const matchIntro = new MatchIntro(() => { const previous = socket; socket = null; previous?.close(); onlineReconnectUntil = 0; clearTimeout(reconnectTimeout); leaveGame(false); matchIntro.hide(); });
 const onlineResultSummary = document.createElement('p'); onlineResultSummary.id = 'online-rating-summary'; onlineResultSummary.hidden = true; $('round-reward').append(onlineResultSummary);
@@ -65,15 +70,27 @@ const onlineWeaponLabel = document.createElement('label'); onlineWeaponLabel.htm
 const onlineWeaponChoice = document.createElement('select'); onlineWeaponChoice.id = 'online-weapon-choice';
 for (const weapon of WEAPONS) { const option = document.createElement('option'); option.value = weapon.id; option.textContent = weapon.name; onlineWeaponChoice.append(option); }
 const onlineWeaponNote = document.createElement('small'); onlineWeaponNote.id = 'online-weapon-note'; onlineWeaponWrap.append(onlineWeaponLabel, onlineWeaponChoice, onlineWeaponNote); $('online-loadout-content').append(onlineWeaponWrap);
-if (ONLINE_SERVER_URL) { try { onlineApi = new OnlineApi(ONLINE_SERVER_URL); } catch (error) { onlineReason = error.message; } }
+if (ONLINE_SERVER_URL) { try { onlineApi = new OnlineApi(ONLINE_SERVER_URL, FRONTEND_URL); } catch (error) { onlineReason = error.message; } }
 let botDifficulty = getBotDifficulty(stored('linkshot-bot-difficulty', 'beginner')).id;
 let savedRound = {}; try { savedRound = JSON.parse(stored('linkshot-round-options', '{}')) || {}; } catch { /* Defaults. */ }
 let roundOptions = normalizeRoundOptions(savedRound);
-function updateRoundOptions() { $('frag-limit').value = roundOptions.fragLimit; $('round-minutes').value = roundOptions.roundSeconds / 60; }
-for (const id of ['frag-limit', 'round-minutes']) $(id).addEventListener('change', () => {
-  roundOptions = normalizeRoundOptions({ fragLimit: Number($('frag-limit').value), roundSeconds: Math.max(1, Number($('round-minutes').value) || 5) * 60 });
-  store('linkshot-round-options', JSON.stringify(roundOptions)); updateRoundOptions();
-});
+let savedObjective = {}; try { savedObjective = JSON.parse(stored('linkshot-objective-options', '{}')) || {}; } catch { /* Defaults. */ }
+let objectiveConfig = objectiveOptions(savedObjective);
+$('room-game-type').value = normalizeGameType(stored('linkshot-game-type', 'ffa'));
+function selectedGameType() { return ['practice', 'lan', 'custom'].includes(mode) ? normalizeGameType($('room-game-type').value) : 'ffa'; }
+function updateRoundOptions() {
+  const type = selectedGameType(), label = type === 'hardpoint' ? '목표 점수' : type === 'defense' ? '방어 공세 수' : type === 'teams' ? '팀 합산 목표 킬' : '목표 킬 수', input = $('frag-limit');
+  document.querySelector('label[for="frag-limit"]').firstChild.textContent = label; input.setAttribute('aria-label', ['ffa', 'teams'].includes(type) ? '목표 킬 수' : label);
+  input.min = type === 'hardpoint' ? 30 : 1; input.max = type === 'defense' ? 10 : 200;
+  input.value = type === 'hardpoint' ? objectiveConfig.scoreLimit : type === 'defense' ? objectiveConfig.waves : roundOptions.fragLimit; $('round-minutes').value = roundOptions.roundSeconds / 60;
+}
+function saveRoundForm() {
+  const type = selectedGameType(), value = Number($('frag-limit').value);
+  roundOptions = normalizeRoundOptions({ ...roundOptions, ...(!['hardpoint', 'defense'].includes(type) ? { fragLimit: value } : {}), roundSeconds: Math.max(1, Number($('round-minutes').value) || 5) * 60 });
+  objectiveConfig = objectiveOptions({ ...objectiveConfig, ...(type === 'hardpoint' ? { scoreLimit: value } : type === 'defense' ? { waves: value } : {}) });
+  store('linkshot-round-options', JSON.stringify(roundOptions)); store('linkshot-objective-options', JSON.stringify(objectiveConfig)); updateRoundOptions();
+}
+for (const id of ['frag-limit', 'round-minutes']) $(id).addEventListener('change', saveRoundForm);
 updateRoundOptions();
 for (const level of BOT_DIFFICULTIES) { const option = document.createElement('option'); option.value = level.id; option.textContent = level.label; $('bot-difficulty').append(option); }
 $('bot-difficulty').value = botDifficulty;
@@ -156,7 +173,7 @@ function updateRooms(list) {
     const row = document.createElement('div'); row.className = 'room-row';
     const details = document.createElement('div'); details.className = 'room-details';
     const code = document.createElement('strong'); code.textContent = room.code;
-    const name = document.createElement('small'); name.textContent = `${room.passwordProtected ? '🔒 비밀번호 · ' : ''}${getMap(room.mapId).name} · ${room.name} · ${room.gameType === 'teams' ? '팀전' : '개인전'} · AI ${room.bots}명 · ${room.fragLimit || RULES.fragLimit}킬/${Math.round((room.roundSeconds || RULES.roundSeconds) / 60)}분 · ${room.phase === 'ended' ? '라운드 종료' : room.phase === 'lobby' ? '대기 중' : `교전 중 ${room.playing ?? room.players}명`}`;
+    const name = document.createElement('small'); name.textContent = `${room.passwordProtected ? '🔒 비밀번호 · ' : ''}${getMap(room.mapId).name} · ${room.name} · ${gameTypeName(room.gameType)} · AI ${room.bots}명 · ${room.gameType === 'hardpoint' ? `${room.scoreLimit}점` : room.gameType === 'defense' ? `${room.waves}공세` : `${room.fragLimit || RULES.fragLimit}킬`}/${Math.round((room.roundSeconds || RULES.roundSeconds) / 60)}분 · ${room.phase === 'ended' ? '라운드 종료' : room.phase === 'lobby' ? '대기 중' : `교전 중 ${room.playing ?? room.players}명`}`;
     details.append(code, name);
     const count = document.createElement('span'); count.textContent = `${room.players}/${room.capacity}`;
     const button = document.createElement('button'); button.textContent = '참가'; button.disabled = room.players >= room.capacity;
@@ -268,6 +285,7 @@ function showMenu(visible) {
   if (training && game.room.phase === 'training-complete') { $('pause-title').textContent = 'TRAINING COMPLETE'; $('pause-description').textContent = '기초 훈련을 마쳤습니다. 다시 도전하거나 혼자 연습으로 이어가세요.'; $('resume-button').hidden = true; }
   else $('resume-button').hidden = false;
   $('return-room-button').hidden = !game.room.staging;
+  $('return-room-button').textContent = isTeamGame(game.room.gameType) && game.room.gameType !== 'defense' ? '팀 변경 / 대기실' : '방 대기실로';
 }
 
 function handleRoomSession(data) {
@@ -343,11 +361,12 @@ function setMode(value) {
   $('deployment-settings-button').hidden = mode !== 'practice'; $('online-loadout-button').hidden = !usesOnlineServices();
   $('tutorial-recommendation').hidden = !['tutorial', 'practice'].includes(mode) || !!stored('linkshot-tutorial-v1', '');
   const settingsVisible = mode === 'practice' || roomMode;
-  for (const selector of ['.bot-row', '.bot-level-row', '.match-options']) document.querySelector(selector).hidden = !settingsVisible;
+  for (const selector of ['.bot-row', '.match-options']) document.querySelector(selector).hidden = !settingsVisible;
+  document.querySelector('.bot-level-row').hidden = mode !== 'practice';
   $('choose-map').disabled = mode === 'tutorial' || selected.transport === 'online';
   $('compact-choose-map').hidden = mode === 'tutorial' || selected.transport === 'online';
-  document.querySelector('label[for="frag-limit"]').firstChild.textContent = roomMode && $('room-game-type').value === 'teams' ? '팀 합산 목표 킬' : '목표 킬 수';
-  if (mode === 'practice' && botCount === 0) botCount = 1;
+  updateRuleChoices();
+  if (mode === 'practice' && selectedGameType() !== 'defense' && botCount === 0) botCount = 1;
   if (socket && transportKind !== selected.transport || !socket && (selected.transport === 'local' || selected.transport === 'custom' && onlineUser && onlineCapabilities.customRooms || selected.transport === 'lan' && !SOLO)) connect(selected.transport);
   else if (unavailable && transportKind !== selected.transport) connect(selected.transport);
   updateConnection(connected && !unavailable);
@@ -370,6 +389,11 @@ function renderOnlineAccount() {
   $('account-badge-state').textContent = onlineUser ? 'ONLINE · 로그인됨' : '로그인 / 회원가입'; $('operator-callsign').textContent = onlineUser?.callsign || profileStore.profile.callsign;
   $('mode-account-note').hidden = !usesOnlineServices(); $('mode-account-note').textContent = onlineUser ? `${onlineUser.callsign} · 온라인 계정으로 출격` : '온라인 로그인은 우측 상단 프로필에서 진행하세요.';
   $('online-auth-form').hidden = !!onlineUser; $('online-profile-summary').hidden = !onlineUser; $('online-logout').hidden = !onlineUser;
+  $('online-callsign-form').hidden = !onlineUser;
+  const nameInput = $('online-profile-callsign'), accountId = onlineUser?.id || '';
+  if (nameInput.dataset.accountId !== accountId) { nameInput.dataset.accountId = accountId; nameInput.dataset.dirty = 'false'; nameInput.value = onlineUser?.callsign || onlineUser?.username || ''; nameInput.setCustomValidity(''); }
+  else if (nameInput.dataset.dirty !== 'true' && document.activeElement !== nameInput) nameInput.value = onlineUser?.callsign || onlineUser?.username || '';
+  nameInput.disabled = onlineBusy || !onlineAvailable;
   if (onlineUser) $('online-profile-summary').textContent = `${onlineUser.callsign} · 온라인 ${onlineUser.points} LP · ${onlineUser.kills} K / ${onlineUser.deaths} D · 일반 ${onlineUser.casualRating} · ${rankText(onlineUser.rankTier, onlineUser.rankDivision, onlineUser.rankPoints, onlineUser.placementsPlayed)}`;
   onlineWeaponWrap.hidden = !onlineUser;
   const ranked = (onlineQueueState?.mode?.toLowerCase() || mode) === 'ranked', allowed = new Set(ranked ? WEAPONS.map((weapon) => weapon.id) : onlineUser?.ownedWeapons || []);
@@ -377,7 +401,8 @@ function renderOnlineAccount() {
   for (const option of onlineWeaponChoice.options) option.disabled = !allowed.has(option.value); onlineWeaponChoice.value = onlineSelectedWeapon;
   onlineWeaponNote.textContent = ranked ? '랭크는 20종 모두 임시 허용 · 영구 소유권은 변하지 않음' : '일반·사용자 대전은 온라인 보유 무기만 출격 · 바닥 총과 G 교체 가능';
   onlinePreview?.set(onlineSelectedWeapon, loadout.skinId);
-  for (const id of ['online-login', 'online-register', 'online-logout']) $(id).disabled = onlineBusy || !onlineAvailable;
+  for (const id of ['online-login', 'online-register', 'online-logout', 'online-save-callsign']) $(id).disabled = onlineBusy || !onlineAvailable;
+  $('online-check-username').disabled = onlineBusy || !onlineAvailable || usernameChecking;
   updateDeployButton();
 }
 function rankText(tier, division = 5, points = 0, placements = 0) { return tier === 'UNRANKED' ? `배치 ${placements || 0}/10` : tier === 'CHALLENGER' ? 'CHALLENGER' : `${tier} ${['', 'I', 'II', 'III', 'IV', 'V'][division]} · ${points} 승급점수`; }
@@ -400,9 +425,9 @@ async function connectOnlineServices() {
 }
 async function onlineAuthenticate(register = false) {
   if (!onlineApi || onlineBusy || !onlineAvailable || !$('online-auth-form').reportValidity()) return;
-  onlineBusy = true; onlineAuthGeneration++; renderOnlineAccount(); $('online-auth-status').textContent = '온라인 계정 확인 중…';
+  onlineBusy = true; onlineAuthGeneration++; usernameCheckGeneration++; usernameChecking = false; renderOnlineAccount(); $('online-auth-status').textContent = '온라인 계정 확인 중…';
   const username = $('online-username').value, password = $('online-password').value;
-  try { if (register) await onlineApi.register(username, password, $('online-callsign').value || 'OPERATOR'); onlineUser = await onlineApi.login(username, password); $('online-auth-status').textContent = '온라인 로그인 완료 · 기기 기록은 변경하지 않았습니다.'; }
+  try { if (register) await onlineApi.register(username, password); onlineUser = await onlineApi.login(username, password); $('online-auth-status').textContent = '온라인 로그인 완료 · 기기 기록은 변경하지 않았습니다.'; }
   catch (error) { $('online-auth-status').textContent = error.message; }
   finally { $('online-password').value = ''; onlineBusy = false; renderOnlineAccount(); if (mode === 'custom') setMode(mode); else void refreshOnlineQueue(); }
 }
@@ -476,8 +501,22 @@ async function fetchOnlineReceipt(id) {
 }
 
 function updateBots() {
+  const minimum = mode === 'practice' && selectedGameType() !== 'defense' ? 1 : 0, maximum = selectedGameType() === 'defense' ? 3 : RULES.maxPlayers - 1;
+  botCount = Math.max(minimum, Math.min(maximum, botCount));
   $('bot-count').textContent = botCount;
-  $('bots-minus').disabled = botCount <= (mode === 'practice' ? 1 : 0); $('bots-plus').disabled = botCount >= RULES.maxPlayers - 1;
+  $('bots-minus').disabled = botCount <= minimum; $('bots-plus').disabled = botCount >= maximum;
+}
+function updateRuleChoices() {
+  const type = selectedGameType(), selected = getMap(loadout.mapId);
+  if (!supportsGameType(selected, type)) loadout.mapId = MAPS.find((world) => supportsGameType(world, type)).id;
+  for (const option of $('room-map-choice').options) option.disabled = option.hidden = !supportsGameType(getMap(option.value), type);
+  $('room-map-choice').value = loadout.mapId;
+  for (const button of $('map-choices').children) { const world = getMap(button.dataset.map); button.disabled = !supportsGameType(world, type); button.title = button.disabled ? `${world.name} · ${(world.gameTypes || ['ffa', 'teams']).map(gameTypeName).join(' / ')} 전용` : world.description; }
+  $('room-initial-team').disabled = !isTeamGame(type) || type === 'defense' || mode === 'practice';
+  $('rule-description').textContent = type === 'hardpoint' ? 'RELAY 전용 · 45초마다 이동 · 단독 점유 초당 1점 · 처치 점수/전적/LP 미반영' : type === 'defense' ? 'BASTION 전용 · 수비팀 최대 4명(지원 AI 포함) · 공세 AI 동시 최대 4명 · 코어 파괴 또는 시간 초과 시 패배 · 전적/LP 미반영' : type === 'teams' ? '양 팀 합산 처치 점수 · 채석장/저수조는 팀 데스매치 전용입니다.' : '기존 8개 전장 · 개인전에는 팀 전용 전장이 배정되지 않습니다.';
+  const difficultyLabel = document.querySelector('.bot-level-row > span'); difficultyLabel.firstChild.textContent = type === 'defense' ? '지원 AI 난이도' : '연습 AI 난이도';
+  difficultyLabel.querySelector('small').textContent = type === 'defense' ? '수비를 돕는 AI에 적용 · 적 공세 난이도는 회차별 자동 진행' : '혼자 연습에만 적용 · 방에서는 AI별로 설정';
+  updateRoundOptions(); updateBots(); updateSelections();
 }
 
 function openDialog(id) {
@@ -491,7 +530,7 @@ function openDialog(id) {
     $('briefing-map-description').textContent = `${world.description} 건물 ${world.buildings.length}개·추가 엄폐벽 ${world.coverWalls.length}개와 계단식 발판을 활용하세요. 지상·2/3층·옥상 ${world.spawns.length}개 스폰은 건물·화물·설비의 자연 엄폐를 사용합니다. ${roundOptions.roundSeconds / 60}분 또는 먼저 ${roundOptions.fragLimit}킬을 달성하면 라운드가 끝납니다.`;
   }
   if (id === 'profile-dialog') renderOnlineAccount();
-  if (id === 'room-create-dialog') { $('room-create-title').textContent = mode === 'practice' ? '연습 교전 설정' : mode === 'custom' ? '사용자 방 만들기' : 'LAN 방 만들기'; $('room-create-confirm').textContent = mode === 'practice' ? '설정 저장' : '대기실 만들기'; $('room-map-choice').value = loadout.mapId; $('room-initial-team').disabled = $('room-game-type').value !== 'teams'; }
+  if (id === 'room-create-dialog') { $('room-create-title').textContent = mode === 'practice' ? '연습 교전 설정' : mode === 'custom' ? '사용자 방 만들기' : 'LAN 방 만들기'; $('room-create-confirm').textContent = mode === 'practice' ? '설정 저장' : '대기실 만들기'; updateRuleChoices(); }
   dialogs.show(dialog);
   if (id === 'armory-dialog') {
     try { preview ||= new ArmoryPreview($('weapon-preview')); preview.set(selectedWeaponId, loadout.skinId); $('preview-fallback').hidden = true; }
@@ -594,7 +633,7 @@ function updateSelections() {
   $('armory-weapon-type').textContent = `${weapon.type} / ${weapon.label}`; $('armory-weapon-name').textContent = weapon.name;
   $('armory-weapon-description').textContent = weapon.description; $('armory-skin-name').textContent = skin.name;
   $('weapon-stats').replaceChildren();
-  for (const [label, value] of [['기본 피해', weapon.pellets > 1 ? `${weapon.damage} × ${weapon.pellets} PELLETS` : `${weapon.damage} / HEAD ${weapon.headDamage}`], ['부위 배율', '몸통 ×1.2 · 손끝 ×0.5 · 머리 별도'], ['탄창 / 연사', `${weapon.magazine} / ${Math.round(60 / weapon.fireSeconds)} RPM`], ['재장전', `${weapon.reloadSeconds.toFixed(2)} SEC`], ['이동 / 달리기', `${(RULES.walkSpeed * weapon.walkMultiplier).toFixed(1)} / ${(RULES.sprintSpeed * weapon.sprintMultiplier).toFixed(1)} M/S`], ['최대 사거리', `${weapon.range} M`]]) {
+  for (const [label, value] of [['기본 피해', weapon.pellets > 1 ? `${weapon.damage} × ${weapon.pellets} PELLETS` : `${weapon.damage} / HEAD ${weapon.headDamage}`], ['부위 배율', '몸통 ×1.2 · 손끝 ×0.5 · 머리 별도'], ['탄창 / 연사', `${weapon.magazine} / ${Math.round(60 / weapon.fireSeconds)} RPM`], ['재장전', `${weapon.reloadSeconds.toFixed(2)} SEC`], ['달리기 / 무음 걷기', `${(RULES.runSpeed * weapon.walkMultiplier).toFixed(1)} / ${(RULES.walkSpeed * weapon.walkMultiplier).toFixed(1)} M/S`], ['최대 사거리', `${weapon.range} M`]]) {
     const row = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.textContent = value; row.append(dt, dd); $('weapon-stats').append(row);
   }
   preview?.set(weapon.id, skin.id); store('sector07-loadout', JSON.stringify(loadout));
@@ -643,7 +682,7 @@ function makeCollections() {
     const description = document.createElement('p'); description.textContent = world.description;
     const size = document.createElement('small'); size.textContent = `${world.width} × ${world.depth} M  /  ${world.platforms.length} DECKS + ${world.extraCover.length} COVER`;
     copy.append(title, description, size); button.append(art, copy); $('map-choices').append(button);
-    button.addEventListener('click', () => { loadout.mapId = world.id; updateSelections(); void dialogs.close($('maps-dialog')); });
+    button.addEventListener('click', () => { if (!supportsGameType(world, selectedGameType())) return; loadout.mapId = world.id; updateSelections(); void dialogs.close($('maps-dialog')); });
   }
   for (const weapon of WEAPONS) {
     const button = document.createElement('button'); button.dataset.weapon = weapon.id; button.setAttribute('aria-label', `${weapon.label} ${weapon.name} 선택`);
@@ -687,6 +726,7 @@ function updateSoundButton() {
 
 function updateSettings() {
   for (const key of ['sensitivity', 'fov', 'volume', 'quality']) $(key).value = settings[key];
+  $('weapon-hand').value = settings.weaponHand;
   $('sensitivity-value').textContent = settings.sensitivity.toFixed(1);
   $('fov-value').textContent = `${settings.fov}°`; $('volume-value').textContent = `${settings.volume}%`;
   audio.updateVolume(); updateSoundButton(); game?.applySettings();
@@ -699,21 +739,21 @@ $('create-button').addEventListener('click', () => {
   if (getPlayMode(mode).transport === 'online') { void joinOnlineQueue(); return; }
   if (!connected) return;
   if (['lan', 'custom'].includes(mode)) { openDialog('room-create-dialog'); return; }
-  setBusy(true); send({ type: 'create', mode, bots: botCount, botDifficulty, ...roundOptions, name: callsign(), ...profileLoadout() });
+  setBusy(true); send({ type: 'create', mode, gameType: selectedGameType(), ...objectiveConfig, bots: botCount, botDifficulty, ...roundOptions, name: callsign(), ...profileLoadout() });
 });
 $('deployment-settings-button').addEventListener('click', () => openDialog('room-create-dialog'));
 $('room-create-form').addEventListener('submit', (event) => {
   event.preventDefault(); if (busy || game || roomSession || !$('room-create-form').reportValidity()) return;
   loadout.mapId = getMap($('room-map-choice').value).id; updateSelections();
-  roundOptions = normalizeRoundOptions({ fragLimit: Number($('frag-limit').value), roundSeconds: Number($('round-minutes').value) * 60 }); store('linkshot-round-options', JSON.stringify(roundOptions)); updateRoundOptions();
+  saveRoundForm();
   if (mode === 'practice') { void dialogs.close($('room-create-dialog')); return; }
   if (!connected) { toast('서버에 연결한 뒤 다시 시도해 주세요.', true); return; }
-  const options = { staging: true, roomName: $('room-title').value, password: $('room-password').value, gameType: $('room-game-type').value, teamId: $('room-initial-team').value, bots: botCount, botDifficulty, ...roundOptions, mapId: loadout.mapId };
+  const options = { staging: true, roomName: $('room-title').value, password: $('room-password').value, gameType: selectedGameType(), teamId: $('room-initial-team').value, bots: botCount, ...roundOptions, ...objectiveConfig, mapId: loadout.mapId };
   dialogs.closeAll(); setBusy(true); send(transportKind === 'custom' ? { type: 'create', ...options, weaponId: onlineSelectedWeapon, skinId: loadout.skinId } : { type: 'create', mode, ...profileLoadout(), ...options, name: callsign() }); $('room-password').value = '';
 });
 $('join-form').addEventListener('submit', (event) => { event.preventDefault(); requestJoin($('room-code').value.trim().toUpperCase()); });
 $('room-password-form').addEventListener('submit', (event) => { event.preventDefault(); if (!$('room-password-form').reportValidity() || !pendingJoinCode) return; const password = $('room-join-password').value; $('room-join-password').value = ''; requestJoin(pendingJoinCode, password); });
-$('room-game-type').addEventListener('change', () => { document.querySelector('label[for="frag-limit"]').firstChild.textContent = $('room-game-type').value === 'teams' ? '팀 합산 목표 킬' : '목표 킬 수'; $('room-initial-team').disabled = $('room-game-type').value !== 'teams'; });
+$('room-game-type').addEventListener('change', () => { store('linkshot-game-type', selectedGameType()); updateRuleChoices(); });
 $('profile-dialog').addEventListener('close', () => { $('online-password').value = ''; });
 $('room-create-dialog').addEventListener('close', () => { $('room-password').value = ''; });
 $('room-password-dialog').addEventListener('close', () => { $('room-join-password').value = ''; });
@@ -728,7 +768,29 @@ document.querySelector('.mode-switch').addEventListener('keydown', (event) => {
 });
 $('recommend-tutorial').addEventListener('click', () => { dialogs.closeAll(); setMode('tutorial'); });
 $('online-auth-form').addEventListener('submit', (event) => { event.preventDefault(); void onlineAuthenticate(); });
+$('online-username').addEventListener('input', () => { usernameCheckGeneration++; usernameChecking = false; $('online-username-status').textContent = ''; delete $('online-username-status').dataset.available; renderOnlineAccount(); });
+$('online-check-username').addEventListener('click', async () => {
+  if (!onlineApi || !onlineAvailable || onlineBusy || usernameChecking || !$('online-username').reportValidity()) return;
+  const generation = ++usernameCheckGeneration; usernameChecking = true; renderOnlineAccount(); $('online-username-status').textContent = '아이디 확인 중…';
+  try {
+    const result = await onlineApi.usernameAvailability($('online-username').value);
+    if (generation !== usernameCheckGeneration) return;
+    $('online-username-status').textContent = result.available ? '사용 가능한 아이디입니다.' : '이미 존재하는 아이디입니다.'; $('online-username-status').dataset.available = String(result.available);
+  } catch (error) { if (generation === usernameCheckGeneration) { $('online-username-status').textContent = error.message; $('online-username-status').dataset.available = 'false'; } }
+  finally { if (generation === usernameCheckGeneration) { usernameChecking = false; renderOnlineAccount(); } }
+});
 $('online-register').addEventListener('click', () => { void onlineAuthenticate(true); });
+$('online-profile-callsign').addEventListener('input', () => { const input = $('online-profile-callsign'); input.dataset.dirty = 'true'; input.setCustomValidity([...input.value.trim()].length > 24 ? '콜사인은 1–24자여야 합니다.' : ''); });
+$('online-callsign-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!onlineApi || !onlineUser || onlineBusy || !onlineAvailable || !$('online-callsign-form').reportValidity()) return;
+  const name = $('online-profile-callsign').value; onlineBusy = true; onlineAuthGeneration++; renderOnlineAccount(); $('online-auth-status').textContent = '콜사인 저장 중…';
+  try {
+    onlineUser = await onlineApi.updateCallsign(name); $('online-profile-callsign').dataset.dirty = 'false'; $('online-profile-callsign').value = onlineUser.callsign; $('online-profile-callsign').setCustomValidity(''); $('online-auth-status').textContent = '콜사인을 저장했습니다.';
+    if (transportKind === 'custom' && !roomSession && !game) connect('custom');
+  } catch (error) { $('online-auth-status').textContent = error.message; }
+  finally { onlineBusy = false; renderOnlineAccount(); }
+});
 onlineWeaponChoice.addEventListener('change', () => { onlineSelectedWeapon = getWeapon(onlineWeaponChoice.value).id; onlinePreview?.set(onlineSelectedWeapon, loadout.skinId); if (roomSession) send({ type: 'room-loadout', weaponId: onlineSelectedWeapon, skinId: loadout.skinId }); });
 $('online-loadout-dialog').addEventListener('close', () => { if (!$('online-loadout-dialog').open) { onlinePreview?.dispose(); onlinePreview = null; } });
 function chooseDeploymentWeapon() { if (usesOnlineServices()) { if (!onlineUser) openDialog('profile-dialog'); else { renderOnlineAccount(); openDialog('online-loadout-dialog'); } } else openDialog('armory-dialog'); }
@@ -749,8 +811,8 @@ $('lan-connect-guide').addEventListener('submit', (event) => {
   try { const address = new URL($('lan-server-address').value.trim()); if (!['http:', 'https:'].includes(address.protocol) || address.username || address.password) throw new Error(); location.assign(address.href); }
   catch { toast('http:// 또는 https://로 시작하는 LAN 서버 주소를 입력하세요.', true); }
 });
-$('bots-minus').addEventListener('click', () => { botCount = Math.max(mode === 'practice' ? 1 : 0, botCount - 1); updateBots(); });
-$('bots-plus').addEventListener('click', () => { botCount = Math.min(RULES.maxPlayers - 1, botCount + 1); updateBots(); });
+$('bots-minus').addEventListener('click', () => { botCount--; updateBots(); });
+$('bots-plus').addEventListener('click', () => { botCount++; updateBots(); });
 $('resume-button').addEventListener('click', () => game?.lock());
 $('leave-button').addEventListener('click', () => { if (!isOnlineRoom() || game.room.phase !== 'active' || confirm('온라인 경기에서 나가면 30초 후 탈주 처리되어 보상을 받지 못하고 랭크는 최하위로 정산됩니다. 나갈까요?')) leaveGame(); });
 $('round-leave').addEventListener('click', () => leaveGame());
@@ -812,6 +874,7 @@ $('refresh-rooms').addEventListener('click', () => { if (send({ type: 'list' }))
 document.querySelectorAll('[data-open]').forEach((button) => button.addEventListener('click', () => openDialog(button.dataset.open)));
 for (const key of ['sensitivity', 'fov', 'volume']) $(key).addEventListener('input', () => { settings[key] = Number($(key).value); updateSettings(); });
 $('quality').addEventListener('change', () => { settings.quality = $('quality').value; updateSettings(); });
+$('weapon-hand').addEventListener('change', () => { settings.weaponHand = normalizeWeaponHand($('weapon-hand').value); updateSettings(); });
 
 setInterval(() => {
   if (!connected) return;
@@ -832,11 +895,9 @@ $('tutorial-advance').addEventListener('click', () => { if (game?.requestTutoria
 $('tutorial-retry').addEventListener('click', () => { send({ type: 'restart' }); game?.lock(); });
 $('tutorial-skip').addEventListener('click', () => { store('linkshot-tutorial-v1', stored('linkshot-tutorial-v1', 'dismissed')); leaveGame(); setMode('practice'); $('tutorial-recommendation').hidden = true; });
 $('tutorial-recommendation').hidden = !!stored('linkshot-tutorial-v1', '');
-const extraControls = document.createElement('p'); extraControls.className = 'controls-addition'; extraControls.textContent = `G: 가까운 바닥 총과 교체합니다. 들고 있던 총은 남은 탄약 그대로 바닥에 남습니다. 교체할 총이 없으면 아무 일도 일어나지 않으며, 총만 버리는 기능은 없습니다. 사망 시에도 사용하던 총을 떨어뜨립니다. 주운 총은 영구 해금이나 다음 부활 장비를 바꾸지 않습니다. 사망 후 E: ${WEAPONS.length}종 목록에서 다음 부활 무기 선택 (처음 10종은 숫자 1–9, 0). 숫자·휠로 생존 중 교체는 불가 · C / Ctrl: 앉기 (달리기·공중에서는 불가). 달리거나 공중에서 쏘면 탄이 크게 퍼집니다. 벽·바닥 탄흔은 약 1분 유지되며 무기·탄약은 우측 하단에만 표시합니다. 일반·랭크는 랜덤 맵 4인 개인전이며 전장 입장 전 5초를 셉니다. 일반은 AI 상대 성적도 레이팅에 반영합니다. 랭크는 현재 임시로 AI 보충을 허용하며 20종 무기를 경기 안에서만 허용합니다. LAN·사용자 방에서는 팀전도 선택할 수 있으며, 양 팀은 맵 반대편에서 부활합니다. 사용자 대전은 점수·전적·LP·영구 숙련도에 반영하지 않습니다. 온라인 계정과 기기 LP/구매 내역은 별개이며 일반·랭크 연결 종료 후 재접속 유예는 30초입니다.`; $('help-dialog').querySelector('.dialog-body').append(extraControls);
+const extraControls = document.createElement('p'); extraControls.className = 'controls-addition'; extraControls.textContent = `WASD: 기본 달리기 · Shift: 절반 속도로 무음 걷기 (본인·상대 모두 발소리 없음). 이전의 가속 달리기는 없습니다. G: 가까운 바닥 총과 교체합니다. 들고 있던 총은 남은 탄약 그대로 바닥에 남습니다. 교체할 총이 없으면 아무 일도 일어나지 않으며, 총만 버리는 기능은 없습니다. 사망 시에도 사용하던 총을 떨어뜨립니다. 주운 총은 영구 해금이나 다음 부활 장비를 바꾸지 않습니다. 사망 후 E: ${WEAPONS.length}종 목록에서 다음 부활 무기 선택 (처음 10종은 숫자 1–9, 0). 숫자·휠로 생존 중 교체는 불가 · C / Ctrl: 앉기 (공중에서는 불가). 이동·공중 사격에는 탄 퍼짐이 적용됩니다. 벽·바닥 탄흔은 약 1분 유지되며 무기·탄약은 우측 하단에만 표시합니다. 일반·랭크는 랜덤 맵 4인 개인전이며 전장 입장 전 5초를 셉니다. 일반은 AI 상대 성적도 레이팅에 반영합니다. 랭크는 현재 임시로 AI 보충을 허용하며 20종 무기를 경기 안에서만 허용합니다. LAN·사용자 방에서는 팀전도 선택할 수 있으며, 양 팀은 맵 반대편에서 부활합니다. 교전 중 팀을 바꾸려면 Esc의 팀 변경 / 대기실을 이용하세요. 사용자 대전은 점수·전적·LP·영구 숙련도에 반영하지 않습니다. 온라인 계정과 기기 LP/구매 내역은 별개이며 일반·랭크 연결 종료 후 재접속 유예는 30초입니다.`; $('help-dialog').querySelector('.dialog-body').append(extraControls);
 if (SOLO) {
   document.body.classList.add('solo-edition'); document.title = 'LINKSHOT · 링크샷 — Solo combat';
-  document.querySelector('.page-heading h1').textContent = '서버 없이 훈련하고, 함께 교전하세요.';
-  document.querySelector('.page-heading p').textContent = '설치 없이 브라우저에서. 연습 봇과 실력을 겨루고 포인트로 나만의 외형을 모으세요.';
   for (const id of ['join-section', 'copy-lan']) $(id).hidden = true;
   $('hero-player-note').textContent = 'SOLO / BOT COMBAT'; $('hud-connection-kind').textContent = 'LOCAL';
   document.querySelector('.build-tag').childNodes[1].textContent = ' SOLO EDITION ';

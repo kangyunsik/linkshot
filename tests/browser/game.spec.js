@@ -13,7 +13,7 @@ test('lobby, generated assets, map, settings persistence and responsive layout',
   await page.goto('/');
   await expect(page.getByText('LAN SERVER ONLINE')).toBeVisible();
   await expect(page).toHaveTitle(/^LINKSHOT/);
-  await expect(page.getByRole('heading', { name: '같은 공간, 하나의 전장.' })).toBeVisible();
+  await expect(page.locator('.page-heading h1, .page-heading p')).toHaveCount(0);
   const asset = await page.request.get('/assets/foundry-hero.png'); expect(asset.ok()).toBeTruthy(); expect(asset.headers()['content-type']).toBe('image/png');
   await page.getByRole('button', { name: '전장 브리핑', exact: true }).click();
   await expect(page.locator('#briefing-dialog')).toBeVisible();

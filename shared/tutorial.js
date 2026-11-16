@@ -7,7 +7,7 @@ import { TRAINING_WORLD } from './training-world.js';
 const TARGET_SPAWN = Object.freeze({ x: 0, y: 0, z: -8, yaw: Math.PI, pitch: 0 });
 
 export const TUTORIAL_STEPS = Object.freeze([
-  { id: 'movement', title: '시점과 이동', description: '마우스로 둘러보고 WASD로 이동하세요. W + Shift로 달리기도 해보세요.', marker: { x: 0, y: 0, z: 9 } },
+  { id: 'movement', title: '시점과 이동', description: '마우스로 둘러보고 WASD로 달리세요. Shift를 누르면 속도를 낮춰 발소리 없이 걷습니다.', marker: { x: 0, y: 0, z: 9 } },
   { id: 'terrain', title: '지형과 엄폐', description: 'Space로 점프하고 C / Ctrl로 앉아보세요. 오른쪽 계단을 걸어 올라 표시된 발판에 서세요.', marker: { x: 6, y: 1.2, z: 3 } },
   { id: 'shooting', title: '조준·사격·재장전', description: '북쪽의 정지 표적을 좌클릭으로 처치하세요. 우클릭 정조준 사격과 R 재장전을 각각 완료하세요.', marker: { x: 0, y: 0, z: -8 } },
   { id: 'equipment', title: '바닥 총기와 교체', description: '가까이 제공된 MP5가 바닥에 내려오면 G로 교체하세요. 들고 있던 총이 바닥에 남는 것을 확인하고 G로 원래 총과 다시 교체하세요.' },
@@ -104,7 +104,7 @@ export class TutorialSession {
   goals() {
     const m = this.metrics;
     return [
-      [['마우스로 시점 돌리기', m.look > .35], ['WASD로 3m 이동', m.distance >= 3], ['Shift로 2m 달리기', m.sprint >= 2]],
+      [['마우스로 시점 돌리기', m.look > .35], ['WASD로 3m 이동', m.distance >= 3], ['Shift로 2m 무음 걷기', m.walk >= 2]],
       [['Space로 점프', m.jump], ['C / Ctrl로 앉기', m.crouch], ['계단으로 발판에 오르기', m.deck]],
       [['정지 표적 처치', this.player.kills > this.startKills], ['우클릭 정조준 사격', m.ads], ['R 재장전 완료', m.reloaded]],
       [['G로 바닥 MP5와 교체', m.swaps >= 1], ['기존 총이 바닥에 남는 것 확인', m.originalOnGround], ['G로 원래 총과 다시 교체', m.swappedBack]],
@@ -120,7 +120,7 @@ export class TutorialSession {
     this.room.tick(dt);
     if (p.hp > 0 && this.previous.life === p.spawnCount) {
       const distance = Math.min(.6, Math.hypot(p.x - this.previous.x, p.z - this.previous.z));
-      m.distance = (m.distance || 0) + distance; if (p.sprinting) m.sprint = (m.sprint || 0) + distance;
+      m.distance = (m.distance || 0) + distance; if (p.walking) m.walk = (m.walk || 0) + distance;
       m.look = (m.look || 0) + Math.abs(angleDelta(p.yaw, this.previous.yaw)) + Math.abs(p.pitch - this.previous.pitch);
       m.jump ||= !p.grounded && p.vy > 0; m.crouch ||= p.crouching; m.deck ||= p.grounded && p.y >= 1.19;
     }

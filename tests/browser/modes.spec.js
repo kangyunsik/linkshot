@@ -54,7 +54,7 @@ test('the real tutorial worker completes all lessons using only ordinary input/e
       if (!state) return; const p = state.players.find((p) => p.id === 'local-operator'), lesson = state.tutorial, now = performance.now();
       let input = { type: 'input', yaw: p.yaw, pitch: 0, spawnCount: p.spawnCount, equipmentSeq: p.equipmentSeq };
       const moveTo = (x, z) => { const distance = Math.hypot(x - p.x, z - p.z); input.yaw = Math.atan2(-(x - p.x), -(z - p.z)); input.forward = distance > .15 ? Math.min(.8, distance * 2) : 0; return distance; };
-      if (lesson.id === 'movement') Object.assign(input, { forward: 1, sprint: true, yaw: .5 });
+      if (lesson.id === 'movement') Object.assign(input, { forward: 1, walk: true, yaw: .5 });
       if (lesson.id === 'terrain') {
         if (!phase) { phase = 'jump'; phaseAt = now; }
         if (phase === 'jump') { input.jump = now - phaseAt < 100; if (now - phaseAt > 1100 && p.grounded) { phase = 'crouch'; phaseAt = now; } }

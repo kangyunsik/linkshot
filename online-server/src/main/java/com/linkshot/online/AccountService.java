@@ -20,6 +20,7 @@ public class AccountService {
     private final GameCatalog catalog;
     public AccountService(JdbcTemplate db, PasswordEncoder passwords, GameCatalog catalog) { this.db = db; this.passwords = passwords; this.catalog = catalog; }
     public record Credentials(UUID id, String username, String passwordHash) {}
+    public record UsernameAvailability(String username, boolean available) {}
     public record Profile(UUID id, String username, String callsign, String characterId, String outfitId, long kills, long deaths, long points, int roundsPlayed, int wins, int casualRating, String rankTier, int rankDivision, int rankPoints, int placementsPlayed, int placementWins, int rankedGames, List<String> ownedWeapons, Map<String, Long> weaponKills) {}
 
     public Credentials credentials(String username) {
@@ -27,17 +28,31 @@ public class AccountService {
     }
     public static String normalizeUsername(String value) { return value == null ? "" : value.toLowerCase(Locale.ROOT); }
 
+    public UsernameAvailability usernameAvailability(String username) {
+        String name = normalizeUsername(username);
+        if (!name.matches("[a-z0-9_]{3,24}")) throw new IllegalArgumentException("아이디는 영문/숫자/_ 3–24자여야 합니다.");
+        boolean exists = Boolean.TRUE.equals(db.queryForObject("SELECT EXISTS (SELECT 1 FROM accounts WHERE username = ?)", Boolean.class, name));
+        return new UsernameAvailability(name, !exists);
+    }
+
     @Transactional
-    public Profile register(String username, String password, String callsign) {
+    public Profile register(String username, String password) {
         username = normalizeUsername(username);
         if (!username.matches("[a-z0-9_]{3,24}") || password == null || password.codePointCount(0, password.length()) < 12 || password.getBytes(StandardCharsets.UTF_8).length > 72) throw new IllegalArgumentException("아이디는 영문/숫자/_ 3–24자, 비밀번호는 12자 이상·UTF-8 72바이트 이하여야 합니다.");
-        String name = callsign == null ? username : callsign.replaceAll("[\\p{C}<>]", "").strip();
-        if (name.isEmpty() || name.codePointCount(0, name.length()) > 16) throw new IllegalArgumentException("콜사인은 1–16자여야 합니다.");
         UUID id = UUID.randomUUID();
-        try { db.update("INSERT INTO accounts(id, username, password_hash, callsign) VALUES (?, ?, ?, ?)", id, username, passwords.encode(password), name); }
-        catch (DuplicateKeyException ex) { throw new IllegalArgumentException("사용할 수 없는 아이디입니다."); }
+        try { db.update("INSERT INTO accounts(id, username, password_hash, callsign) VALUES (?, ?, ?, ?)", id, username, passwords.encode(password), username); }
+        catch (DuplicateKeyException ex) { throw new DuplicateUsernameException(); }
         db.update("INSERT INTO profiles(account_id) VALUES (?)", id);
         for (String weapon : catalog.freeWeapons()) db.update("INSERT INTO owned_weapons(account_id, weapon_id) VALUES (?, ?)", id, weapon);
+        return profile(id);
+    }
+
+    @Transactional
+    public Profile updateCallsign(String username, String callsign) {
+        String name = callsign == null ? "" : callsign.replaceAll("[\\p{C}<>]", "").strip();
+        if (name.isEmpty() || name.codePointCount(0, name.length()) > 24) throw new IllegalArgumentException("콜사인은 1–24자여야 합니다.");
+        UUID id = credentials(username).id();
+        db.update("UPDATE accounts SET callsign = ? WHERE id = ?", name, id);
         return profile(id);
     }
 

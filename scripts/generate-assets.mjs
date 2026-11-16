@@ -44,6 +44,14 @@ const assets = [
     negative: 'worst quality, low quality, blurry, watermark, signature, people, crowd, cars blocking street, pitch black, dark silhouette, heavy fog, oversaturated, futuristic megacity, skyscraper canyon',
   },
   ...[
+    ['faultline', 'a massive abandoned open-pit stone quarry arena, terraced ochre rock faces, broad smooth access ramps descending into a central excavation basin, a large fixed rock drilling machine, rugged limestone cover, a low excavated side tunnel, northern elevated rocky ridge, dusty pale golden daylight, readable wide tactical routes, no stairs or conventional buildings'],
+    ['sump', 'a monumental dry underground circular concrete reservoir, wide raised annular maintenance walkway around a lower central drainage basin, large cylindrical concrete piers, four broad sloping access ramps, green oxidized pipes and central pump baffles, dim teal ambient light and warm maintenance lights, readable traversable dry floor, no windows or staircases'],
+    ['relay', 'an open-air circular communications relay facility, three separated antenna plazas connected by broad gently sloping paths, low mint gray relay cabinets and ceramic equipment cover, north elevated dish antenna platform and south maintenance deck, weathered pale concrete and turquoise technical trim, clear sky, readable open tactical routes, no conventional buildings or stairs'],
+    ['bastion', 'a cooperative coastal defense installation with a bright mint green generator core at the rear, three broad rocky approach lanes converging toward layered low defensive cover, a small raised support deck reached by smooth wide ramps, warm amber lamps and cool blue sea haze, fixed concrete berms and steel service equipment, dramatic readable defensive arena, no conventional buildings or stairs'],
+  ].map(([id, scene], i) => ({ file: `${id}-hero.png`, width: 1152, height: 768, seed: 7092600 + i, teamMapAsset: true, prompt: `masterpiece, best quality, very aesthetic, scenery, no humans, ${scene}, wide angle establishing shot, highly detailed game environment concept art, anime background art, original environment, empty arena`, negative: 'worst quality, low quality, blurry, text, logo, watermark, signature, people, soldiers, character, firearm, dense fog, pitch black, buildings with windows, staircase, shipping container maze' })),
+  { file: 'quarry-strata.png', width: 768, height: 768, seed: 7092610, teamMapAsset: true, prompt: 'masterpiece, best quality, no humans, seamless neutral beige gray limestone quarry rock material, thin horizontal sedimentary strata, subtle chipped cut stone microtexture, matte mineral surface, evenly lit flat orthographic material swatch, full frame, no shadows, no perspective, no objects' },
+  { file: 'terrain-concrete.png', width: 768, height: 768, seed: 7092611, teamMapAsset: true, prompt: 'masterpiece, best quality, no humans, seamless neutral light gray weathered concrete material texture, fine aggregate and subtle damp mineral speckling, restrained industrial floor surface, matte finish, even diffuse lighting, flat orthographic material swatch, full frame, no cracks forming objects, no markings, no shadows, no perspective' },
+  ...[
     ['circuit', 'dark charcoal teal futuristic circuit board surface pattern, thin mint cyan geometric circuit traces, microchip paths, intricate etched lines, subtle metallic finish, seamless flat surface, no perspective'],
     ['forge', 'dark gunmetal and burnt orange forged steel surface pattern, angular copper molten cracks, geometric armor camouflage, scratched metal, intricate abstract industrial pattern, seamless flat surface, no perspective'],
     ['camo', 'white gray black digital camouflage pattern texture, irregular angular geometric polygon patches, arctic military camouflage, flat graphic pattern, matte painted surface, seamless all over pattern, no perspective'],
@@ -92,6 +100,7 @@ const checkpoint = checkpoints.find((name) => name.includes('animagine-xl-4.0-op
 if (!checkpoint) throw new Error('ComfyUI에 체크포인트가 없습니다.');
 
 for (const asset of assets) {
+  if (process.argv.includes('--team-maps') && !asset.teamMapAsset) continue;
   if (selectedAsset && asset.file !== selectedAsset) continue;
   if (process.argv.includes('--maps') && !asset.file.endsWith('-hero.png')) continue;
   if (process.argv.includes('--materials') && !asset.file.startsWith('operator-')) continue;

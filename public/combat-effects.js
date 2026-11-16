@@ -2,6 +2,9 @@ import * as THREE from '/vendor/three.module.js';
 import { createOperator, poseOperator } from './operator-model.js';
 import { disposeModel } from './weapon-model.js';
 import { bounds } from '/shared/world.js';
+import { EQUIPMENT } from '/shared/catalog.js';
+import { WeaponWallGuard } from './weapon-wall.js';
+import { topHeight, horizontalOverlap } from '/shared/terrain.js';
 
 const corpseKey = (player) => `${player.characterId}/${player.outfitId}/${player.skinId}/${player.teamId || ''}/${player.weaponId}/${player.weaponSkinId || player.skinId}`;
 const CORPSE_LIMIT = 8;
@@ -12,9 +15,18 @@ export class CombatEffects {
   prepareWarmup(players) {
     if (this.warmup) return this.warmup;
     const group = new THREE.Group(), seen = new Set(); group.position.set(10000, 0, 10000);
-    for (const player of players) {
+    const enemies = this.world.gameTypes?.includes('defense') ? ['male', 'female'].map((characterId) => ({ characterId, outfitId: 'field', skinId: 'standard', weaponId: 'rifle', weaponSkinId: 'standard', teamId: 'red' })) : [];
+    for (const player of enemies) { const operator = createOperator(player, this.models); operator.weapon.visible = false; group.add(operator.group); }
+    for (const player of [...players, ...enemies]) {
       const key = corpseKey(player); if (seen.has(key)) continue; seen.add(key);
       const corpse = this.createCorpse(player); group.add(corpse.pivot); this.warmupCorpses.push(corpse);
+    }
+    // Respawns/pickups can introduce any gun and either mapped/unmapped skins.
+    // Retain these materials off-scene until disposal: compiling then deleting
+    // the last material reference would evict the prepared clipping programs.
+    for (const weapon of EQUIPMENT) for (const skin of ['standard', 'circuit']) {
+      const model = this.models.create(weapon.id, skin); new WeaponWallGuard(model);
+      model.userData.flash.visible = true; model.userData.worldWeaponWarmup = true; group.add(model);
     }
     group.add(new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0], 3)), new THREE.PointsMaterial({ color: '#a62532', size: .045, transparent: true, opacity: .85, depthWrite: false })));
     group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 1, 0)]), new THREE.LineBasicMaterial({ color: '#ffdf9c', transparent: true, opacity: .8, depthWrite: false })));
@@ -51,7 +63,7 @@ export class CombatEffects {
 
   floor(x, z, ceiling) {
     let floor = 0;
-    for (const box of this.world.obstacles) { const b = bounds(box); if (x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ && b.maxY <= ceiling + 0.05) floor = Math.max(floor, b.maxY); }
+    for (const box of this.world.obstacles) { const b = bounds(box), point = { x, z }, top = topHeight(b, point); if (horizontalOverlap(point, b) && top <= ceiling + .05) floor = Math.max(floor, top); }
     return floor;
   }
 

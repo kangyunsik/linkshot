@@ -37,6 +37,7 @@ import tools.jackson.databind.json.JsonMapper;
 class OnlineServerTest {
     private static final String ENGINE_KEY = UUID.randomUUID() + "-" + UUID.randomUUID();
     private static final JsonMapper JSON = JsonMapper.builder().build();
+    private static final String LAN_ORIGIN = "http://" + String.join(".", "192", "168", "40", "25") + ":4174";
     private static final EmbeddedPostgres PG;
     static {
         try {
@@ -47,7 +48,7 @@ class OnlineServerTest {
     @DynamicPropertySource static void properties(DynamicPropertyRegistry properties) {
         properties.add("spring.datasource.url", () -> PG.getJdbcUrl("postgres", "postgres"));
         properties.add("spring.datasource.username", () -> "postgres"); properties.add("spring.datasource.password", () -> "");
-        properties.add("linkshot.engine-secret", () -> ENGINE_KEY); properties.add("linkshot.allowed-origins", () -> "http://127.0.0.1:4174");
+        properties.add("linkshot.engine-secret", () -> ENGINE_KEY); properties.add("linkshot.allowed-origins", () -> LAN_ORIGIN);
     }
     @org.springframework.beans.factory.annotation.Value("${local.server.port}") int port;
     @Autowired AccountService accounts;
@@ -55,7 +56,7 @@ class OnlineServerTest {
     @Autowired JdbcTemplate db;
     private String base() { return "http://127.0.0.1:" + port; }
     private String username() { return "u_" + UUID.randomUUID().toString().replace("-", "").substring(0, 18); }
-    private AccountService.Profile account() { return accounts.register(username(), "test-only-long-passphrase", "TESTER"); }
+    private AccountService.Profile account() { return accounts.register(username(), "test-only-long-passphrase"); }
     private JsonNode json(HttpResponse<String> response) { return JSON.readTree(response.body()); }
     private final class Browser {
         final CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
@@ -69,7 +70,7 @@ class OnlineServerTest {
             builder.method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(content)); return http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
         }
         void csrf() throws Exception { csrf = json(request("GET", "/api/auth/csrf", null, false)).get("token").asString(); }
-        HttpResponse<String> register(String username) throws Exception { csrf(); return request("POST", "/api/auth/register", Map.of("username", username, "password", "test-only-long-passphrase", "callsign", "TESTER"), true); }
+        HttpResponse<String> register(String username) throws Exception { csrf(); return request("POST", "/api/auth/register", Map.of("username", username, "password", "test-only-long-passphrase"), true); }
         HttpResponse<String> login(String username) throws Exception { return request("POST", "/api/auth/login", "username=" + URLEncoder.encode(username, StandardCharsets.UTF_8) + "&password=test-only-long-passphrase", true); }
     }
     private HttpResponse<String> engine(String path, Object body) throws Exception {
@@ -79,7 +80,7 @@ class OnlineServerTest {
     @Test void unauthenticatedRequestsCannotReadProfilesOrWriteResults() throws Exception {
         var client = new Browser(); assertEquals(200, client.request("GET", "/api/health", null, false).statusCode());
         assertEquals(401, client.request("GET", "/api/account", null, false).statusCode());
-        assertEquals(403, client.request("POST", "/api/auth/register", Map.of("username", username(), "password", "test-only-long-passphrase", "callsign", "TESTER"), false).statusCode());
+        assertEquals(403, client.request("POST", "/api/auth/register", Map.of("username", username(), "password", "test-only-long-passphrase"), false).statusCode());
         assertEquals(401, client.request("GET", "/internal/matches/pending", null, false).statusCode());
         assertFalse(json(client.request("GET", "/api/health", null, false)).get("matchmaking").asBoolean());
     }
@@ -87,6 +88,7 @@ class OnlineServerTest {
     @Test void registrationLoginJdbcSessionsAndLogoutProtectPasswordAndRotateSessionIdentity() throws Exception {
         var client = new Browser(); String name = username(); var created = client.register(name); assertEquals(201, created.statusCode());
         var profile = json(created); UUID id = UUID.fromString(profile.get("id").asString()); assertEquals(0, profile.get("points").asInt()); assertEquals(0, profile.get("kills").asInt());
+        assertEquals(name, profile.get("callsign").asString());
         assertEquals(new HashSet<>(List.of("rifle", "pistol", "shotgun", "sniper")), new HashSet<>(JSON.convertValue(profile.get("ownedWeapons"), List.class)));
         String hash = db.queryForObject("SELECT password_hash FROM accounts WHERE id = ?", String.class, id); assertTrue(hash.startsWith("$2a$12$")); assertFalse(created.body().contains(hash)); assertFalse(created.body().contains("test-only-long-passphrase"));
         String oldCookie = client.cookies.getCookieStore().getCookies().get(0).getValue(), oldCsrf = client.csrf;
@@ -100,10 +102,10 @@ class OnlineServerTest {
 
     @Test void clientProgressImportsAndMalformedRegistrationAreRejected() throws Exception {
         var client = new Browser(); String name = username(); assertEquals(201, client.register(name).statusCode());
-        assertEquals(400, client.request("POST", "/api/auth/register", Map.of("username", name, "password", "test-only-long-passphrase", "callsign", "TESTER"), true).statusCode());
-        assertEquals(400, client.request("POST", "/api/auth/register", Map.of("username", username(), "password", "test-only-long-passphrase", "callsign", "TESTER", "points", 999_999, "ownedWeapons", List.of("m82")), true).statusCode());
-        assertEquals(400, client.request("POST", "/api/auth/register", Map.of("username", username(), "password", "가".repeat(30), "callsign", "TESTER"), true).statusCode());
-        assertEquals(400, client.request("POST", "/api/auth/register", Map.of("username", username(), "password", "short", "callsign", "TESTER"), true).statusCode());
+        assertEquals(409, client.request("POST", "/api/auth/register", Map.of("username", name, "password", "test-only-long-passphrase"), true).statusCode());
+        assertEquals(400, client.request("POST", "/api/auth/register", Map.of("username", username(), "password", "test-only-long-passphrase", "points", 999_999, "ownedWeapons", List.of("m82")), true).statusCode());
+        assertEquals(400, client.request("POST", "/api/auth/register", Map.of("username", username(), "password", "가".repeat(30)), true).statusCode());
+        assertEquals(400, client.request("POST", "/api/auth/register", Map.of("username", username(), "password", "short"), true).statusCode());
         assertEquals(200, client.login(name).statusCode()); client.csrf();
         assertNotEquals(200, client.request("POST", "/api/account", Map.of("kills", 500, "points", 999_999), true).statusCode()); assertEquals(0, accounts.profile(name).points());
     }
@@ -114,6 +116,48 @@ class OnlineServerTest {
         assertEquals(403, client.http.send(evil, HttpResponse.BodyHandlers.ofString()).statusCode());
         var allowed = HttpRequest.newBuilder(URI.create(base() + "/api/account")).header("Origin", "http://127.0.0.1:4174").header("Access-Control-Request-Method", "POST").method("OPTIONS", HttpRequest.BodyPublishers.noBody()).build();
         var response = client.http.send(allowed, HttpResponse.BodyHandlers.ofString()); assertEquals(200, response.statusCode()); assertEquals("http://127.0.0.1:4174", response.headers().firstValue("Access-Control-Allow-Origin").orElseThrow()); assertEquals("true", response.headers().firstValue("Access-Control-Allow-Credentials").orElseThrow());
+        for (String origin : List.of("http://localhost:4174", LAN_ORIGIN)) {
+            var request = HttpRequest.newBuilder(URI.create(base() + "/api/health")).header("Origin", origin).GET().build();
+            var ok = client.http.send(request, HttpResponse.BodyHandlers.ofString()); assertEquals(200, ok.statusCode()); assertEquals(origin, ok.headers().firstValue("Access-Control-Allow-Origin").orElseThrow());
+        }
+        for (String origin : List.of("http://127.0.0.1:9999", "http://localhost.example.invalid:4174")) {
+            var request = HttpRequest.newBuilder(URI.create(base() + "/api/health")).header("Origin", origin).GET().build(); assertEquals(403, client.http.send(request, HttpResponse.BodyHandlers.ofString()).statusCode());
+        }
+    }
+
+    @Test void duplicateRegistrationClearlyFailsAndCannotReplaceTheOriginalPassword() throws Exception {
+        var client = new Browser(); String name = username();
+        var available = json(client.request("GET", "/api/auth/username-availability?username=" + name, null, false)); assertTrue(available.get("available").asBoolean());
+        assertEquals(201, client.register(name).statusCode());
+        String hash = db.queryForObject("SELECT password_hash FROM accounts WHERE username = ?", String.class, name);
+        var duplicate = client.request("POST", "/api/auth/register", Map.of("username", name.toUpperCase(java.util.Locale.ROOT), "password", "a-different-test-passphrase"), true);
+        assertEquals(409, duplicate.statusCode()); assertEquals("이미 존재하는 아이디입니다.", json(duplicate).get("message").asString());
+        assertEquals(hash, db.queryForObject("SELECT password_hash FROM accounts WHERE username = ?", String.class, name)); assertEquals(1, db.queryForObject("SELECT COUNT(*) FROM accounts WHERE username = ?", Integer.class, name));
+        assertFalse(json(client.request("GET", "/api/auth/username-availability?username=" + name.toUpperCase(java.util.Locale.ROOT), null, false)).get("available").asBoolean());
+        assertEquals(400, client.request("GET", "/api/auth/username-availability?username=ab", null, false).statusCode());
+        assertEquals(401, client.request("POST", "/api/auth/login", "username=" + name + "&password=a-different-test-passphrase", true).statusCode());
+        assertEquals(200, client.login(name).statusCode());
+    }
+
+    @Test void callsignIsAnAuthenticatedProfileSettingAndNeverChangesTheLoginIdentityOrProgress() throws Exception {
+        var client = new Browser(); String name = username() + "abcd"; assertEquals(24, name.length());
+        var created = client.register(name); assertEquals(201, created.statusCode()); assertEquals(name, json(created).get("callsign").asString());
+        assertEquals(200, client.login(name).statusCode()); client.csrf();
+        assertEquals(403, client.request("POST", "/api/account/callsign", Map.of("callsign", "바뀌면 안됨"), false).statusCode());
+        var changed = client.request("POST", "/api/account/callsign", Map.of("callsign", "  새 콜사인  "), true); assertEquals(200, changed.statusCode());
+        assertEquals("새 콜사인", json(changed).get("callsign").asString()); assertEquals(name, json(changed).get("username").asString()); assertEquals(0, json(changed).get("points").asLong());
+        assertEquals("새 콜사인", json(client.request("GET", "/api/account", null, false)).get("callsign").asString());
+        assertEquals(400, client.request("POST", "/api/account/callsign", Map.of("callsign", ""), true).statusCode());
+        assertEquals(400, client.request("POST", "/api/account/callsign", Map.of("callsign", "a".repeat(25)), true).statusCode());
+        assertEquals(400, client.request("POST", "/api/account/callsign", Map.of("callsign", "FORGED", "username", "someone_else", "points", 99999), true).statusCode());
+        assertEquals("새 콜사인", accounts.profile(name).callsign());
+    }
+
+    @Test void simultaneousRegistrationsHaveOneWinnerAndOneExplicitDuplicateFailure() throws Exception {
+        String name = username(); var results = new java.util.ArrayList<CompletableFuture<Boolean>>();
+        for (int i = 0; i < 2; i++) results.add(CompletableFuture.supplyAsync(() -> { try { accounts.register(name, "test-only-long-passphrase"); return true; } catch (DuplicateUsernameException expected) { return false; } }));
+        int successes = 0; for (var result : results) if (result.get(10, TimeUnit.SECONDS)) successes++;
+        assertEquals(1, successes); assertEquals(1, db.queryForObject("SELECT COUNT(*) FROM accounts WHERE username = ?", Integer.class, name));
     }
 
     @Test void temporaryRankedAiAssignmentsAreServerOwnedAndAnAccountCannotJoinTwoActiveMatches() {

@@ -27,15 +27,16 @@ async function dispose(page) {
   await page.evaluate(() => { const f = window.__rules; if (f) { clearInterval(f.timer); document.getElementById('resume-button').removeEventListener('click', f.start); f.game.dispose(); delete window.__rules; } });
 }
 
-test('live weapon shortcuts are locked; sprint/airborne crouch and accuracy penalties match the server', async ({ page }) => {
+test('live weapons stay locked; Shift is silent walking, grounded crouch works and airborne crouch stays blocked', async ({ page }) => {
   await fixture(page);
   try {
     await page.keyboard.press('Digit4'); await page.mouse.wheel(0, 300);
     expect(await page.evaluate(() => window.__rules.player.weaponId)).toBe('rifle');
     await page.keyboard.down('KeyW'); await page.keyboard.down('ShiftLeft'); await page.keyboard.down('KeyC');
-    await expect.poll(() => page.evaluate(() => window.__rules.player.sprinting)).toBe(true);
-    expect(await page.evaluate(() => window.__rules.player.crouching)).toBe(false);
-    await page.mouse.down(); await expect(page.locator('#crosshair')).toHaveAttribute('data-accuracy', 'sprinting');
+    await expect.poll(() => page.evaluate(() => window.__rules.player.walking && window.__rules.player.crouching)).toBe(true);
+    expect(await page.evaluate(() => window.__rules.player.sprinting)).toBe(false); await page.keyboard.up('KeyC');
+    await expect.poll(() => page.evaluate(() => Math.abs(window.__rules.player.moveSpeed - 2.85))).toBeLessThan(.05);
+    await page.mouse.down(); await expect(page.locator('#crosshair')).toHaveAttribute('data-accuracy', 'walking');
     await expect.poll(() => page.evaluate(() => window.__rules.game.pitch)).toBeGreaterThan(0.025); await page.mouse.up();
     await page.keyboard.press('Space'); await expect(page.locator('#crosshair')).toHaveAttribute('data-accuracy', 'airborne');
     expect(await page.evaluate(() => window.__rules.player.crouching)).toBe(false);
@@ -116,12 +117,15 @@ test('local and nearby remote movement both produce footsteps, but dead sources 
       game.keys.add('KeyW'); const avatar = game.remote.get('other'); Object.assign(avatar.target, { moveSpeed: 5.7, grounded: true, hp: 100 });
       const start = performance.now(); game.previousFrame = start;
       for (let i = 1; i <= 120; i++) { avatar.target.z = 6 - i * 5.7 / 60; avatar.target.stepDistance = i * 5.7 / 60; game.animate(start + i * 1000 / 60); cancelAnimationFrame(game.frameId); }
-      const local = steps.filter((step) => !step.remote), remote = steps.filter((step) => step.remote), beforeDeath = steps.length;
+      const local = steps.filter((step) => !step.remote), remote = steps.filter((step) => step.remote), beforeWalk = steps.length;
+      game.keys.add('ShiftLeft'); avatar.target.walking = true;
+      for (let i = 121; i <= 240; i++) { avatar.target.z -= 2.85 / 60; game.animate(start + i * 1000 / 60); cancelAnimationFrame(game.frameId); }
+      const afterWalk = steps.length, beforeDeath = steps.length;
       game.local.hp = 0; avatar.target.hp = 0;
-      for (let i = 121; i <= 180; i++) { avatar.target.z -= 0.1; game.animate(start + i * 1000 / 60); cancelAnimationFrame(game.frameId); }
-      return { local, remote, beforeDeath, afterDeath: steps.length };
+      for (let i = 241; i <= 300; i++) { avatar.target.z -= 0.1; game.animate(start + i * 1000 / 60); cancelAnimationFrame(game.frameId); }
+      return { local, remote, beforeWalk, afterWalk, beforeDeath, afterDeath: steps.length };
     });
-    expect(result.local.length).toBeGreaterThanOrEqual(3); expect(result.remote.length).toBeGreaterThanOrEqual(3); expect(result.afterDeath).toBe(result.beforeDeath);
+    expect(result.local.length).toBeGreaterThanOrEqual(3); expect(result.remote.length).toBeGreaterThanOrEqual(3); expect(result.afterWalk).toBe(result.beforeWalk); expect(result.afterDeath).toBe(result.beforeDeath);
     expect(result.local.every((step) => step.playerId === 'viewer' && step.volume === 1)).toBe(true);
     expect(result.remote.every((step) => step.playerId === 'other' && step.pan < 0 && step.volume > 0 && step.volume < 1)).toBe(true);
   } finally { await dispose(page); }

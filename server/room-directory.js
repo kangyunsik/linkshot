@@ -2,6 +2,7 @@ import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { Room, createRoomCode } from './game.js';
 import { LobbyRoom } from './room-lobby.js';
+import { isGameType } from '../shared/game-types.js';
 
 const derive = promisify(scrypt);
 let pendingHashes = 0;
@@ -26,7 +27,7 @@ export class RoomDirectory {
   }
   async create(options = {}, account = null) {
     const password = checkedPassword(options.password);
-    if (options.gameType != null && !['ffa', 'teams'].includes(options.gameType)) throw new Error('개인전 또는 팀전을 선택해 주세요.');
+    if (options.gameType != null && !isGameType(options.gameType)) throw new Error('지원하는 교전 규칙을 선택해 주세요.');
     if (this.rooms.size >= this.capacity()) throw new Error('서버의 방이 모두 사용 중입니다.');
     if (typeof account === 'string') {
       const now = this.clock(); for (const [key, entry] of this.creations) if (now - entry.at >= 30_000) this.creations.delete(key);

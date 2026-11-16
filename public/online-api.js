@@ -1,11 +1,13 @@
+import { onlineBrowserUrl } from '/shared/online-network.js';
+
 // Online identity is a server session, never a localStorage bearer token or an
 // imported device profile. The configured URL is public configuration, not a key.
 export class OnlineApi {
-  constructor(baseUrl) {
-    const url = new URL(baseUrl);
+  constructor(baseUrl, frontendOrigin = '') {
+    const url = onlineBrowserUrl(baseUrl, globalThis.location, frontendOrigin);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('온라인 API 주소를 확인하세요.');
     if (globalThis.location?.protocol === 'https:' && url.protocol !== 'https:') throw new Error('HTTPS 페이지에는 HTTPS 온라인 API가 필요합니다.');
-    this.base = url.href.replace(/\/$/, ''); this.token = null;
+    this.base = url.href.replace(/\/$/, ''); this.frontendOrigin = frontendOrigin; this.token = null;
   }
   async request(path, { method = 'GET', body, form = false, csrf = true } = {}) {
     if (method !== 'GET' && csrf && !this.token) await this.refreshCsrf();
@@ -17,6 +19,7 @@ export class OnlineApi {
   health() { return this.request('/api/health'); }
   async refreshCsrf() { const data = await this.request('/api/auth/csrf', { csrf: false }); if (typeof data?.token !== 'string' || data.token.length > 512 || data.headerName !== 'X-CSRF-TOKEN') throw new Error('온라인 인증 응답을 확인할 수 없습니다.'); this.token = data.token; }
   profile() { return this.request('/api/account'); }
+  usernameAvailability(username) { return this.request('/api/auth/username-availability?username=' + encodeURIComponent(username)); }
   queue(mode) { return this.request('/api/queue', { method: 'POST', body: { mode } }); }
   queueStatus() { return this.request('/api/queue'); }
   cancelQueue() { return this.request('/api/queue', { method: 'DELETE' }); }
@@ -25,7 +28,8 @@ export class OnlineApi {
   customTicket() { return this.request('/api/custom/ticket', { method: 'POST' }); }
   receipt(id) { return this.request(`/api/results/${encodeURIComponent(id)}`); }
   history() { return this.request('/api/results'); }
-  register(username, password, callsign) { return this.request('/api/auth/register', { method: 'POST', body: { username, password, callsign } }); }
+  register(username, password) { return this.request('/api/auth/register', { method: 'POST', body: { username, password } }); }
+  updateCallsign(callsign) { return this.request('/api/account/callsign', { method: 'POST', body: { callsign } }); }
   async login(username, password) { const result = await this.request('/api/auth/login', { method: 'POST', form: true, body: { username, password } }); this.token = null; await this.refreshCsrf(); return result.profile; }
   async logout() { await this.request('/api/auth/logout', { method: 'POST' }); this.token = null; }
 }

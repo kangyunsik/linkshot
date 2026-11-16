@@ -1,4 +1,5 @@
 export const VIEWMODEL_LAYER = 1;
+export const normalizeWeaponHand = (value) => value === 'left' ? 'left' : 'right';
 
 export async function compileViewmodelPrograms(renderer, scene, camera) {
   const mask = camera.layers.mask;

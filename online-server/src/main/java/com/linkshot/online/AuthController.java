@@ -10,6 +10,7 @@ import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -20,10 +21,13 @@ public class AuthController {
     private final MatchmakingService matchmaking;
     private final CustomAccessService custom;
     public AuthController(AccountService accounts, OnlineProperties properties, MatchmakingService matchmaking, CustomAccessService custom) { this.accounts = accounts; this.properties = properties; this.matchmaking = matchmaking; this.custom = custom; }
-    public record Registration(@NotBlank @Size(max = 24) String username, @NotBlank @Size(max = 72) String password, @NotBlank @Size(max = 32) String callsign) {}
+    public record Registration(@NotBlank @Size(max = 24) String username, @NotBlank @Size(max = 72) String password) {}
+    public record Callsign(@NotBlank @Size(max = 48) String callsign) {}
     @GetMapping("/api/health") public Map<String, Object> health() { return Map.of("status", "UP", "service", "linkshot-online", "auth", true, "matchmaking", matchmaking.available(), "combatEngine", "shared-js", "engineConfigured", properties.engineEnabled(), "players", matchmaking.players(), "casualWaitSeconds", matchmaking.waitSeconds(), "rankedAiEnabled", matchmaking.rankedAiEnabled(), "customRooms", custom.available()); }
     @GetMapping("/api/auth/csrf") public Map<String, String> csrf(CsrfToken token) { return Map.of("token", token.getToken(), "headerName", token.getHeaderName()); }
+    @GetMapping("/api/auth/username-availability") public AccountService.UsernameAvailability usernameAvailability(@RequestParam String username) { return accounts.usernameAvailability(username); }
     @PostMapping("/api/auth/register") @ResponseStatus(HttpStatus.CREATED)
-    public AccountService.Profile register(@Valid @RequestBody Registration request) { return accounts.register(request.username(), request.password(), request.callsign()); }
+    public AccountService.Profile register(@Valid @RequestBody Registration request) { return accounts.register(request.username(), request.password()); }
     @GetMapping("/api/account") public AccountService.Profile account(Authentication user) { return accounts.profile(user.getName()); }
+    @PostMapping("/api/account/callsign") public AccountService.Profile callsign(Authentication user, @Valid @RequestBody Callsign request) { return accounts.updateCallsign(user.getName(), request.callsign()); }
 }

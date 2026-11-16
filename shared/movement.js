@@ -1,7 +1,8 @@
 import { RULES, WORLD, bounds, playerPose } from './world.js';
 import { DEFAULT_WEAPON, isWeaponId, getWeapon } from './catalog.js';
+import { topHeight, horizontalOverlap, horizontalContact } from './terrain.js';
 
-export const EMPTY_INPUT = Object.freeze({ forward: 0, strafe: 0, yaw: 0, pitch: 0, jump: false, sprint: false, crouch: false, fire: false, reload: false, ads: false, weaponId: DEFAULT_WEAPON });
+export const EMPTY_INPUT = Object.freeze({ forward: 0, strafe: 0, yaw: 0, pitch: 0, jump: false, walk: false, sprint: false, crouch: false, fire: false, reload: false, ads: false, weaponId: DEFAULT_WEAPON });
 export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 export const angleDelta = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
 
@@ -14,11 +15,12 @@ export function advanceTime(elapsed, tick) {
   return duration;
 }
 const CONTACT_EPSILON = 0.00001;
-const overlaps = (player, b) => player.x > b.minX + CONTACT_EPSILON && player.x < b.maxX - CONTACT_EPSILON && player.z > b.minZ + CONTACT_EPSILON && player.z < b.maxZ - CONTACT_EPSILON;
+const overlaps = (player, b) => horizontalOverlap(player, b, CONTACT_EPSILON);
 const colliderCache = new WeakMap();
+const movementBounds = (box) => ({ ...bounds(box, RULES.playerRadius), walkable: box.walkable === true });
 function collidersFor(world) {
-  if (!Object.isFrozen(world)) return world.obstacles.map((box) => bounds(box, RULES.playerRadius));
-  if (!colliderCache.has(world)) colliderCache.set(world, world.obstacles.map((box) => bounds(box, RULES.playerRadius)));
+  if (!Object.isFrozen(world)) return world.obstacles.map(movementBounds);
+  if (!colliderCache.has(world)) colliderCache.set(world, world.obstacles.map(movementBounds));
   return colliderCache.get(world);
 }
 
@@ -27,7 +29,8 @@ function collidersFor(world) {
 export function supportHeight(player, world = WORLD, maxDrop = 0.02) {
   let floor = player.y >= -CONTACT_EPSILON && player.y <= maxDrop + CONTACT_EPSILON ? 0 : null;
   for (const b of collidersFor(world)) {
-    if (overlaps(player, b) && b.maxY <= player.y + CONTACT_EPSILON && player.y - b.maxY <= maxDrop + CONTACT_EPSILON) floor = Math.max(floor ?? 0, b.maxY);
+    const top = topHeight(b, player);
+    if (overlaps(player, b) && top <= player.y + CONTACT_EPSILON && player.y - top <= maxDrop + CONTACT_EPSILON) floor = Math.max(floor ?? 0, top);
   }
   return floor;
 }
@@ -37,7 +40,7 @@ export function sanitizeInput(data, previous = EMPTY_INPUT) {
   return {
     forward: clamp(finite(data.forward), -1, 1), strafe: clamp(finite(data.strafe), -1, 1),
     yaw: finite(data.yaw, previous.yaw) % (Math.PI * 2), pitch: clamp(finite(data.pitch, previous.pitch), -1.48, 1.48),
-    jump: data.jump === true, sprint: data.sprint === true, fire: data.fire === true, reload: data.reload === true,
+    jump: data.jump === true, walk: data.walk === true, sprint: false, fire: data.fire === true, reload: data.reload === true,
     crouch: data.crouch === true,
     ads: data.ads === true, weaponId: isWeaponId(data.weaponId) || data.weaponId === 'knife' ? data.weaponId : previous.weaponId || DEFAULT_WEAPON,
   };
@@ -45,16 +48,15 @@ export function sanitizeInput(data, previous = EMPTY_INPUT) {
 
 export function canStand(player, world = WORLD) {
   return !collidersFor(world).some((b) => {
-    return overlaps(player, b) && player.y < b.maxY - CONTACT_EPSILON && player.y + RULES.playerHeight > b.minY + CONTACT_EPSILON;
+    return overlaps(player, b) && player.y < topHeight(b, player) - CONTACT_EPSILON && player.y + RULES.playerHeight > b.minY + CONTACT_EPSILON;
   });
 }
 
 function baseMovementSpeed(player, input) {
   const weapon = getWeapon(player.weaponId || input.weaponId);
-  const sprinting = input.sprint && input.forward > 0 && !input.ads && !player.crouching;
-  const amount = player.crouchAmount ?? (player.crouching ? 1 : 0), standing = sprinting ? RULES.sprintSpeed : RULES.walkSpeed;
+  const amount = player.crouchAmount ?? (player.crouching ? 1 : 0), standing = input.walk === true ? RULES.walkSpeed : RULES.runSpeed;
   const base = standing + (RULES.crouchSpeed - standing) * amount;
-  return base * (sprinting ? weapon.sprintMultiplier : weapon.walkMultiplier) * (input.ads ? weapon.adsMoveMultiplier : 1);
+  return base * weapon.walkMultiplier * (input.ads ? weapon.adsMoveMultiplier : 1);
 }
 
 export const hitSlowMultiplier = (player, now = Date.now()) => player.hitSlowUntil > now ? RULES.hitSlowMultiplier : 1;
@@ -68,20 +70,20 @@ export function movePlayer(player, input, dt, world = WORLD, now = Date.now()) {
   const startX = player.x, startZ = player.z;
   const previousCrouch = player.crouchAmount ?? (player.crouching ? 1 : 0);
   const forcedCrouch = (player.crouching === true || previousCrouch > 0) && !canStand(player, world);
-  const sprintRequested = input.sprint && input.forward > 0 && !input.ads;
   const jumpRequested = input.jump && !player.jumpHeld && player.grounded && !forcedCrouch;
-  player.crouching = forcedCrouch || (player.grounded && !sprintRequested && !jumpRequested && input.crouch === true);
-  player.crouchAmount = !forcedCrouch && (jumpRequested || sprintRequested || !player.grounded) ? 0 : clamp(previousCrouch + (player.crouching ? 1 : -1) * dt / RULES.crouchSeconds, 0, 1);
+  player.crouching = forcedCrouch || (player.grounded && !jumpRequested && input.crouch === true);
+  player.crouchAmount = !forcedCrouch && (jumpRequested || !player.grounded) ? 0 : clamp(previousCrouch + (player.crouching ? 1 : -1) * dt / RULES.crouchSeconds, 0, 1);
   if (player.crouchAmount < 0.00001) player.crouchAmount = 0;
   if (player.crouchAmount > 0.99999) player.crouchAmount = 1;
-  if (!airborne) player.sprinting = sprintRequested && !player.crouching;
+  player.sprinting = false; // Old packets cannot restore the removed speed boost.
+  if (!airborne) player.walking = input.walk === true;
   const height = playerPose(player).height;
   let forward = input.forward, strafe = input.strafe;
   const length = Math.hypot(forward, strafe);
   if (length > 1) { forward /= length; strafe /= length; }
   const speed = baseMovementSpeed(player, input), slow = hitSlowMultiplier(player, now);
   // Capture world-space momentum on takeoff (including walking off a ledge).
-  // Looking, releasing WASD, sprinting or aiming cannot steer/brake in flight.
+  // Looking, releasing WASD, holding Shift or aiming cannot steer/brake in flight.
   // Collision still clips displacement; only landing enables new movement.
   if (!airborne) {
     player.vx = (Math.cos(input.yaw) * strafe - Math.sin(input.yaw) * forward) * speed;
@@ -90,13 +92,20 @@ export function movePlayer(player, input, dt, world = WORLD, now = Date.now()) {
   const vx = (Number.isFinite(player.vx) ? player.vx : 0) * slow, vz = (Number.isFinite(player.vz) ? player.vz : 0) * slow;
   const radius = RULES.playerRadius;
   const colliders = collidersFor(world);
-  const intersectsHeight = (b) => player.y < b.maxY - CONTACT_EPSILON && player.y + height > b.minY + CONTACT_EPSILON;
+  const intersectsHeight = (b) => player.y < topHeight(b, player) - CONTACT_EPSILON && player.y + height > b.minY + CONTACT_EPSILON;
   const tryStep = (b) => {
-    const rise = b.maxY - player.y;
+    let top = topHeight(b, player); const rise = top - player.y;
     if (!player.grounded || rise <= CONTACT_EPSILON || rise > RULES.stepHeight + CONTACT_EPSILON) return false;
-    const blocked = colliders.some((other) => overlaps(player, other) && b.maxY < other.maxY - CONTACT_EPSILON && b.maxY + height > other.minY + CONTACT_EPSILON);
+    // At a ramp/deck seam the footprint can touch both surfaces. Step onto
+    // their highest reachable support before a lower ramp can eject the body.
+    if (world.terrain && b.walkable) for (const other of colliders) {
+      if (!other.walkable || !overlaps(player, other)) continue;
+      const height = topHeight(other, player);
+      if (height > top && height <= player.y + RULES.stepHeight + CONTACT_EPSILON) top = height;
+    }
+    const blocked = colliders.some((other) => overlaps(player, other) && top < topHeight(other, player) - CONTACT_EPSILON && top + height > other.minY + CONTACT_EPSILON);
     if (blocked) return false;
-    player.y = b.maxY; player.vy = 0; return true;
+    player.y = top; player.vy = 0; return true;
   };
   // Consume the jump edge before auto-step so jumping at a riser cannot also
   // gain a free stair's height during the same frame.
@@ -109,12 +118,12 @@ export function movePlayer(player, input, dt, world = WORLD, now = Date.now()) {
   // jump arc as the authoritative 60Hz server/solo worker.
   const steps = Math.max(1, Math.ceil(dt / (1 / 120))), step = dt / steps;
   for (let i = 0; i < steps; i++) {
-    for (const [axis, delta, lo, hi] of [['x', vx * step, 'minX', 'maxX'], ['z', vz * step, 'minZ', 'maxZ']]) {
+    for (const [axis, delta] of [['x', vx * step], ['z', vz * step]]) {
       player[axis] += delta;
       for (const b of colliders) {
         if (!delta || !intersectsHeight(b) || !overlaps(player, b)) continue;
         if (tryStep(b)) continue;
-        player[axis] = delta > 0 ? b[lo] : b[hi];
+        player[axis] = horizontalContact(player, b, axis, delta);
       }
     }
     player.x = clamp(player.x, -world.width / 2 + radius, world.width / 2 - radius);
@@ -136,7 +145,8 @@ export function movePlayer(player, input, dt, world = WORLD, now = Date.now()) {
     } else {
       let floor = 0;
       for (const b of colliders) {
-        if (overlaps(player, b) && previousY >= b.maxY - CONTACT_EPSILON && player.y <= b.maxY) floor = Math.max(floor, b.maxY);
+        const top = topHeight(b, player);
+        if (overlaps(player, b) && previousY >= top - CONTACT_EPSILON && player.y <= top) floor = Math.max(floor, top);
       }
       if (player.y <= floor) { player.y = floor; player.vy = 0; player.grounded = true; }
     }
@@ -144,6 +154,6 @@ export function movePlayer(player, input, dt, world = WORLD, now = Date.now()) {
   const travelled = Math.hypot(player.x - startX, player.z - startZ);
   player.moveSpeed = dt > 0 ? travelled / dt : 0;
   // Grounded travel survives snapshots which can end on an instantaneous stop.
-  if (!airborne && player.grounded) player.stepDistance = (player.stepDistance || 0) + travelled;
+  if (!airborne && player.grounded && !player.walking) player.stepDistance = (player.stepDistance || 0) + travelled;
   return player;
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAPS, hasLineOfSight, RULES } from '../shared/world.js';
+import { MATCHMAKING_MAPS as MAPS, hasLineOfSight, RULES } from '../shared/world.js';
 import { Room } from '../shared/simulation.js';
 import { movePlayer, EMPTY_INPUT, supportHeight } from '../shared/movement.js';
 

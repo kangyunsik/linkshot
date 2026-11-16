@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
-import { MAPS } from '../../shared/world.js';
+import { MAPS, MATCHMAKING_MAPS } from '../../shared/world.js';
 
 test.use({ baseURL: process.env.SOLO_SOURCE_TEST ? `http://127.0.0.1:${process.env.LAN_TEST_PORT || 3000}` : `http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}` });
 test.beforeEach(async ({ context }) => {
@@ -60,10 +60,10 @@ test('solo rounds end and restart locally without any backend', async ({ context
   await page.getByRole('button', { name: '로비로 나가기', exact: true }).click(); await expect(page.locator('#lobby')).toBeVisible();
 });
 
-test('every arena can be entered and disposed in the static build', async ({ page }) => {
+test('every FFA arena can be entered and disposed in the static build', async ({ page }) => {
   const errors = []; page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/'); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
-  for (const map of MAPS) {
+  for (const map of MATCHMAKING_MAPS) {
     await page.getByRole('button', { name: '전장 변경', exact: false }).click(); await page.getByRole('button', { name: `${map.label} 전장 선택`, exact: true }).click();
     await page.getByRole('button', { name: '연습전 시작', exact: true }).click(); await expect(page.locator('#pause-overlay')).toBeVisible();
     await expect(page.locator('#hud-map-name')).toHaveText(map.name);

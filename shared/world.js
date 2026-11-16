@@ -1,6 +1,8 @@
 import { expandBuildings } from './buildings.js';
 import { addSpawnZones } from './spawns.js';
-export const NETWORK_PROTOCOL = 18;
+import { TEAM_WORLDS } from './team-worlds.js';
+import { surfaceBounds, surfaceRay, surfaceNormal } from './terrain.js';
+export const NETWORK_PROTOCOL = 21;
 export const BULLET_MARK_RULES = Object.freeze({ lifetimeMs: 60_000, fadeMs: 6000, maxMarks: 6144, historyLimit: 2048, cellScale: 40 });
 
 export const RULES = Object.freeze({
@@ -9,7 +11,7 @@ export const RULES = Object.freeze({
   respawnSeconds: 3, protectionSeconds: 1.5, damage: 28, headDamage: 48,
   playerRadius: 0.34, playerHeight: 1.8, eyeHeight: 1.62,
   crouchHeight: 1.1, crouchEyeHeight: 0.92, crouchSpeed: 2.565,
-  walkSpeed: 5.7, sprintSpeed: 8.55, stepHeight: 0.48,
+  runSpeed: 5.7, walkSpeed: 2.85, stepHeight: 0.48,
   jumpSpeed: 9.2, gravity: 20,
   switchSeconds: 0.32,
   loadoutSelectSeconds: 15,
@@ -244,14 +246,17 @@ function addTacticalFeatures(base) {
 }
 
 export const WORLD = addSpawnZones(expandBuildings(addTacticalFeatures(FOUNDRY)), RULES);
-export const MAPS = Object.freeze([WORLD, ...[longrail, drydock, blocknine, whiteout, redline, overgrowth, nightmarket].map((map) => addSpawnZones(expandBuildings(addTacticalFeatures(map)), RULES))]);
+export const MATCHMAKING_MAPS = Object.freeze([WORLD, ...[longrail, drydock, blocknine, whiteout, redline, overgrowth, nightmarket].map((map) => addSpawnZones(expandBuildings(addTacticalFeatures(map)), RULES))]);
+export const MAPS = Object.freeze([...MATCHMAKING_MAPS, ...TEAM_WORLDS]);
 export const getMap = (id) => MAPS.find((map) => map.id === id) || WORLD;
 
 export function bounds(box, padding = 0) {
+  const surface = surfaceBounds(box, padding);
   return {
     minX: box.x - box.w / 2 - padding, maxX: box.x + box.w / 2 + padding,
     minY: box.y || 0, maxY: (box.y || 0) + box.h,
     minZ: box.z - box.d / 2 - padding, maxZ: box.z + box.d / 2 + padding,
+    ...(surface ? { surface } : {}),
   };
 }
 
@@ -271,7 +276,7 @@ export function rayBox(origin, direction, box, maxDistance = 100) {
       if (near > far) return null;
     }
   }
-  return near <= maxDistance ? near : null;
+  return near <= maxDistance ? surfaceRay(origin, direction, b, near, far) : null;
 }
 
 export function raySphere(origin, direction, center, radius) {
@@ -328,7 +333,8 @@ export function impactSurface(origin, direction, distance, box, world = WORLD) {
     if (floor > .0001 && floor <= distance && Math.abs(x) <= world.width / 2 && Math.abs(z) <= world.depth / 2) return { point: { x, y: 0, z }, normal: { x: 0, y: 1, z: 0 }, id: 'ground', kind: 'ground', bounds: { minX: -world.width / 2, maxX: world.width / 2, minY: 0, maxY: 0, minZ: -world.depth / 2, maxZ: world.depth / 2 } };
   }
   if (!box || distance <= .0001) return null;
-  const b = 'minX' in box ? box : bounds(box), faces = [];
+  const b = 'minX' in box ? box : bounds(box), shaped = surfaceNormal(b, point), faces = [];
+  if (shaped) return { point, normal: shaped, id: box.id || 'world-surface', kind: box.kind || 'wall', bounds: { minX: b.minX, maxX: b.maxX, minY: b.minY, maxY: b.maxY, minZ: b.minZ, maxZ: b.maxZ } };
   for (const [axis, low, high] of [['x', 'minX', 'maxX'], ['y', 'minY', 'maxY'], ['z', 'minZ', 'maxZ']]) for (const [edge, sign] of [[low, -1], [high, 1]]) faces.push({ axis, sign, error: Math.abs(point[axis] - b[edge]), strength: Math.abs(direction[axis]) });
   faces.sort((a, b) => Math.abs(a.error - b.error) > 1e-7 ? a.error - b.error : b.strength - a.strength);
   if (faces[0].error > .002) return null;

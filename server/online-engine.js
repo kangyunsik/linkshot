@@ -2,13 +2,14 @@ import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Room } from '../shared/simulation.js';
-import { NETWORK_PROTOCOL, RULES, MAPS } from '../shared/world.js';
+import { NETWORK_PROTOCOL, RULES, MATCHMAKING_MAPS as MAPS } from '../shared/world.js';
 import { isWeaponId, ownsWeapon, WEAPONS } from '../shared/catalog.js';
 import { EMPTY_INPUT, advanceTime } from '../shared/movement.js';
 import { roundReward } from '../shared/progression.js';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { CustomGateway } from './custom-gateway.js';
+import { onlineBrowserOrigins } from '../shared/online-network.js';
 
 const validId = (id) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 const neutral = (player) => ({ ...EMPTY_INPUT, yaw: player.yaw, pitch: player.pitch, weaponId: player.weaponId });
@@ -57,7 +58,7 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
   if (!Number.isFinite(countdownMs) || countdownMs < 0 || countdownMs > 10_000) throw new Error('Invalid countdown duration.');
   const matches = new Map(), loading = new Map(), connections = new Set(), timers = []; let closed = false, syncing = false;
   const custom = new CustomGateway({ send, clock, capacity: () => Math.max(0, 24 - matches.size - loading.size) });
-  for (const origin of origins) if (new URL(origin).origin !== origin || origin.includes('*')) throw new Error('FRONTEND_ORIGINS must list explicit origins.');
+  origins = onlineBrowserOrigins(origins);
   const server = http.createServer((request, response) => { response.setHeader('Cache-Control', 'no-store'); response.setHeader('X-Content-Type-Options', 'nosniff'); response.writeHead(request.method === 'GET' && request.url === '/health' ? 200 : 404, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(request.url === '/health' ? { status: 'UP', protocolVersion: NETWORK_PROTOCOL } : { message: 'Not found' })); });
   const wss = new WebSocketServer({ server, path: '/play', maxPayload: 4096, perMessageDeflate: false });
 

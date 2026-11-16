@@ -1,7 +1,8 @@
 import { WORLD } from '/shared/world.js';
 import { TEAM_COLORS, teamSpawnZones } from '/shared/teams.js';
+import { isTeamGame } from '/shared/game-types.js';
 
-export function drawTacticalMap(canvas, { world = WORLD, players = [], self = null, spawns = false, detailed = false, gameType = 'ffa' } = {}) {
+export function drawTacticalMap(canvas, { world = WORLD, players = [], self = null, spawns = false, detailed = false, gameType = 'ffa', objective = null } = {}) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const w = canvas.width, h = canvas.height, pad = detailed ? 45 : 15;
@@ -11,7 +12,7 @@ export function drawTacticalMap(canvas, { world = WORLD, players = [], self = nu
   const z = (v) => oz + (v + world.depth / 2) * scale;
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = detailed ? '#111c23' : '#0d1920d9'; ctx.fillRect(0, 0, w, h);
-  if (gameType === 'teams') for (const team of ['blue', 'red']) {
+  if (isTeamGame(gameType)) for (const team of ['blue', 'red']) {
     const points = teamSpawnZones(world)[team]; ctx.fillStyle = TEAM_COLORS[team] + '28';
     const minX = Math.min(...points.map((p) => p.x)) - 1.5, maxX = Math.max(...points.map((p) => p.x)) + 1.5, minZ = Math.min(...points.map((p) => p.z)) - 1.5, maxZ = Math.max(...points.map((p) => p.z)) + 1.5; ctx.fillRect(x(minX), z(minZ), (maxX - minX) * scale, (maxZ - minZ) * scale);
   }
@@ -21,9 +22,15 @@ export function drawTacticalMap(canvas, { world = WORLD, players = [], self = nu
   for (const box of world.obstacles) {
     ctx.fillStyle = box.kind === 'reactor' ? '#577b7a' : box.color === 'orange' ? '#a86b4e' : box.kind === 'wall' ? '#637988' : '#3f5868';
     ctx.strokeStyle = box.color === 'orange' ? '#d29973' : '#8eabb959'; ctx.lineWidth = detailed ? 1.5 : 1;
-    ctx.fillRect(x(box.x - box.w / 2), z(box.z - box.d / 2), box.w * scale, box.d * scale);
-    if (box.kind !== 'wall') ctx.strokeRect(x(box.x - box.w / 2), z(box.z - box.d / 2), box.w * scale, box.d * scale);
+    if (box.shape === 'cylinder' || box.shape === 'ring') {
+      ctx.beginPath(); ctx.arc(x(box.x), z(box.z), box.w / 2 * scale, 0, Math.PI * 2);
+      if (box.shape === 'ring') ctx.arc(x(box.x), z(box.z), box.innerRadius * scale, 0, Math.PI * 2, true);
+      ctx.fill('evenodd'); ctx.stroke();
+      if (box.cutHalf) { ctx.fillStyle = detailed ? '#111c23' : '#0d1920'; ctx.fillRect(x(box.x - box.w / 2), z(box.z - box.cutHalf), box.w * scale, box.cutHalf * 2 * scale); ctx.fillRect(x(box.x - box.cutHalf), z(box.z - box.d / 2), box.cutHalf * 2 * scale, box.d * scale); }
+    } else { ctx.fillRect(x(box.x - box.w / 2), z(box.z - box.d / 2), box.w * scale, box.d * scale); if (box.kind !== 'wall') ctx.strokeRect(x(box.x - box.w / 2), z(box.z - box.d / 2), box.w * scale, box.d * scale); }
   }
+  for (const point of world.hardpoints || []) { const active = objective?.point?.id === point.id; ctx.strokeStyle = active ? TEAM_COLORS[objective.owner] || '#f2cd89' : '#c3b99088'; ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth = active ? 2 : 1; ctx.beginPath(); ctx.arc(x(point.x), z(point.z), point.radius * scale, 0, Math.PI * 2); ctx.stroke(); ctx.font = `${detailed ? 13 : 9}px monospace`; ctx.textAlign = 'center'; ctx.fillText(point.id, x(point.x), z(point.z) + 3); }
+  if (world.defenseCore) { const core = world.defenseCore; ctx.fillStyle = '#8ee0c4'; ctx.fillRect(x(core.x) - 4, z(core.z) - 4, 8, 8); }
   if (spawns) for (const p of world.spawns) {
     ctx.strokeStyle = '#a3dbc9'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(x(p.x), z(p.z), 4, 0, Math.PI * 2); ctx.stroke();

@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 public class ApiErrors {
+    @ExceptionHandler(DuplicateUsernameException.class) @ResponseStatus(HttpStatus.CONFLICT)
+    public Map<String, String> duplicateUsername(DuplicateUsernameException error) { return Map.of("message", error.getMessage()); }
     @ExceptionHandler(IllegalArgumentException.class) @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Map<String, String> invalid(IllegalArgumentException error) { return Map.of("message", error.getMessage()); }
     @ExceptionHandler(MethodArgumentNotValidException.class) @ResponseStatus(HttpStatus.BAD_REQUEST)

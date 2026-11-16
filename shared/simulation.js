@@ -5,12 +5,16 @@ import { getOutfit, getCharacter, CHARACTERS } from './outfits.js';
 import { roundReward, normalizeWeaponKills, weaponMastery } from './progression.js';
 import { EQUIPMENT_RULES, nearestDroppedWeapon, settleDroppedWeapon } from './equipment.js';
 import { sameTeam, normalizeGameType, teamSpawnZones, balancedTeam, TEAM_NAMES } from './teams.js';
+import { findPath, canTraverse, followBotPath, steerBot, nearBotCover } from './bot-navigation.js';
+import { isTeamGame, isObjectiveGame, assertMapGameType } from './game-types.js';
+import { ObjectiveRound, objectiveOptions, OBJECTIVE_RULES } from './objectives.js';
+export { findPath } from './bot-navigation.js';
 
 const BOT_NAMES = ['GHOST', 'RIVET', 'ECHO', 'CINDER', 'STATIC', 'ONYX', 'NOVA'];
 const botId = () => globalThis.crypto?.randomUUID?.().slice(0, 8) || Math.random().toString(36).slice(2, 10);
 const nowMs = () => Date.now();
 const newRoundId = () => globalThis.crypto?.randomUUID?.() || `round-${nowMs().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
-export const cleanName = (name) => typeof name === 'string' ? name.replace(/[\p{C}<>]/gu, '').trim().slice(0, 16) || 'OPERATOR' : 'OPERATOR';
+export const cleanName = (name, limit = 16) => typeof name === 'string' ? [...name.replace(/[\p{C}<>]/gu, '').trim()].slice(0, limit).join('') || 'OPERATOR' : 'OPERATOR';
 
 export const BOT_BEHAVIOR = Object.freeze({
   turnRadiansPerSecond: 1.1, pitchRadiansPerSecond: 0.85,
@@ -28,7 +32,7 @@ export const BOT_DIFFICULTIES = Object.freeze([
 export const getBotDifficulty = (id) => BOT_DIFFICULTIES.find((level) => level.id === id) || BOT_DIFFICULTIES[0];
 
 function freshBotBrain() {
-  return { targetId: null, visibleSince: null, reactAt: 0, aimPoint: null, nextAimSampleAt: 0, yawError: 0, pitchError: 0, nextAimErrorAt: 0, burstLeft: 0, nextBurstAt: 0 };
+  return { targetId: null, visibleSince: null, reactAt: 0, aimPoint: null, nextAimSampleAt: 0, yawError: 0, pitchError: 0, nextAimErrorAt: 0, burstLeft: 0, nextBurstAt: 0, sniperSettleAt: 0 };
 }
 
 const bodyVolumeCache = new WeakMap();
@@ -107,62 +111,12 @@ export function traceShot(shooter, players, now = nowMs(), world = WORLD, direct
   return { victim, headshot, protectedTarget, friendlyTarget, bodyPart, damageMultiplier, limbProgress, origin, distance, surface, end: surface?.point || { x: origin.x + direction.x * distance, y: origin.y + direction.y * distance, z: origin.z + direction.z * distance } };
 }
 
-const navigation = new WeakMap();
-function getNavigation(world) {
-  if (navigation.has(world)) return navigation.get(world);
-  const width = Math.floor(world.width - 4) + 1, height = Math.floor(world.depth - 4) + 1;
-  const minX = -world.width / 2 + 2, minZ = -world.depth / 2 + 2;
-  const blockers = world.obstacles.map((box) => bounds(box, RULES.playerRadius + 0.06)).filter((b) => b.minY < RULES.playerHeight && b.maxY > RULES.stepHeight);
-  const cells = Array.from({ length: width * height }, (_, i) => { const x = minX + i % width, z = minZ + Math.floor(i / width); return !blockers.some((b) => x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ); });
-  const edges = world.obstacles.map((box) => bounds(box, RULES.playerRadius - 0.00001)).filter((b) => b.minY < RULES.playerHeight && b.maxY > RULES.stepHeight);
-  const nav = { width, height, minX, minZ, cells, edges }; navigation.set(world, nav); return nav;
-}
-export function findPath(from, to, world = WORLD) {
-  const { width, height, minX, minZ, cells, edges } = getNavigation(world);
-  const clearSegment = (a, b) => {
-    const distance = Math.hypot(b.x - a.x, b.z - a.z);
-    if (distance < 0.0001) return true;
-    const origin = { x: a.x, y: 0, z: a.z }, direction = { x: (b.x - a.x) / distance, y: 0, z: (b.z - a.z) / distance };
-    return !edges.some((box) => rayBox(origin, direction, { ...box, minY: -1, maxY: 1 }, distance) !== null);
-  };
-  const gridCell = (point) => ({ x: clamp(Math.round(point.x - minX), 0, width - 1), z: clamp(Math.round(point.z - minZ), 0, height - 1) });
-  const a = gridCell(from), b = gridCell(to);
-  let start = a.z * width + a.x; const end = b.z * width + b.x;
-  const startPoint = { x: minX + a.x, z: minZ + a.z };
-  if (!cells[start] || !clearSegment(from, startPoint)) {
-    const choices = [];
-    for (let dz = -3; dz <= 3; dz++) for (let dx = -3; dx <= 3; dx++) {
-      const x = a.x + dx, z = a.z + dz, index = z * width + x;
-      if (x >= 0 && z >= 0 && x < width && z < height && cells[index]) choices.push({ index, x: minX + x, z: minZ + z });
-    }
-    choices.sort((a, b) => (a.x - from.x) ** 2 + (a.z - from.z) ** 2 - (b.x - from.x) ** 2 - (b.z - from.z) ** 2);
-    const reachable = choices.find((point) => clearSegment(from, point)); if (!reachable) return [];
-    start = reachable.index;
-  }
-  const queue = [start], visited = new Map([[start, -1]]);
-  let closest = start, best = Infinity;
-  for (let i = 0; i < queue.length; i++) {
-    const current = queue[i], x = current % width, z = Math.floor(current / width);
-    const distance = Math.abs(b.x - x) + Math.abs(b.z - z);
-    if (distance < best) { best = distance; closest = current; }
-    if (current === end) break;
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const nx = x + dx, nz = z + dz, next = nz * width + nx;
-      if (nx < 0 || nx >= width || nz < 0 || nz >= height || !cells[next] || visited.has(next)) continue;
-      visited.set(next, current); queue.push(next);
-    }
-  }
-  const path = [];
-  for (let p = closest; p !== start && p !== -1; p = visited.get(p) ?? -1) path.push({ x: minX + p % width, z: minZ + Math.floor(p / width) });
-  if (Math.hypot(minX + start % width - from.x, minZ + Math.floor(start / width) - from.z) > 0.2) path.push({ x: minX + start % width, z: minZ + Math.floor(start / width) });
-  return path.reverse();
-}
-
 export class Room {
-  constructor(code, { mode = 'lan', bots = 2, mapId = WORLD.id, botDifficulty = 'beginner', fragLimit, roundSeconds, gameType = 'ffa', roomName = '', clock = nowMs, random = Math.random } = {}) {
+  constructor(code, { mode = 'lan', bots = 2, mapId = WORLD.id, botDifficulty = 'beginner', fragLimit, roundSeconds, scoreLimit, waves, gameType = 'ffa', roomName = '', clock = nowMs, random = Math.random } = {}) {
     this.code = code; this.mode = mode; this.clock = clock; this.random = random;
     this.gameType = normalizeGameType(gameType); this.roomName = typeof roomName === 'string' ? roomName.replace(/[\p{C}<>]/gu, '').trim().slice(0, 32) : ''; this.teamScores = { blue: 0, red: 0 };
     this.world = getMap(mapId);
+    assertMapGameType(this.world, this.gameType);
     const difficulty = getBotDifficulty(botDifficulty); this.botDifficulty = difficulty.id; this.botBehavior = difficulty.behavior;
     Object.assign(this, normalizeRoundOptions({ fragLimit, roundSeconds }));
     this.players = new Map(); this.hostId = null; this.events = []; this.phase = 'active';
@@ -170,13 +124,19 @@ export class Room {
     this.roundId = newRoundId(); this.result = null;
     this.lastActivity = this.startedAt;
     this.spawnUses = new Map(); this.droppedWeapons = new Map(); this.dropSerial = 0; this.impacts = new Map();
-    for (let i = 0; i < clamp(Math.floor(Number(bots) || 0), 0, RULES.maxPlayers - 1); i++) this.addPlayer(`bot-${botId()}`, BOT_NAMES[i], true);
+    Object.assign(this, objectiveOptions({ scoreLimit, waves })); this.objectives = isObjectiveGame(this.gameType) ? new ObjectiveRound(this) : null;
+    for (let i = 0; i < clamp(Math.floor(Number(bots) || 0), 0, this.gameType === 'defense' ? 3 : RULES.maxPlayers - 1); i++) this.addPlayer(`bot-${botId()}`, BOT_NAMES[i], true);
   }
 
   addPlayer(id, name, isBot = false, loadout = {}) {
     if (this.players.has(id)) throw new Error('이미 이 방에 접속해 있습니다.');
+    const waveEnemy = isBot && loadout.defenseEnemy === true && this.gameType === 'defense';
+    if (this.gameType === 'defense' && !waveEnemy) {
+      const defenders = [...this.players.values()].filter((p) => p.teamId === 'blue');
+      if (defenders.length >= 4) { const replace = !isBot && defenders.find((p) => p.isBot); if (replace) this.players.delete(replace.id); else throw new Error('협동 방어전의 수비팀은 최대 4명입니다.'); }
+    }
     if (this.players.size >= RULES.maxPlayers) {
-      const team = this.gameType === 'teams' ? balancedTeam(this.players.values()) : null;
+      const team = isTeamGame(this.gameType) ? this.gameType === 'defense' ? 'blue' : balancedTeam(this.players.values()) : null;
       const bot = [...this.players.values()].find((p) => p.isBot && (!team || p.teamId === team)) || [...this.players.values()].find((p) => p.isBot);
       if (bot && !isBot) this.players.delete(bot.id);
       else throw new Error('방이 가득 찼습니다.');
@@ -185,14 +145,14 @@ export class Room {
     const requested = isBot && !isWeaponId(loadout.weaponId) ? WEAPONS[[...this.players.values()].filter((p) => p.isBot).length % WEAPONS.length].id : isWeaponId(loadout.weaponId) ? loadout.weaponId : 'rifle';
     const chosenWeapon = ownsWeapon({ ownedWeapons }, requested) ? requested : 'rifle';
     const player = {
-      id, name: cleanName(name), isBot, teamId: this.gameType === 'teams' ? balancedTeam(this.players.values(), !isBot) : null, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, vy: 0,
+      id, name: cleanName(name, ['casual', 'ranked', 'custom'].includes(this.mode) ? 24 : 16), isBot, isWaveEnemy: waveEnemy, teamId: this.gameType === 'defense' ? waveEnemy ? 'red' : 'blue' : isTeamGame(this.gameType) ? balancedTeam(this.players.values(), !isBot) : null, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, vy: 0,
       hp: 100, ammo: RULES.magazine, kills: 0, deaths: 0, grounded: true, jumpHeld: false,
       reloadUntil: 0, respawnAt: 0, protectedUntil: 0, lastShot: 0, lastInput: this.clock(),
       input: { ...EMPTY_INPUT }, botPath: [], nextPathAt: 0,
       weaponId: chosenWeapon,
       ownedWeapons, weaponKills: {}, masteryKills: isBot ? {} : normalizeWeaponKills(loadout.weaponKills), killChain: 0, lastKillAt: null,
       nextWeaponId: chosenWeapon, loadoutSelecting: false, diedAt: 0, pendingShot: null, history: [], shotSerial: 0,
-      skinId: getSkin(isBot ? SKINS[(this.players.size + 1) % SKINS.length].id : loadout.skinId).id,
+      skinId: getSkin(waveEnemy ? loadout.skinId : isBot ? SKINS[(this.players.size + 1) % SKINS.length].id : loadout.skinId).id,
       outfitId: getOutfit(loadout.outfitId).id,
       characterId: getCharacter(isBot ? CHARACTERS[this.players.size % CHARACTERS.length].id : loadout.characterId).id,
       magazines: freshMagazines(), switchUntil: 0, nextFireAt: 0, fireLatched: false,
@@ -200,7 +160,7 @@ export class Room {
     this.players.set(id, player);
     if (!isBot && !this.hostId) this.hostId = id;
     this.spawn(player);
-    this.events.push({ type: 'joined', name: player.name, id, isBot });
+    if (!waveEnemy) this.events.push({ type: 'joined', name: player.name, id, isBot });
     return player;
   }
 
@@ -217,8 +177,10 @@ export class Room {
     const requested = getWeapon(player.nextWeaponId || player.weaponId).id;
     player.weaponId = ownsWeapon(player, requested) ? requested : 'rifle'; player.nextWeaponId = player.weaponId;
     const others = [...this.players.values()].filter((p) => p.id !== player.id && p.hp > 0 && !sameTeam(p, player));
-    let spawnPoints = this.gameType === 'teams' ? teamSpawnZones(this.world)[player.teamId] : this.world.spawns;
-    if (this.gameType === 'teams') {
+    // Wave entries use the same random, visibility/distance-aware selection as
+    // player spawns instead of a predictable fixed lane cycle.
+    let spawnPoints = isTeamGame(this.gameType) ? teamSpawnZones(this.world)[player.teamId] : this.world.spawns;
+    if (isTeamGame(this.gameType)) {
       const unoccupied = spawnPoints.filter((point) => ![...this.players.values()].some((p) => p.id !== player.id && p.hp > 0 && Math.hypot(point.x - p.x, (point.y || 0) - p.y, point.z - p.z) < 1));
       if (unoccupied.length) spawnPoints = unoccupied;
     }
@@ -236,7 +198,7 @@ export class Room {
     const uses = Math.min(...pool.map((s) => s.uses)); pool = pool.filter((s) => s.uses === uses);
     const choice = pool[Math.min(pool.length - 1, Math.floor(this.random() * pool.length))], spawn = choice.point;
     this.spawnUses.set(choice.key, choice.uses + 1);
-    Object.assign(player, { x: spawn.x, y: spawn.y || 0, z: spawn.z, yaw: spawn.yaw, spawnId: spawn.spawnId || null, spawnLevel: spawn.roof ? 'ROOF' : `${spawn.level || 1}F`, pitch: 0, vx: 0, vy: 0, vz: 0, hp: 100, hitSlowUntil: 0, ammo: getWeapon(player.weaponId).magazine, magazines: freshMagazines(), reloadUntil: 0, switchUntil: 0, nextFireAt: 0, fireLatched: false, respawnAt: 0, protectedUntil: this.clock() + RULES.protectionSeconds * 1000, grounded: true, jumpHeld: false, crouching: false, crouchAmount: 0, sprinting: false, moveSpeed: 0, shotHeat: 0, loadoutSelecting: false, diedAt: 0, lastDeath: null, botPath: [], nextPathAt: 0, stairRouteKey: null });
+    Object.assign(player, { x: spawn.x, y: spawn.y || 0, z: spawn.z, yaw: spawn.yaw, spawnId: spawn.spawnId || null, spawnLevel: spawn.roof ? 'ROOF' : `${spawn.level || 1}F`, pitch: 0, vx: 0, vy: 0, vz: 0, hp: 100, hitSlowUntil: 0, ammo: getWeapon(player.weaponId).magazine, magazines: freshMagazines(), reloadUntil: 0, switchUntil: 0, nextFireAt: 0, fireLatched: false, respawnAt: 0, protectedUntil: this.clock() + RULES.protectionSeconds * 1000, grounded: true, jumpHeld: false, crouching: false, crouchAmount: 0, walking: false, sprinting: false, moveSpeed: 0, shotHeat: 0, loadoutSelecting: false, diedAt: 0, lastDeath: null, botPath: [], nextPathAt: 0, stairRouteKey: null });
     player.botBrain = player.isBot ? freshBotBrain() : null;
     player.input = { ...EMPTY_INPUT, yaw: player.yaw, weaponId: player.weaponId };
     player.pendingShot = null; player.viewTime = null; player.burstLeft = 0; player.triggerSeq = null; player.triggerShotIndex = 0;
@@ -276,7 +238,7 @@ export class Room {
     const next = sanitizeInput(input, player.input), now = this.clock();
     if (getWeapon(player.weaponId).melee) next.ads = false;
     player.viewTime = typeof input.viewTime === 'number' && Number.isFinite(input.viewTime) ? clamp(input.viewTime, now - 200, now) : null;
-    if (next.fire && !player.input.fire && !player.pendingShot) player.pendingShot = { newTrigger: true, fireSeq: Number.isSafeInteger(input.fireSeq) && input.fireSeq >= 0 ? input.fireSeq : null, yaw: next.yaw, pitch: next.pitch, ads: next.ads, at: now, movement: { grounded: player.grounded, sprinting: player.sprinting || next.sprint && next.forward > 0 && !next.ads && !player.crouching, moveSpeed: Math.max(player.moveSpeed || 0, Math.hypot(next.forward, next.strafe)) }, viewTime: typeof input.viewTime === 'number' && Number.isFinite(input.viewTime) ? clamp(input.viewTime, now - 200, now) : null };
+    if (next.fire && !player.input.fire && !player.pendingShot) player.pendingShot = { newTrigger: true, fireSeq: Number.isSafeInteger(input.fireSeq) && input.fireSeq >= 0 ? input.fireSeq : null, yaw: next.yaw, pitch: next.pitch, ads: next.ads, at: now, movement: { grounded: player.grounded, walking: player.walking, sprinting: false, moveSpeed: Math.max(player.moveSpeed || 0, Math.hypot(next.forward, next.strafe)) }, viewTime: typeof input.viewTime === 'number' && Number.isFinite(input.viewTime) ? clamp(input.viewTime, now - 200, now) : null };
     player.input = next;
     player.lastInput = now;
   }
@@ -336,28 +298,32 @@ export class Room {
     this.phase = 'active'; this.startedAt = this.clock(); this.endsAt = this.startedAt + this.roundSeconds * 1000;
     this.roundId = newRoundId(); this.result = null;
     this.events = [{ type: 'restart' }]; this.droppedWeapons.clear(); this.impacts.clear(); this.teamScores = { blue: 0, red: 0 };
+    this.objectives?.reset(this.startedAt);
     this.spawnUses.clear(); for (const player of this.players.values()) player.hp = 0;
     for (const player of this.players.values()) { player.kills = 0; player.deaths = 0; player.weaponKills = {}; this.spawn(player); }
   }
 
   botInput(bot, now, dt) {
     const behavior = bot.botDifficulty ? getBotDifficulty(bot.botDifficulty).behavior : this.botBehavior;
+    const brain = bot.botBrain ||= freshBotBrain();
     while (bot.spawnExitPath?.length && Math.hypot(bot.spawnExitPath[0].x - bot.x, bot.spawnExitPath[0].z - bot.z) < 0.25) bot.spawnExitPath.shift();
     if (bot.spawnExitPath?.length) {
       const point = bot.spawnExitPath[0], targetYaw = Math.atan2(-(point.x - bot.x), -(point.z - bot.z));
       const yaw = bot.yaw + clamp(angleDelta(targetYaw, bot.yaw), -dt * behavior.turnRadiansPerSecond, dt * behavior.turnRadiansPerSecond);
       const bearing = angleDelta(targetYaw, yaw);
-      return { ...EMPTY_INPUT, weaponId: bot.weaponId, yaw, pitch: bot.pitch + clamp(-bot.pitch, -dt * behavior.pitchRadiansPerSecond, dt * behavior.pitchRadiansPerSecond), forward: Math.cos(bearing) * 0.65, strafe: -Math.sin(bearing) * 0.65 };
+      return steerBot(bot, { ...EMPTY_INPUT, weaponId: bot.weaponId, yaw, pitch: bot.pitch + clamp(-bot.pitch, -dt * behavior.pitchRadiansPerSecond, dt * behavior.pitchRadiansPerSecond), forward: Math.cos(bearing) * 0.65, strafe: -Math.sin(bearing) * 0.65 }, this.world, now);
     }
-    const brain = bot.botBrain ||= freshBotBrain();
     const origin = { x: bot.x, y: bot.y + playerPose(bot).eyeHeight, z: bot.z };
     // Free-for-all: humans and other bots use exactly the same target score.
-    const candidates = [...this.players.values()].filter((p) => p.id !== bot.id && !sameTeam(p, bot) && p.hp > 0 && p.protectedUntil <= now).map((target) => {
+    const objectiveGoal = this.objectives?.goal(bot), possibleTargets = [...this.players.values()];
+    if (bot.isWaveEnemy) possibleTargets.push(objectiveGoal);
+    const candidates = possibleTargets.filter((p) => p.id !== bot.id && !sameTeam(p, bot) && p.hp > 0 && p.roomStatus !== 'waiting' && p.protectedUntil <= now).map((target) => {
       const distance = Math.hypot(target.x - bot.x, target.z - bot.z);
       const pose = playerPose(target);
-      const visible = hasLineOfSight(origin, { x: target.x, y: target.y + pose.aimHeight, z: target.z }, this.world) || hasLineOfSight(origin, { x: target.x, y: target.y + pose.eyeHeight, z: target.z }, this.world);
-      return { target, distance, visible, score: distance * (visible ? 0.65 : 1) };
+      const visible = target.isObjective ? this.objectives.coreVisible(origin, target) : hasLineOfSight(origin, { x: target.x, y: target.y + pose.aimHeight, z: target.z }, this.world) || hasLineOfSight(origin, { x: target.x, y: target.y + pose.eyeHeight, z: target.z }, this.world);
+      return { target, distance, visible, score: distance * (visible ? .65 : 1) * (target.isObjective ? .8 : bot.isWaveEnemy && distance > 12 ? 2.5 : 1) };
     }).sort((a, b) => a.score - b.score);
+    if (!candidates.length && objectiveGoal) candidates.push({ target: { ...objectiveGoal, id: `navigate-${objectiveGoal.id || 'defense'}`, isNavigation: true }, distance: Math.hypot(objectiveGoal.x - bot.x, objectiveGoal.z - bot.z), visible: false, score: 0 });
     if (!candidates.length) {
       Object.assign(brain, freshBotBrain());
       return { ...EMPTY_INPUT, yaw: bot.yaw, pitch: bot.pitch, weaponId: bot.weaponId };
@@ -366,31 +332,34 @@ export class Room {
     // Keep a reasonable current target instead of flicking between nearby enemies.
     const selected = current && current.score <= candidates[0].score * 1.3 ? current : candidates[0];
     const { target, distance, visible } = selected;
+    const movementTarget = objectiveGoal?.approach || objectiveGoal || target;
+    if (brain.objectiveId !== objectiveGoal?.id) { brain.objectiveId = objectiveGoal?.id; bot.nextPathAt = 0; bot.botPath = []; }
     if (brain.targetId !== target.id) {
       Object.assign(brain, freshBotBrain(), { targetId: target.id });
       bot.botPath = []; bot.nextPathAt = 0; bot.stairRouteKey = null;
     }
-    if (now > bot.nextPathAt) {
+    if (now >= bot.nextPathAt && bot.grounded) {
       const buildings = [...(this.world.buildings || []), ...(this.world.walkways || [])];
       const own = buildings.find((b) => Math.abs(bot.x - b.x) < b.w / 2 && Math.abs(bot.z - b.z) < b.d / 2);
-      const leaving = own && bot.y > 0.2 && (Math.abs(target.x - own.x) >= own.w / 2 || Math.abs(target.z - own.z) >= own.d / 2);
-      const up = !leaving && buildings.find((b) => Math.abs(target.x - b.x) < b.w / 2 && Math.abs(target.z - b.z) < b.d / 2 && target.y > bot.y + 0.2);
-      const down = leaving ? own : !up && own && bot.y > target.y + 0.2 ? own : null;
+      const leaving = own && bot.y > 0.2 && (Math.abs(movementTarget.x - own.x) >= own.w / 2 || Math.abs(movementTarget.z - own.z) >= own.d / 2);
+      const up = !leaving && buildings.find((b) => Math.abs(movementTarget.x - b.x) < b.w / 2 && Math.abs(movementTarget.z - b.z) < b.d / 2 && movementTarget.y > bot.y + 0.2);
+      const down = leaving ? own : !up && own && bot.y > movementTarget.y + 0.2 ? own : null;
       const building = up || down;
       if (building) {
-        const destinationY = leaving ? 0 : target.y;
+        const destinationY = leaving ? 0 : movementTarget.y;
         const key = `${building.id}-${up ? 'up' : 'down'}-${Math.floor((destinationY + 0.15) / 3)}`;
         if (key !== bot.stairRouteKey || !bot.botPath.length) {
           const inside = Math.abs(bot.x - building.x) < building.w / 2 && Math.abs(bot.z - building.z) < building.d / 2;
-          const destination = { x: target.x, y: target.y, z: target.z };
-          bot.botPath = up ? [...(inside ? [] : findPath(bot, building.entry, this.world)), ...building.route.filter((point) => point.y >= bot.y - 0.15 && point.y <= target.y + 0.15), destination] : [...building.route.slice().reverse().filter((point) => point.y <= bot.y + 0.15 && point.y >= destinationY - 0.15), ...findPath(building.entry, target, this.world), destination];
+          const destination = { x: movementTarget.x, y: movementTarget.y, z: movementTarget.z };
+          bot.botPath = up ? [...(inside ? [] : findPath(bot, building.entry, this.world)), ...building.route.filter((point) => point.y >= bot.y - 0.15 && point.y <= movementTarget.y + 0.15), destination] : [...building.route.slice().reverse().filter((point) => point.y <= bot.y + 0.15 && point.y >= destinationY - 0.15), ...findPath(building.entry, movementTarget, this.world), destination];
           bot.stairRouteKey = key;
         }
-      } else { bot.stairRouteKey = null; bot.botPath = findPath(bot, target, this.world); }
+      } else { bot.stairRouteKey = null; bot.botPath = findPath(bot, movementTarget, this.world); }
       bot.nextPathAt = now + 850;
     }
-    while (bot.botPath.length && Math.hypot(bot.botPath[0].x - bot.x, bot.botPath[0].z - bot.z) < 0.18 && Math.abs((bot.botPath[0].y ?? bot.y) - bot.y) < 0.16) bot.botPath.shift();
-    const waypoint = visible && Math.abs(target.y - bot.y) < 0.2 ? target : bot.botPath[0] || bot;
+    const pathPoint = followBotPath(bot, this.world), direct = visible && Math.abs(target.y - bot.y) < .2 && canTraverse(bot, target, this.world, RULES.crouchHeight);
+    const objectiveMoving = objectiveGoal && (bot.isWaveEnemy ? Math.hypot(objectiveGoal.x - bot.x, objectiveGoal.z - bot.z) > 18 || !this.objectives.coreVisible(origin, objectiveGoal) : Math.hypot(objectiveGoal.x - bot.x, objectiveGoal.z - bot.z) > 1.1 || Math.abs((objectiveGoal.y || 0) - bot.y) > .2);
+    const navigating = objectiveGoal ? objectiveMoving : !direct || !!(bot.stairRouteKey && bot.botPath.length), waypoint = navigating ? pathPoint : target;
     const navigationYaw = Math.atan2(-(waypoint.x - bot.x), -(waypoint.z - bot.z));
     const targetYaw = Math.atan2(-(target.x - bot.x), -(target.z - bot.z));
     const perceived = visible && Math.abs(angleDelta(targetYaw, bot.yaw)) <= behavior.viewHalfAngle;
@@ -404,7 +373,7 @@ export class Room {
       }
       // Delayed observations and body aim make moving/flanking players harder to hit.
       if (now >= brain.nextAimSampleAt) {
-        brain.aimPoint = { x: target.x, y: target.y + playerPose(target).aimHeight, z: target.z };
+        brain.aimPoint = { x: target.x, y: target.y + (target.isObjective ? 1.5 : playerPose(target).aimHeight), z: target.z };
         brain.nextAimSampleAt = now + behavior.aimSampleMs;
       }
       if (now >= brain.nextAimErrorAt) {
@@ -423,17 +392,29 @@ export class Room {
     if (ready && brain.burstLeft === 0 && now >= brain.nextBurstAt) {
       brain.burstLeft = behavior.burstMinShots + Math.floor(this.random() * (behavior.burstMaxShots - behavior.burstMinShots + 1));
     }
-    const alignedToMove = Math.abs(angleDelta(navigationYaw, yaw)) < behavior.viewHalfAngle;
-    const navigating = !visible || Math.abs(target.y - bot.y) >= 0.2, bearing = angleDelta(navigationYaw, yaw);
+    const bearing = angleDelta(navigationYaw, yaw);
     const botWeapon = getWeapon(bot.weaponId), preferred = botWeapon.type === 'SNIPER' ? 30 : botWeapon.type === 'SHOTGUN' ? 7 : botWeapon.type === 'SMG' || botWeapon.type === 'SIDEARM' ? 10 : 16;
-    return {
+    brain.moveSeed ??= [...bot.id].reduce((value, letter) => (value * 31 + letter.charCodeAt(0)) >>> 0, 0);
+    brain.strafeSide ||= brain.moveSeed % 2 ? 1 : -1;
+    brain.nextStrafeAt ||= now + 1200 + brain.moveSeed % 800;
+    if (now >= brain.nextStrafeAt) { brain.strafeSide *= -1; brain.nextStrafeAt = now + 1200 + brain.moveSeed % 800; }
+    const sniper = botWeapon.type === 'SNIPER'; let hold = false;
+    if (sniper) {
+      if (bot.lastShot > (brain.sniperLastShot || 0)) { brain.sniperLastShot = bot.lastShot; brain.repositionUntil = now + Math.min(650, Math.max(350, botWeapon.fireSeconds * 500)); brain.sniperSettleAt = 0; }
+      hold = perceived && now >= brain.reactAt && distance < behavior.firingRange && bot.grounded && !navigating && now >= bot.nextFireAt - 250 && now >= (brain.repositionUntil || 0) && bot.reloadUntil <= now;
+      if (hold) brain.sniperSettleAt ||= now + 220; else brain.sniperSettleAt = 0;
+    }
+    brain.nextDuckAt ||= now + 3500 + brain.moveSeed % 2000;
+    if (now >= brain.nextDuckAt && perceived && bot.grounded && !navigating && nearBotCover(bot, this.world)) { brain.duckUntil = now + 550; brain.nextDuckAt = now + 4500 + brain.moveSeed % 1500; }
+    const crouch = bot.grounded && !navigating && (sniper && hold && distance > 18 || now < (brain.duckUntil || 0) || bot.reloadUntil > now && nearBotCover(bot, this.world));
+    const fire = !!(ready && brain.burstLeft > 0 && now >= brain.nextBurstAt && now >= bot.nextFireAt && (!sniper || hold && now >= brain.sniperSettleAt && bot.moveSpeed < .2));
+    return steerBot(bot, {
       ...EMPTY_INPUT, weaponId: bot.weaponId, yaw, pitch,
-      forward: navigating ? Math.cos(bearing) * 0.8 : alignedToMove ? ready && botWeapon.type === 'SNIPER' ? 0 : (distance > preferred + 3 ? 0.65 : distance < preferred - 4 ? -0.4 : 0) : 0,
-      strafe: navigating ? -Math.sin(bearing) * 0.8 : perceived && distance < 20 && botWeapon.type !== 'SNIPER' ? Math.sin(now / 1100 + bot.z) * 0.3 : 0,
-      ads: ready && distance > 12 && ['ASSAULT', 'SNIPER', 'DMR', 'LMG'].includes(botWeapon.type),
-      fire: !!(ready && brain.burstLeft > 0 && now >= brain.nextBurstAt && now >= bot.nextFireAt),
-      reload: bot.ammo < 1, sprint: !visible && alignedToMove && distance > 20,
-    };
+      forward: hold || target.isNavigation && !navigating ? 0 : navigating ? Math.cos(bearing) * .8 : objectiveGoal && !bot.isWaveEnemy ? Math.sin(now / 1600 + brain.moveSeed % 11) * .1 : distance > preferred + 3 ? .65 : distance < preferred - 4 ? -.35 : Math.sin(now / 1600 + brain.moveSeed % 11) * .12,
+      strafe: hold ? 0 : navigating ? -Math.sin(bearing) * .8 : perceived ? brain.strafeSide * (sniper || botWeapon.type === 'DMR' ? .28 : .5) : 0,
+      ads: sniper ? hold : ready && distance > 12 && ['ASSAULT', 'DMR', 'LMG'].includes(botWeapon.type),
+      fire, crouch, reload: bot.ammo < 1,
+    }, this.world, now);
   }
 
   tick(dt) {
@@ -462,6 +443,7 @@ export class Room {
       if (this.phase !== 'active') break;
     }
     for (const player of this.players.values()) this.recordPlayerHistory(player, now);
+    this.objectives?.tick(dt, now);
   }
 
   shoot(player, now, ads = false, shot = null) {
@@ -490,6 +472,7 @@ export class Room {
       const trace = traceShot(player, targets, now, this.world, direction, weapon.range);
       const { headshot, end, distance, protectedTarget, friendlyTarget, bodyPart, damageMultiplier, limbProgress, surface } = trace, victim = trace.victim ? this.players.get(trace.victim.id) : null;
       if (surface) {
+        if (this.gameType === 'defense' && surface.id === this.world.defenseCore.id) this.objectives.damageCore(player, damageAtDistance(weapon, distance));
         const mark = { ...surface, id: `${this.roundId}-${player.id}-${player.shotSerial}-${rays.length}`, surfaceId: surface.id, at: now, weaponId: weapon.id };
         const key = `${surface.id}/${surface.normal.x},${surface.normal.y},${surface.normal.z}/${Math.round(end.x * BULLET_MARK_RULES.cellScale)},${Math.round(end.y * BULLET_MARK_RULES.cellScale)},${Math.round(end.z * BULLET_MARK_RULES.cellScale)}`;
         this.impacts.delete(key); this.impacts.set(key, mark); while (this.impacts.size > BULLET_MARK_RULES.maxMarks) this.impacts.delete(this.impacts.keys().next().value);
@@ -534,6 +517,7 @@ export class Room {
       if (victim.hp <= 0) {
         this.dropWeapon(victim, now); victim.reloadUntil = 0;
         victim.deaths++; victim.diedAt = now; victim.loadoutSelecting = false; victim.pendingShot = null; victim.burstLeft = 0; victim.respawnAt = now + RULES.respawnSeconds * 1000;
+        if (victim.isWaveEnemy) victim.respawnAt = Infinity;
         victim.hitSlowUntil = 0;
         victim.killChain = 0; victim.lastKillAt = null;
         player.weaponKills[weapon.id] = (player.weaponKills[weapon.id] || 0) + 1;
@@ -544,24 +528,25 @@ export class Room {
         victim.input = { ...EMPTY_INPUT, yaw: victim.yaw, pitch: victim.pitch, weaponId: victim.weaponId }; player.kills++;
         this.events.push({ type: 'kill', killId: `${this.roundId}-${player.id}-kill-${player.kills}`, at: now, killer: player.name, victim: victim.name, killerId: player.id, victimId: victim.id, weaponId: weapon.id, weaponLevel: mastery.level, weaponKills: mastery.kills, killChain: player.killChain, headshot });
         if (this.gameType === 'teams') this.teamScores[player.teamId]++;
-        if ((this.gameType === 'teams' ? this.teamScores[player.teamId] : player.kills) >= this.fragLimit) this.finish();
+        if (!isObjectiveGame(this.gameType) && (this.gameType === 'teams' ? this.teamScores[player.teamId] : player.kills) >= this.fragLimit) this.finish();
       }
   }
 
   finish() {
     if (this.phase === 'ended') return;
     this.phase = 'ended';
-    const winnerTeam = this.gameType === 'teams' ? this.teamScores.blue > this.teamScores.red ? 'blue' : this.teamScores.red > this.teamScores.blue ? 'red' : null : null;
-    const winner = [...this.players.values()].filter((p) => p.roomStatus !== 'waiting' && (this.gameType !== 'teams' || p.teamId === winnerTeam)).sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)[0];
-    const winnerName = this.gameType === 'teams' ? TEAM_NAMES[winnerTeam] || '무승부' : winner?.name || 'OPERATOR';
-    const rewards = Object.fromEntries([...this.players.values()].filter((player) => !player.isBot && player.roomStatus !== 'waiting').map((player) => [player.id, { kills: player.kills, deaths: player.deaths, weaponKills: { ...player.weaponKills }, ...roundReward(player.kills, this.gameType === 'teams' ? !!winnerTeam && player.teamId === winnerTeam : player.id === winner?.id), ...(this.mode === 'custom' ? { completion: 0, killBonus: 0, winBonus: 0, points: 0 } : {}) }]));
-    this.result = { roundId: this.roundId, winnerId: winner?.id || null, winnerName, winnerKills: this.gameType === 'teams' ? this.teamScores[winnerTeam] || 0 : winner?.kills || 0, rewards, ...(this.gameType === 'teams' ? { winnerTeam, teamScores: { ...this.teamScores } } : {}) };
-    this.events.push({ type: 'ended', winner: winnerName, winnerId: winner?.id || null, ...(this.gameType === 'teams' ? { winnerTeam } : {}) });
+    const teamGame = isTeamGame(this.gameType), defense = this.gameType === 'defense', winnerTeam = defense ? this.objectives.state.cleared >= this.waves && this.objectives.state.coreHealth > 0 ? 'blue' : 'red' : teamGame ? this.teamScores.blue > this.teamScores.red ? 'blue' : this.teamScores.red > this.teamScores.blue ? 'red' : null : null;
+    const winner = [...this.players.values()].filter((p) => p.roomStatus !== 'waiting' && (!teamGame || p.teamId === winnerTeam)).sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)[0];
+    const winnerName = defense ? winnerTeam === 'blue' ? '수비 성공' : '방어 실패' : teamGame ? TEAM_NAMES[winnerTeam] || '무승부' : winner?.name || 'OPERATOR';
+    const rewards = Object.fromEntries([...this.players.values()].filter((player) => !player.isBot && player.roomStatus !== 'waiting').map((player) => [player.id, { kills: player.kills, deaths: player.deaths, weaponKills: { ...player.weaponKills }, ...roundReward(player.kills, teamGame ? !!winnerTeam && player.teamId === winnerTeam : player.id === winner?.id), ...(this.mode === 'custom' || isObjectiveGame(this.gameType) ? { completion: 0, killBonus: 0, winBonus: 0, points: 0 } : {}) }]));
+    this.result = { roundId: this.roundId, winnerId: winner?.id || null, winnerName, winnerKills: teamGame ? this.teamScores[winnerTeam] || 0 : winner?.kills || 0, rewards, ...(teamGame ? { winnerTeam, teamScores: { ...this.teamScores } } : {}), ...(defense ? { reason: this.objectives.state.reason || 'time-expired', cleared: this.objectives.state.cleared, totalWaves: this.waves, coreHealth: this.objectives.state.coreHealth } : {}) };
+    this.events.push({ type: 'ended', winner: winnerName, winnerId: winner?.id || null, ...(teamGame ? { winnerTeam } : {}) });
+    if (defense) for (const [id, player] of this.players) if (player.isWaveEnemy) this.players.delete(id);
   }
 
   summary() {
     const humans = [...this.players.values()].filter((p) => !p.isBot);
-    return { code: this.code, mapId: this.world.id, gameType: this.gameType, botDifficulty: this.botDifficulty, fragLimit: this.fragLimit, roundSeconds: this.roundSeconds, name: this.roomName || humans.find((p) => p.id === this.hostId)?.name || 'OPERATOR', players: humans.length, bots: this.players.size - humans.length, capacity: RULES.maxPlayers, phase: this.phase, teams: this.gameType === 'teams' ? Object.fromEntries(['blue', 'red'].map((team) => [team, [...this.players.values()].filter((p) => p.teamId === team).length])) : null };
+    return { code: this.code, mapId: this.world.id, gameType: this.gameType, botDifficulty: this.botDifficulty, fragLimit: this.fragLimit, scoreLimit: this.scoreLimit, waves: this.waves, roundSeconds: this.roundSeconds, name: this.roomName || humans.find((p) => p.id === this.hostId)?.name || 'OPERATOR', players: humans.length, bots: [...this.players.values()].filter((p) => p.isBot && !p.isWaveEnemy).length, capacity: this.gameType === 'defense' ? 4 : RULES.maxPlayers, phase: this.phase, teams: isTeamGame(this.gameType) ? Object.fromEntries(['blue', 'red'].map((team) => [team, [...this.players.values()].filter((p) => p.teamId === team).length])) : null };
   }
 
   impactHistory() { const now = this.clock(); return [...this.impacts.values()].filter((mark) => now - mark.at < BULLET_MARK_RULES.lifetimeMs).slice(-BULLET_MARK_RULES.historyLimit); }
@@ -570,10 +555,10 @@ export class Room {
     const now = this.clock();
     const result = {
       type: 'state', serverTime: now, sequence: this.snapshotSequence = (this.snapshotSequence || 0) + 1,
-      room: { protocolVersion: NETWORK_PROTOCOL, code: this.code, roundId: this.roundId, result: this.result, mapId: this.world.id, gameType: this.gameType, teamScores: { ...this.teamScores }, name: this.roomName, botDifficulty: this.botDifficulty, mode: this.mode, hostId: this.hostId, phase: this.phase, timeLeft: Math.max(0, Math.ceil((this.endsAt - now) / 1000)), fragLimit: this.fragLimit, roundSeconds: this.roundSeconds },
+      room: { protocolVersion: NETWORK_PROTOCOL, code: this.code, roundId: this.roundId, result: this.result, mapId: this.world.id, gameType: this.gameType, teamScores: { ...this.teamScores }, scoreLimit: this.scoreLimit, waves: this.waves, objective: this.objectives?.snapshot(now) || null, name: this.roomName, botDifficulty: this.botDifficulty, mode: this.mode, hostId: this.hostId, phase: this.phase, timeLeft: Math.max(0, Math.ceil((this.endsAt - now) / 1000)), fragLimit: this.fragLimit, roundSeconds: this.roundSeconds },
       players: [...this.players.values()].map((p) => ({
-        id: p.id, name: p.name, isBot: p.isBot, teamId: p.teamId, x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yaw: p.yaw, pitch: p.pitch,
-        vx: p.vx, vy: p.vy, vz: p.vz, grounded: p.grounded, crouching: p.crouching, crouchAmount: p.crouchAmount, sprinting: p.sprinting, moveSpeed: p.moveSpeed, stepDistance: +p.stepDistance.toFixed(3), shotHeat: p.shotHeat, hp: p.hp, ammo: p.ammo, kills: p.kills, deaths: p.deaths, spawnId: p.spawnId, spawnLevel: p.spawnLevel, lastDeath: p.lastDeath,
+        id: p.id, name: p.name, isBot: p.isBot, isWaveEnemy: p.isWaveEnemy, teamId: p.teamId, x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yaw: p.yaw, pitch: p.pitch,
+        vx: p.vx, vy: p.vy, vz: p.vz, grounded: p.grounded, crouching: p.crouching, crouchAmount: p.crouchAmount, walking: p.walking, sprinting: false, moveSpeed: p.moveSpeed, stepDistance: +p.stepDistance.toFixed(3), shotHeat: p.shotHeat, hp: p.hp, ammo: p.ammo, kills: p.kills, deaths: p.deaths, spawnId: p.spawnId, spawnLevel: p.spawnLevel, lastDeath: p.lastDeath,
         reloadUntil: p.reloadUntil, respawnAt: p.respawnAt, protectedUntil: p.protectedUntil, hitSlowUntil: p.hitSlowUntil,
         weaponId: p.weaponId, weaponSkinId: p.weaponSkinId, equipmentSeq: p.equipmentSeq, nextWeaponId: p.nextWeaponId, loadoutSelecting: p.loadoutSelecting, skinId: p.skinId, outfitId: p.outfitId, characterId: p.characterId, magazines: { ...p.magazines }, switchUntil: p.switchUntil, nextFireAt: p.nextFireAt,
         spawnCount: p.spawnCount, ownedWeapons: [...p.ownedWeapons], weaponKills: { ...p.weaponKills }, masteryKills: { ...p.masteryKills }, weaponLevel: weaponMastery(p.masteryKills[p.weaponId]).level,

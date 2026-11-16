@@ -10,16 +10,23 @@ import { publicationRisk } from './security-audit.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const output = path.join(root, 'dist');
 let onlineServerUrl = '';
+let frontendOrigin = '';
+if (process.env.FRONTEND_URL) {
+  const url = new URL(process.env.FRONTEND_URL);
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error('FRONTEND_URL must be a public HTTP(S) frontend origin.');
+  frontendOrigin = url.origin;
+}
 if (process.env.ONLINE_SERVER_URL) {
   const url = new URL(process.env.ONLINE_SERVER_URL);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('ONLINE_SERVER_URL must be a public HTTP(S) API base URL without credentials/query parameters.');
   onlineServerUrl = url.href.replace(/\/$/, '');
 }
-const images = [...new Set([...MAPS.map((map) => map.image), ...SKINS.map((skin) => skin.pattern).filter(Boolean), ...OUTFITS.flatMap((outfit) => [outfit.image, outfit.pattern]).filter(Boolean), ...CHARACTERS.map((character) => character.image), 'foundry-panel.png', 'operator-fabric.png', 'operator-armor.png', 'operator-jacket.png'])];
+const images = [...new Set([...MAPS.flatMap((map) => [map.image, map.previewImage].filter(Boolean)), ...SKINS.map((skin) => skin.pattern).filter(Boolean), ...OUTFITS.flatMap((outfit) => [outfit.image, outfit.pattern]).filter(Boolean), ...CHARACTERS.map((character) => character.image), 'foundry-panel.png', 'operator-fabric.png', 'operator-armor.png', 'operator-jacket.png', 'quarry-strata.png', 'terrain-concrete.png'])];
 for (const image of images) {
   try {
     const bytes = await readFile(path.join(root, 'public/assets', image));
-    if (bytes.length < 100 || bytes.readUInt32BE(0) !== 0x89504e47) throw new Error('Invalid PNG');
+    if (image.endsWith('.svg')) { const svg = bytes.toString('utf8'); if (!svg.startsWith('<svg ') || /<script|\bon\w+\s*=|(?:href|src)\s*=/i.test(svg)) throw new Error('Unsafe SVG preview'); }
+    else if (bytes.length < 100 || bytes.readUInt32BE(0) !== 0x89504e47) throw new Error('Invalid PNG');
   } catch { console.error(`빌드에 필요한 이미지가 준비되지 않았습니다: public/assets/${image}\n먼저 npm run assets:generate로 애셋을 준비하세요. GitHub에는 생성된 public/assets도 함께 올려야 합니다.`); process.exit(1); }
 }
 for (const file of CHARACTERS.flatMap((character) => [character.model, character.hair, character.helmetHair].filter(Boolean))) { const bytes = await readFile(path.join(root, 'public/assets/models', file)); if (bytes.readUInt32LE(0) !== 0x46546c67 || bytes.readUInt32LE(8) !== bytes.length) throw new Error(`Invalid character model: ${file}`); }
@@ -43,6 +50,6 @@ await cp(path.join(root, 'shared'), path.join(output, 'shared'), { recursive: tr
 await mkdir(path.join(output, 'vendor'), { recursive: true });
 for (const file of ['three.module.js', 'three.core.js']) await cp(path.join(root, 'node_modules/three/build', file), path.join(output, 'vendor', file));
 for (const file of ['loaders/GLTFLoader.js', 'utils/BufferGeometryUtils.js', 'utils/SkeletonUtils.js']) { await mkdir(path.dirname(path.join(output, 'vendor/addons', file)), { recursive: true }); await cp(path.join(root, 'node_modules/three/examples/jsm', file), path.join(output, 'vendor/addons', file)); }
-await writeFile(path.join(output, 'runtime-config.js'), `// Tutorial/practice remain local even when an optional online API is configured.\nexport const APP_MODE = 'solo';\nexport const PROFILE_STORAGE = 'browser';\nexport const ONLINE_SERVER_URL = ${JSON.stringify(onlineServerUrl)};\n`);
+await writeFile(path.join(output, 'runtime-config.js'), `// Tutorial/practice remain local even when an optional online API is configured.\nexport const APP_MODE = 'solo';\nexport const PROFILE_STORAGE = 'browser';\nexport const ONLINE_SERVER_URL = ${JSON.stringify(onlineServerUrl)};\nexport const FRONTEND_URL = ${JSON.stringify(frontendOrigin)};\n`);
 await writeFile(path.join(output, 'economy.json'), JSON.stringify({ version: 1, points: POINT_RULES, outfits: OUTFITS.map(({ id, price }) => ({ id, price })), weapons: WEAPONS.map(({ id, price }) => ({ id, price })), freeWeapons: FREE_WEAPON_IDS }));
 console.log('Vercel용 1인 플레이 빌드 완료: dist/ (게임 서버 불필요)');

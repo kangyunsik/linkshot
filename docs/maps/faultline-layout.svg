@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="720" viewBox="0 0 1000 720" role="img" aria-labelledby="title desc">
+  <title id="title">FAULTLINE 폐광 채석장 — 1차 평면 배치도</title>
+  <desc id="desc">서쪽 블루와 동쪽 레드 스폰 사이를 북쪽 절벽길, 중앙 채굴 분지, 남쪽 굴착 터널이 연결한다. 거점 후보 A는 중앙, B는 북쪽 고지대, C는 남쪽에 있다.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 10 5 0 10Z" fill="#e7b875"/></marker>
+    <style>
+      text { font-family: system-ui, sans-serif; fill: #d9e6e6; text-anchor: middle; }
+      .small { font-size: 13px; fill: #a5bdc5; }
+      .label { font-size: 17px; font-weight: 650; }
+      .route { fill: none; stroke: #8aa3a6; stroke-width: 28; stroke-linecap: round; stroke-linejoin: round; }
+      .ramp { fill: none; stroke: #e7b875; stroke-width: 4; marker-end: url(#arrow); }
+      .rock { fill: #394b52; stroke: #9a9b83; stroke-width: 2; }
+      .site { fill: #d9a95f; fill-opacity: .16; stroke: #f0c37f; stroke-width: 3; }
+    </style>
+  </defs>
+  <rect width="1000" height="720" fill="#101c26"/>
+  <text x="40" y="48" style="text-anchor:start;font-size:30px;font-weight:750">FAULTLINE / 폐광 채석장</text>
+  <text x="40" y="78" class="small" style="text-anchor:start">DESIGN 01 · 약 76 × 68m · 최대 8인 · 실제 게임 구현 전 동선 설계</text>
+  <rect x="40" y="108" width="920" height="510" rx="18" fill="#1b2a32" stroke="#435a65"/>
+  <path d="M250 174 365 150 690 158 764 208 720 250 325 248 237 219Z" fill="#556267" stroke="#87958e" stroke-width="2"/>
+  <path d="M333 278 432 251 592 262 678 298 700 391 622 444 390 446 300 396Z" fill="#594a3b" stroke="#c0a273" stroke-width="2"/>
+  <path d="M250 489 738 489 771 526 733 565 266 565 225 528Z" fill="#173d3c" stroke="#73b7a3" stroke-width="2"/>
+  <path class="route" d="M187 329 262 205 736 205 813 329"/>
+  <path class="route" d="M185 351 344 351M656 351 815 351"/>
+  <path class="route" d="M188 378 266 527M735 527 812 378"/>
+  <path d="M266 527H735" fill="none" stroke="#86cebb" stroke-width="14" stroke-linecap="round" stroke-dasharray="15 12"/>
+  <path d="M349 381 395 455 445 501M650 381 605 455 555 501" fill="none" stroke="#92d4c6" stroke-width="4" stroke-dasharray="7 7"/>
+  <path class="ramp" d="M214 302 258 228M786 302 742 228"/>
+  <path class="ramp" d="M427 244 441 286M573 244 559 286"/>
+  <path d="M80 295 151 283 201 324 201 381 145 409 80 394Z" fill="#20466b" stroke="#79baff" stroke-width="3"/>
+  <path d="M920 295 849 283 799 324 799 381 855 409 920 394Z" fill="#65333c" stroke="#ff817a" stroke-width="3"/>
+  <text x="134" y="342" class="label" style="fill:#a9d4ff">BLUE</text><text x="134" y="367" class="small">서쪽 스폰</text>
+  <text x="866" y="342" class="label" style="fill:#ffb9b1">RED</text><text x="866" y="367" class="small">동쪽 스폰</text>
+  <path class="rock" d="M316 320 344 301 367 328 354 362 322 358Z"/>
+  <path class="rock" d="M684 320 656 301 633 328 646 362 678 358Z"/>
+  <path class="rock" d="M407 324 436 312 453 345 433 369 401 354Z"/>
+  <path class="rock" d="M593 324 564 312 547 345 567 369 599 354Z"/>
+  <path class="rock" d="M364 392 391 374 416 399 399 425 370 420Z"/>
+  <path class="rock" d="M636 392 609 374 584 399 601 425 630 420Z"/>
+  <rect x="339" y="179" width="56" height="27" rx="7" fill="#354953" stroke="#97aaa1"/>
+  <rect x="605" y="204" width="56" height="27" rx="7" fill="#354953" stroke="#97aaa1"/>
+  <circle cx="500" cy="351" r="35" class="site"/><text x="500" y="358" class="label" style="fill:#f6d8a6;font-size:25px">A</text>
+  <circle cx="500" cy="205" r="29" class="site"/><text x="500" y="212" class="label" style="fill:#f6d8a6;font-size:23px">B</text>
+  <circle cx="500" cy="527" r="29" class="site"/><text x="500" y="534" class="label" style="fill:#f6d8a6;font-size:23px">C</text>
+  <text x="500" y="137" class="label">北 · 절벽길 +3m</text>
+  <text x="500" y="305" class="small">중앙 채굴 분지 · 0m</text>
+  <text x="500" y="414" class="small">큰 암석 / 고정 굴착 장비로 사선 분리</text>
+  <text x="500" y="590" class="label">南 · 굴착 터널 / 일부 앉기 구간</text>
+  <text x="195" y="211" class="small">경사로</text><text x="805" y="211" class="small">경사로</text>
+  <text x="326" y="469" class="small">낮은 턱 점프</text><text x="674" y="469" class="small">낮은 턱 점프</text>
+  <text x="870" y="145" class="small">N ↑</text>
+  <path d="M64 653H115" stroke="#e7b875" stroke-width="4" marker-end="url(#arrow)"/>
+  <text x="192" y="659" class="small">경사 / 아래로 낙하</text>
+  <path d="M327 653H379" stroke="#86cebb" stroke-width="8" stroke-dasharray="10 7"/>
+  <text x="452" y="659" class="small">낮은 우회 통로</text>
+  <circle cx="599" cy="653" r="13" class="site"/><text x="709" y="659" class="small">A/B/C = 목표 위치 후보</text>
+  <text x="500" y="696" class="small">스폰 직통 사선 금지 · 필수 경로는 AI도 통과 가능 · 축척/최종 충돌 도면 아님</text>
+</svg>

@@ -65,7 +65,7 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain browser(HttpSecurity http, AccountService accounts, ObjectMapper json, CorsConfigurationSource corsConfigurationSource) throws Exception {
-        http.cors(cors -> cors.configurationSource(corsConfigurationSource)).authorizeHttpRequests(auth -> auth.requestMatchers("/api/health", "/api/auth/csrf", "/api/auth/register", "/api/auth/login", "/error").permitAll().anyRequest().authenticated());
+        http.cors(cors -> cors.configurationSource(corsConfigurationSource)).authorizeHttpRequests(auth -> auth.requestMatchers("/api/health", "/api/auth/csrf", "/api/auth/username-availability", "/api/auth/register", "/api/auth/login", "/error").permitAll().anyRequest().authenticated());
         http.addFilterBefore(new AuthRateLimitFilter(), UsernamePasswordAuthenticationFilter.class);
         http.exceptionHandling(errors -> errors.authenticationEntryPoint((request, response, exception) -> error(response, 401, "Login required")).accessDeniedHandler((request, response, exception) -> error(response, 403, "Request not permitted")));
         http.formLogin(login -> login.loginProcessingUrl("/api/auth/login").successHandler((request, response, authentication) -> { response.setContentType("application/json;charset=UTF-8"); json.writeValue(response.getOutputStream(), Map.of("profile", accounts.profile(authentication.getName()))); }).failureHandler((request, response, exception) -> error(response, 401, "Invalid credentials")));

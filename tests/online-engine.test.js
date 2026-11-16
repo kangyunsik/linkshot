@@ -46,6 +46,17 @@ async function disconnect(socket, match, id) {
   const clientClosed = new Promise((resolve) => socket.once('close', resolve)), serverClosed = new Promise((resolve) => match.sockets.get(id).once('close', resolve)); socket.close(); await Promise.all([clientClosed, serverClosed]);
 }
 
+test('a LAN-configured combat server also accepts matching-port loopback origins but still rejects unrelated sites', async (t) => {
+  const lanOrigin = `http://${[192, 168, 40, 25].join('.')}:4173`;
+  const app = createOnlineEngine({ client: { pending: async () => [] }, host: '127.0.0.1', port: 0, loop: false, origins: [lanOrigin] }), info = await app.listen(); t.after(() => app.close());
+  for (const origin of [lanOrigin, 'http://127.0.0.1:4173', 'http://localhost:4173']) {
+    const socket = new WebSocket(`ws://127.0.0.1:${info.port}/play`, { origin }); t.after(() => socket.terminate()); assert.equal((await message(socket, 'hello')).type, 'hello'); socket.close();
+  }
+  for (const origin of ['http://127.0.0.1:9999', 'https://evil.invalid']) {
+    const socket = new WebSocket(`ws://127.0.0.1:${info.port}/play`, { origin }); t.after(() => socket.terminate()); const code = await new Promise((resolve, reject) => { socket.once('error', reject); socket.once('close', resolve); }); assert.equal(code, 1008);
+  }
+});
+
 test('the online gateway consumes Spring tickets, ignores spoofed identity/ownership and requires every assigned human before starting', async (t) => {
   const f = await fixture(t, { mode: 'CASUAL' }); const a = await f.join(f.players[0], { ownedWeapons: ['m82'], weaponId: 'm82', id: f.players[1].id });
   const match = f.app.matches.get(f.id); assert.equal(match.room.phase, 'waiting'); assert.equal(match.room.players.get(f.players[0].id).weaponId, 'rifle');

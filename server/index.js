@@ -10,6 +10,7 @@ import { RoomDirectory } from './room-directory.js';
 import { roomLobbyAction } from './room-lobby.js';
 import { RULES, NETWORK_PROTOCOL } from '../shared/world.js';
 import { advanceTime } from '../shared/movement.js';
+import { isTeamGame } from '../shared/game-types.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8', '.webp': 'image/webp', '.ico': 'image/x-icon', '.glb': 'model/gltf-binary', '.wav': 'audio/wav' };
@@ -35,7 +36,7 @@ export function createGameServer({ port = Number(process.env.PORT) || 3000, host
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       response.end(request.method === 'HEAD' ? undefined : JSON.stringify(info())); return;
     }
-    const allowedShared = new Set(['/shared/world.js', '/shared/buildings.js', '/shared/spawns.js', '/shared/movement.js', '/shared/catalog.js', '/shared/simulation.js', '/shared/progression.js', '/shared/outfits.js', '/shared/equipment.js', '/shared/tutorial.js', '/shared/training-world.js', '/shared/teams.js']);
+    const allowedShared = new Set(['/shared/world.js', '/shared/buildings.js', '/shared/spawns.js', '/shared/movement.js', '/shared/catalog.js', '/shared/simulation.js', '/shared/bot-navigation.js', '/shared/collision-grid.js', '/shared/progression.js', '/shared/outfits.js', '/shared/equipment.js', '/shared/tutorial.js', '/shared/training-world.js', '/shared/teams.js', '/shared/game-types.js', '/shared/terrain.js', '/shared/team-worlds.js', '/shared/objectives.js', '/shared/online-network.js']);
     const vendor = { '/vendor/three.module.js': 'three.module.js', '/vendor/three.core.js': 'three.core.js' };
     const addon = { '/vendor/addons/loaders/GLTFLoader.js': 'loaders/GLTFLoader.js', '/vendor/addons/utils/BufferGeometryUtils.js': 'utils/BufferGeometryUtils.js', '/vendor/addons/utils/SkeletonUtils.js': 'utils/SkeletonUtils.js' };
     let file;
@@ -64,7 +65,7 @@ export function createGameServer({ port = Number(process.env.PORT) || 3000, host
   }
   function enter(client, room, name, loadout = {}) {
     room.addPlayer(client.id, name, false, loadout);
-    if (room.staging && ['blue', 'red'].includes(loadout.teamId) && room.gameType === 'teams') room.team(client.id, client.id, loadout.teamId);
+    if (room.staging && ['blue', 'red'].includes(loadout.teamId) && isTeamGame(room.gameType) && room.gameType !== 'defense') room.team(client.id, client.id, loadout.teamId);
     client.room = room.code;
     send(client.socket, { ...room.snapshot(false), type: 'joined', id: client.id, events: [], impacts: room.impactHistory() });
   }

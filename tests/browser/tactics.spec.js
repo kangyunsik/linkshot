@@ -144,7 +144,9 @@ test('duplicate restart events and delayed old-life snapshots cannot teleport th
       return { afterDuplicate, final: { yaw: game.yaw, pitch: game.pitch, x: game.predicted.x, life: game.local.spawnCount, round: game.room.roundId }, expected: { x: player.x, life: player.spawnCount, round: room.roundId } };
     });
     expect(result.afterDuplicate.yaw).toBeCloseTo(.63,8); expect(result.afterDuplicate.pitch).toBeCloseTo(-.12,8); expect(result.afterDuplicate.x).toBeCloseTo(result.expected.x,6);
-    expect(result.final).toEqual({ yaw: .63, pitch: -.12, ...result.expected });
+    // Accepted snapshots round positions to 3 decimals. Rejected packets must
+    // preserve the post-reconciliation state exactly, not an unrounded server X.
+    expect(result.final).toEqual({ ...result.afterDuplicate, life: result.expected.life, round: result.expected.round });
   } finally { await disposeComponent(page); }
 });
 
@@ -157,7 +159,7 @@ test('the actual render loop keeps full movement speed at 15 FPS without repeate
       game.world = { ...game.world, width: 200,depth: 200,obstacles: [],buildings: [] }; game.predicted = { ...player,x: 0,y: 0,z: 0,vy: 0,vx: 0,vz: 0,grounded: true }; game.yaw = 0; game.keys.add('KeyW');
       const base = performance.now(); game.previousFrame = base;
       for (let frame = 1; frame <= 15; frame++) { game.animate(base + frame * 1000 / 15); cancelAnimationFrame(game.frameId); }
-      return { distance: -game.predicted.z, expected: RULES.walkSpeed * getWeapon(player.weaponId).walkMultiplier };
+      return { distance: -game.predicted.z, expected: RULES.runSpeed * getWeapon(player.weaponId).walkMultiplier };
     });
     expect(result.distance).toBeCloseTo(result.expected,6);
   } finally { await disposeComponent(page); }

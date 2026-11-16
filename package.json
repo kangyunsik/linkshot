@@ -19,7 +19,8 @@
     "online:dev": "node --env-file=online-server/.env scripts/run-online-dev.mjs",
     "online:engine": "node --env-file=online-server/.env server/online-engine.js",
     "test:online": "mvn -f online-server/pom.xml test",
-    "assets:generate": "node scripts/generate-assets.mjs"
+    "assets:generate": "node scripts/generate-assets.mjs",
+    "assets:map-previews": "node scripts/create-team-map-previews.mjs"
   },
   "engines": { "node": ">=22" },
   "dependencies": {

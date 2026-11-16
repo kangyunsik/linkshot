@@ -15,12 +15,14 @@ final class AuthRateLimitFilter extends OncePerRequestFilter {
     private final ConcurrentHashMap<String, Window> windows = new ConcurrentHashMap<>();
     @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain) throws IOException, ServletException {
         String path = request.getRequestURI();
-        if (!"POST".equals(request.getMethod()) || !(path.equals("/api/auth/login") || path.equals("/api/auth/register"))) { chain.doFilter(request, response); return; }
+        boolean availability = "GET".equals(request.getMethod()) && path.equals("/api/auth/username-availability");
+        if (!availability && (!"POST".equals(request.getMethod()) || !(path.equals("/api/auth/login") || path.equals("/api/auth/register")))) { chain.doFilter(request, response); return; }
         long now = System.currentTimeMillis();
         if (windows.size() >= 10_000) windows.entrySet().removeIf(entry -> entry.getValue().until() <= now);
         if (windows.size() >= 10_000) { SecurityConfig.error(response, 429, "Try again later"); return; }
-        Window window = windows.compute(request.getRemoteAddr(), (key, prior) -> prior == null || prior.until() <= now ? new Window(now + 60_000, 1) : new Window(prior.until(), prior.count() + 1));
-        if (window.count() > 20) { response.setHeader("Retry-After", "60"); SecurityConfig.error(response, 429, "Try again later"); return; }
+        String key = request.getRemoteAddr() + (availability ? "/availability" : "/authentication");
+        Window window = windows.compute(key, (ignored, prior) -> prior == null || prior.until() <= now ? new Window(now + 60_000, 1) : new Window(prior.until(), prior.count() + 1));
+        if (window.count() > (availability ? 60 : 20)) { response.setHeader("Retry-After", "60"); SecurityConfig.error(response, 429, "Try again later"); return; }
         if (path.endsWith("/login")) {
             String password = request.getParameter("password"), username = request.getParameter("username");
             if (password == null || password.getBytes(StandardCharsets.UTF_8).length > 72 || username == null || username.length() > 24) { SecurityConfig.error(response, 401, "Invalid credentials"); return; }

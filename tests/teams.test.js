@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Room, traceShot } from '../shared/simulation.js';
-import { MAPS, RULES } from '../shared/world.js';
+import { MATCHMAKING_MAPS as MAPS, RULES } from '../shared/world.js';
 import { getWeapon } from '../shared/catalog.js';
 import { teamSpawnZones } from '../shared/teams.js';
 

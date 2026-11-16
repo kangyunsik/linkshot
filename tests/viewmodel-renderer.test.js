@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileViewmodelPrograms, renderViewmodelFrame } from '../public/viewmodel-renderer.js';
+import { compileViewmodelPrograms, renderViewmodelFrame, normalizeWeaponHand } from '../public/viewmodel-renderer.js';
+
+test('weapon handedness defaults safely to right without accepting arbitrary saved transforms', () => {
+  assert.equal(normalizeWeaponHand('left'), 'left');
+  for (const value of ['right', undefined, null, 1, -1, 'LEFT', {}, '__proto__']) assert.equal(normalizeWeaponHand(value), 'right');
+});
 
 function fixture() {
   const calls = [], camera = { layers: { mask: 5, set(layer) { this.mask = 1 << layer; } } }, background = {}, scene = { background };

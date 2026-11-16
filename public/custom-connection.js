@@ -1,4 +1,5 @@
 import { NETWORK_PROTOCOL } from '/shared/world.js';
+import { onlineBrowserUrl } from '/shared/online-network.js';
 
 // Account authentication is a one-use Spring ticket in the first WS frame.
 // Room passwords travel only in create/join messages, never in links/storage.
@@ -8,7 +9,7 @@ export class CustomConnection extends EventTarget {
     this.open(api).catch((error) => { if (this.closed) return; this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'error', message: error.message }) })); this.finish(1008, 'Custom gateway authentication failed'); });
   }
   async open(api) {
-    const ticket = await api.customTicket(); if (this.closed) return; const url = new URL(ticket.engineUrl);
+    const ticket = await api.customTicket(); if (this.closed) return; const url = onlineBrowserUrl(ticket.engineUrl, location, api.frontendOrigin);
     if (!['ws:', 'wss:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || location.protocol === 'https:' && url.protocol !== 'wss:' || !/^[A-Za-z0-9_-]{43}$/.test(ticket.ticket)) throw new Error('사용자 대전 서버 주소를 확인하세요.');
     this.socket = new WebSocket(url);
     this.socket.addEventListener('open', () => { if (this.closed) this.socket.close(); });

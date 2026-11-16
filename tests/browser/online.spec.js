@@ -27,15 +27,16 @@ async function services(origin, { engine = false, wait = 1, lanHost = '', ranked
   } catch (error) { await close(); throw error; }
 }
 
-async function onlinePage(context, apiUrl, origin, mode, index = 0) {
-  await context.route('**/runtime-config.js', (route) => route.fulfill({ contentType: 'text/javascript', body: `export const APP_MODE = 'solo'; export const PROFILE_STORAGE = 'browser'; export const ONLINE_SERVER_URL = ${JSON.stringify(apiUrl)};` }));
+async function onlinePage(context, apiUrl, origin, mode, index = 0, configuredFrontend = origin) {
+  await context.route('**/runtime-config.js', (route) => route.fulfill({ contentType: 'text/javascript', body: `export const APP_MODE = 'solo'; export const PROFILE_STORAGE = 'browser'; export const ONLINE_SERVER_URL = ${JSON.stringify(apiUrl)}; export const FRONTEND_URL = ${JSON.stringify(configuredFrontend)};` }));
   const local = createProfile(`online-match-local-${index}-0001`, Date.now(), 'LOCAL TESTER'); local.points = local.totalEarned = 1234;
   await context.addInitScript((local) => { try { if (!localStorage.getItem('linkshot-profile-v1')) localStorage.setItem('linkshot-profile-v1', JSON.stringify(local)); localStorage.setItem('sector07-settings', JSON.stringify({ volume: 0, quality: 'low', fov: 82, sensitivity: 1 })); } catch {} }, local);
   const page = await context.newPage(), state = { latest: null, errors: [] };
   page.on('pageerror', (error) => state.errors.push(error.message)); page.on('websocket', (socket) => socket.on('framereceived', ({ payload }) => { try { const value = JSON.parse(payload.toString()); if (['state', 'joined'].includes(value.type)) state.latest = value; } catch {} }));
   await page.goto(origin); await page.getByRole('tab', { name: mode, exact: true }).click(); await expect(page.locator('#online-server-state')).toContainText('연결됨');
   await page.locator('#profile-button').click();
-  await page.locator('#online-username').fill('ui_' + randomBytes(7).toString('hex')); await page.locator('#online-password').fill('test-only-long-passphrase'); await page.locator('#online-callsign').fill(`PLAYER ${index}`); await page.getByRole('button', { name: '온라인 계정 만들기', exact: true }).click(); await expect(page.locator('#online-profile-summary')).toContainText(`PLAYER ${index} · 온라인 0 LP`);
+  const username = 'ui_' + randomBytes(7).toString('hex'); await page.locator('#online-username').fill(username); await page.locator('#online-password').fill('test-only-long-passphrase'); await page.getByRole('button', { name: '온라인 계정 만들기', exact: true }).click(); await expect(page.locator('#online-profile-summary')).toContainText(`${username} · 온라인 0 LP`);
+  await page.locator('#online-profile-callsign').fill(`PLAYER ${index}`); await page.locator('#online-save-callsign').click(); await expect(page.locator('#online-profile-summary')).toContainText(`PLAYER ${index} · 온라인 0 LP`);
   await page.getByLabel('프로필 닫기').click(); await expect(page.locator('#profile-dialog')).toBeHidden();
   return { page, state };
 }
@@ -58,8 +59,9 @@ test('real Spring/PostgreSQL browser authentication is separate from device LP, 
     const errors = []; page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(origin); await page.getByRole('tab', { name: '일반', exact: true }).click(); await expect(page.locator('#online-server-state')).toContainText('연결됨');
     await page.locator('#profile-button').click();
-    const username = 'ui_' + randomBytes(7).toString('hex'); await page.locator('#online-username').fill(username); await page.locator('#online-password').fill('test-only-long-passphrase'); await page.locator('#online-callsign').fill('ONLINE TESTER');
-    await page.getByRole('button', { name: '온라인 계정 만들기', exact: true }).click(); await expect(page.locator('#online-profile-summary')).toContainText('ONLINE TESTER · 온라인 0 LP'); await expect(page.locator('#profile-points')).toHaveText('1,234'); await expect(page.locator('#online-password')).toHaveValue('');
+    const username = 'ui_' + randomBytes(7).toString('hex'); await page.locator('#online-username').fill(username); await page.locator('#online-check-username').click(); await expect(page.locator('#online-username-status')).toHaveText('사용 가능한 아이디입니다.'); await expect(page.locator('#online-password')).toHaveValue(''); await page.locator('#online-password').fill('test-only-long-passphrase');
+    await page.getByRole('button', { name: '온라인 계정 만들기', exact: true }).click(); await expect(page.locator('#online-profile-summary')).toContainText(`${username} · 온라인 0 LP`); await expect(page.locator('#profile-points')).toHaveText('1,234'); await expect(page.locator('#online-password')).toHaveValue('');
+    await page.locator('#online-profile-callsign').fill('ONLINE TESTER'); await page.locator('#online-save-callsign').click(); await expect(page.locator('#online-profile-summary')).toContainText('ONLINE TESTER · 온라인 0 LP');
     await expect(page.locator('#profile-casual-rating')).toHaveText('1,000'); await expect(page.locator('#profile-rank-tier')).toHaveText('배치 중'); await expect(page.locator('#profile-rank-progress')).toContainText('배치 0/10');
     const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1'))); expect(stored.points).toBe(1234); expect(stored.ownedWeapons).toContain('m82');
     const cookie = (await context.cookies(apiUrl + '/api')).find((cookie) => cookie.name === 'LINKSHOTSESSION'); expect(cookie?.httpOnly).toBe(true); expect(cookie?.path).toBe('/api');
@@ -67,6 +69,8 @@ test('real Spring/PostgreSQL browser authentication is separate from device LP, 
     await page.screenshot({ path: 'artifacts/spring-online-account.png', fullPage: true });
     await page.getByRole('button', { name: '온라인 로그아웃', exact: true }).click(); await expect(page.locator('#online-auth-form')).toBeVisible();
     await expect(page.locator('#profile-casual-rating')).toHaveText('—'); await expect(page.locator('#profile-rank-tier')).toHaveText('—');
+    await page.locator('#online-check-username').click(); await expect(page.locator('#online-username-status')).toHaveText('이미 존재하는 아이디입니다.');
+    await page.locator('#online-password').fill('test-only-different-passphrase'); await page.locator('#online-register').click(); await expect(page.locator('#online-auth-status')).toHaveText('이미 존재하는 아이디입니다.'); await expect(page.locator('#online-auth-form')).toBeVisible();
     await page.locator('#online-password').fill('test-only-long-passphrase'); await page.getByRole('button', { name: '온라인 로그인', exact: true }).click(); await expect(page.locator('#online-profile-summary')).toContainText('ONLINE TESTER · 온라인 0 LP'); await expect(page.locator('#create-button')).toBeDisabled(); expect(errors).toEqual([]);
   } finally {
     const stopped = new Promise((resolve) => { if (child.exitCode !== null || child.signalCode !== null) resolve(); else child.once('exit', resolve); }); child.kill('SIGTERM'); await stopped;
@@ -137,4 +141,20 @@ test('a private LAN frontend authenticates with same-site cookies and joins the 
     await page.getByRole('button', { name: '일반 매칭', exact: true }).click(); await expect(page.locator('#pause-overlay')).toBeVisible({ timeout: 25_000 }); await expect.poll(() => state.latest?.room.phase).toBe('active');
     expect(sockets.some((url) => new URL(url).hostname === host)).toBe(true); expect(sockets.some((url) => ['localhost', '127.0.0.1'].includes(new URL(url).hostname))).toBe(false); expect(state.latest.players).toHaveLength(4); expect(state.errors).toEqual([]);
   } finally { await context.close(); await backend.close(); }
+});
+
+test('loopback frontends authenticate and join real combat with a saved LAN configuration and no local-mode switch', async ({ browser }) => {
+  test.skip(process.env.ONLINE_BROWSER_TEST !== '1', 'Optional Java/PostgreSQL browser integration.'); test.setTimeout(180_000);
+  const previewPort = Number(process.env.PREVIEW_PORT) || 4173, oldLanHost = [192, 168, 40, 25].join('.'), configuredFrontend = `http://${oldLanHost}:${previewPort}`, backend = await services(configuredFrontend, { engine: true, lanHost: oldLanHost }), contexts = [];
+  try {
+    for (const [i, host] of ['127.0.0.1', 'localhost'].entries()) {
+      const context = await browser.newContext(), sockets = []; contexts.push(context); context.on('page', (page) => page.on('websocket', (socket) => sockets.push(socket.url())));
+      const { page, state } = await onlinePage(context, backend.apiUrl, `http://${host}:${previewPort}`, '사용자 대전', 20 + i, configuredFrontend);
+      await expect(page.getByText('CUSTOM ROOMS CONNECTED')).toBeVisible();
+      await page.locator('#create-button').click(); await page.locator('#room-title').fill('LOCAL ALIAS'); await page.locator('#room-create-confirm').click(); await expect(page.locator('#room-lobby-dialog')).toBeVisible();
+      expect(sockets.some((value) => new URL(value).hostname === host)).toBe(true); expect(sockets.some((value) => new URL(value).hostname === oldLanHost)).toBe(false);
+      const cookies = await context.cookies(backend.apiUrl.replace(oldLanHost, host) + '/api'); expect(cookies.some((cookie) => cookie.name === 'LINKSHOTSESSION' && cookie.httpOnly && cookie.path === '/api')).toBe(true);
+      expect(state.errors).toEqual([]); await page.locator('#room-lobby-leave').click(); await context.close();
+    }
+  } finally { for (const context of contexts) await context.close(); await backend.close(); }
 });

@@ -21,5 +21,5 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'HEAD') res.end(); else createReadStream(file).on('error', () => res.destroy()).pipe(res);
   } catch { res.writeHead(404); res.end('Not found. Run npm run build first.'); }
 });
-server.listen(port, '0.0.0.0', () => console.log(`FE 미리보기: ${publicUrl.origin} · 종료: Ctrl+C`));
+server.listen(port, '0.0.0.0', () => { console.log(`FE 미리보기: ${publicUrl.origin} · 종료: Ctrl+C`); console.log(`이 PC에서 접속: http://127.0.0.1:${port}`); });
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { server.close(() => process.exit(0)); server.closeAllConnections(); });

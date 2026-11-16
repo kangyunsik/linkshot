@@ -48,3 +48,17 @@ test('staging is opt-in for LAN/custom rooms and never changes legacy solo/LAN/r
   assert.equal(staged.phase, 'lobby'); assert.equal(directory.list()[0].staging, true); assert.equal(staged.snapshot().room.staging, true);
   const legacy = await directory.create({ bots: 0 }); assert.equal(legacy.phase, 'active'); assert.equal(roomLobbyAction(legacy, 'host', { type: 'input' }), false); assert.throws(() => roomLobbyAction(legacy, 'host', { type: 'room-start' }), /대기실/);
 });
+
+test('hosts edit each existing AI difficulty independently, including at full capacity, without adding another AI', () => {
+  const { room, host, guest } = fixture();
+  for (let i = 0; i < 6; i++) room.bot(host.id, { teamId: 'red' });
+  const bots = [...room.players.values()].filter((p) => p.isBot), before = room.players.size;
+  roomLobbyAction(room, host.id, { type: 'room-bot', id: bots[0].id, difficulty: 'advanced' });
+  roomLobbyAction(room, host.id, { type: 'room-bot', id: bots[1].id, difficulty: 'intermediate' });
+  assert.equal(room.players.size, before); assert.equal(bots[0].botDifficulty, 'advanced'); assert.equal(bots[1].botDifficulty, 'intermediate'); assert.equal(bots[2].botDifficulty, 'beginner');
+  assert.throws(() => room.bot(guest.id, { id: bots[0].id, difficulty: 'beginner' }), /방장/);
+  assert.throws(() => room.bot(host.id, { id: guest.id, difficulty: 'advanced' }), /AI/);
+  assert.throws(() => room.bot(host.id, { id: bots[0].id, difficulty: '__proto__' }), /난이도/);
+  assert.equal(bots[0].botDifficulty, 'advanced'); assert.equal(room.snapshot().players.find((p) => p.id === bots[1].id).botDifficulty, 'intermediate');
+  guest.ready = true; room.start(host.id); assert.equal(bots[0].botDifficulty, 'advanced'); assert.throws(() => room.bot(host.id, { id: bots[0].id, difficulty: 'beginner' }), /경기 시작 전/);
+});

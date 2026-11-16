@@ -1,4 +1,5 @@
 import { NETWORK_PROTOCOL } from '/shared/world.js';
+import { onlineBrowserUrl } from '/shared/online-network.js';
 
 // Spring owns identity/assignment. Only a short-lived single-use ticket crosses
 // into the WebSocket gateway; it never appears in the URL or localStorage.
@@ -9,7 +10,7 @@ export class OnlineConnection extends EventTarget {
   }
   async open(api, weaponId) {
     const ticket = await api.ticket(); if (this.closed) return;
-    const url = new URL(ticket.engineUrl);
+    const url = onlineBrowserUrl(ticket.engineUrl, location, api.frontendOrigin);
     if (!['ws:', 'wss:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || location.protocol === 'https:' && url.protocol !== 'wss:' || !/^[A-Za-z0-9_-]{43}$/.test(ticket.ticket)) throw new Error('온라인 전투 서버 접속 정보를 확인하세요.');
     this.matchId = ticket.matchId; this.socket = new WebSocket(url);
     this.socket.addEventListener('open', () => { if (this.closed) this.socket.close(); });

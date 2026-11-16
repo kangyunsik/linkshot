@@ -83,11 +83,11 @@ test('lag compensation rewinds arm orientation and weapon pose as well as positi
 test('a damaging hit slows movement for one second, refreshes rather than stacks, and resets on respawn', () => {
   let now = 1000; const room = new Room('SLOW1', { bots: 0, clock: () => now, random: () => 0 }); room.world = { ...room.world, ...empty };
   const shooter = room.addPlayer('shooter', 'SHOOTER'), p = room.addPlayer('target', 'TARGET'); Object.assign(p, target({ hp: 10000 })); Object.assign(shooter, aimAt(p, { x: 0, y: 1, z: 0 }, false));
-  room.shoot(shooter, now, true); assert.equal(p.hitSlowUntil, 2000); assert.equal(movementSpeed(p, { ...EMPTY_INPUT, forward: 1 }, 1000), RULES.walkSpeed * .7);
+  room.shoot(shooter, now, true); assert.equal(p.hitSlowUntil, 2000); assert.equal(movementSpeed(p, { ...EMPTY_INPUT, forward: 1 }, 1000), RULES.runSpeed * .7);
   now = 1500; shooter.ammo = 30; room.shoot(shooter, now, true); assert.equal(p.hitSlowUntil, 2500);
   room.setInput(p.id, { ...EMPTY_INPUT, forward: 1, hitSlowUntil: 0 }); assert.equal(p.hitSlowUntil, 2500);
-  const before = p.z; room.tick(1 / 60); assert.ok(Math.abs(before - p.z - RULES.walkSpeed * .7 / 60) < 1e-9);
-  assert.equal(movementSpeed(p, EMPTY_INPUT, 2499), RULES.walkSpeed * .7); assert.equal(movementSpeed(p, EMPTY_INPUT, 2500), RULES.walkSpeed);
+  const before = p.z; room.tick(1 / 60); assert.ok(Math.abs(before - p.z - RULES.runSpeed * .7 / 60) < 1e-9);
+  assert.equal(movementSpeed(p, EMPTY_INPUT, 2499), RULES.runSpeed * .7); assert.equal(movementSpeed(p, EMPTY_INPUT, 2500), RULES.runSpeed);
   assert.equal(room.snapshot().players.find((entry) => entry.id === p.id).hitSlowUntil, 2500); room.spawn(p); assert.equal(p.hitSlowUntil, 0);
 });
 

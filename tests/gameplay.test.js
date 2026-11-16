@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RULES, MAPS, hasLineOfSight } from '../shared/world.js';
+import { RULES, MATCHMAKING_MAPS as MAPS, hasLineOfSight } from '../shared/world.js';
 import { EMPTY_INPUT, movePlayer } from '../shared/movement.js';
 import { WEAPONS, getWeapon, shotSpread } from '../shared/catalog.js';
 import { Room, BOT_DIFFICULTIES, BOT_BEHAVIOR, getBotDifficulty } from '../shared/simulation.js';
@@ -9,10 +9,10 @@ const input = (extra = {}) => ({ ...EMPTY_INPUT, ...extra });
 const player = (extra = {}) => ({ x: 0, y: 0, z: 0, grounded: true, vy: 0, yaw: 0, pitch: 0, weaponId: 'rifle', ...extra });
 const empty = { width: 50, depth: 50, obstacles: [] };
 
-test('sprint and jump cannot enter crouch, including simultaneous or spoofed inputs', () => {
+test('silent walk permits grounded crouch, jumping forbids airborne crouch and old sprint cannot accelerate', () => {
   const running = player();
-  movePlayer(running, input({ forward: 1, sprint: true, crouch: true, fire: true }), 1 / 60, empty);
-  assert.equal(running.crouching, false); assert.equal(running.sprinting, true); assert.ok(running.moveSpeed > RULES.walkSpeed);
+  movePlayer(running, input({ forward: 1, walk: true, sprint: true, crouch: true, fire: true }), 1 / 60, empty);
+  assert.equal(running.crouching, true); assert.equal(running.sprinting, false); assert.equal(running.walking, true); assert.ok(running.moveSpeed <= RULES.walkSpeed);
   const jumping = player({ crouching: true });
   movePlayer(jumping, input({ jump: true, crouch: true }), 1 / 60, empty);
   assert.equal(jumping.grounded, false); assert.equal(jumping.crouching, false);
@@ -25,10 +25,10 @@ test('sprint and jump cannot enter crouch, including simultaneous or spoofed inp
 test('ADS does not erase running or airborne shot spread; rifle spray blooms and recovers', () => {
   const rifle = getWeapon('rifle'), steady = shotSpread(rifle, true, { grounded: true });
   const walking = shotSpread(rifle, true, { grounded: true, moveSpeed: 5 });
-  const running = shotSpread(rifle, true, { grounded: true, sprinting: true });
+  const running = shotSpread(rifle, true, { grounded: true, sprinting: true, moveSpeed: RULES.runSpeed });
   const airborne = shotSpread(rifle, true, { grounded: false });
-  assert.ok(steady < walking && walking < running && running < airborne);
-  assert.ok(running > steady * 30 && airborne > 0.1); assert.ok(rifle.recoil >= 1.6);
+  assert.ok(steady < walking && running < airborne); assert.equal(walking, running, 'removed sprint has no hidden accuracy mode');
+  assert.ok(running > steady * 8 && airborne > 0.1); assert.ok(rifle.recoil >= 1.6);
   let now = 1000; const room = new Room('SPRAY', { bots: 0, clock: () => now }), p = room.addPlayer('a', 'ALPHA');
   for (let i = 0; i < 8; i++) room.shoot(p, now + i * 110);
   assert.ok(shotSpread(rifle, true, p) > steady * 10);
@@ -40,9 +40,9 @@ test('snipers have wide hip fire and stronger movement penalties while stationar
   for (const [id, precision] of [['sniper', .0004], ['awp', .00025], ['m82', .001]]) {
     const weapon = getWeapon(id), steady = shotSpread(weapon, true, { grounded: true, moveSpeed: 0 });
     const hip = shotSpread(weapon, false, { grounded: true }), walking = shotSpread(weapon, true, { grounded: true, moveSpeed: 2 });
-    const running = shotSpread(weapon, true, { grounded: true, sprinting: true }), air = shotSpread(weapon, true, { grounded: false });
+    const running = shotSpread(weapon, true, { grounded: true, moveSpeed: RULES.runSpeed }), air = shotSpread(weapon, true, { grounded: false });
     assert.equal(steady, precision, id); assert.ok(hip >= .08 && hip > steady * 70, id);
-    assert.ok(walking >= .045 && walking > steady * 40 && running > walking && air > running, id);
+    assert.ok(walking >= .045 && walking > steady * 40 && running === walking && air > running, id);
     assert.ok(shotSpread(weapon, false, { grounded: true, moveSpeed: 2 }) > hip + .06, id);
   }
   for (const weapon of WEAPONS.filter((weapon) => weapon.type !== 'SNIPER')) for (const ads of [false, true]) {
@@ -65,7 +65,7 @@ test('authoritative sniper bullets miss far more often from the hip and while mo
     };
     const stationary = hitRate(true, { grounded: true, moveSpeed: 0, sprinting: false }), hip = hitRate(false, { grounded: true, moveSpeed: 0, sprinting: false });
     const walking = hitRate(true, { grounded: true, moveSpeed: 2, sprinting: false }), running = hitRate(true, { grounded: true, moveSpeed: 6, sprinting: true });
-    assert.equal(stationary, 1, id); assert.ok(hip < .2 && walking < .4 && running < walking, `${id}: ${JSON.stringify({ stationary, hip, walking, running })}`);
+    assert.equal(stationary, 1, id); assert.ok(hip < .2 && walking < .4 && running === walking, `${id}: ${JSON.stringify({ stationary, hip, walking, running })}`);
   }
 });
 
@@ -80,7 +80,7 @@ test('actual authoritative bullets miss more often while running or airborne', (
     return hits / 400;
   };
   const steady = rate({ grounded: true }), running = rate({ grounded: true, sprinting: true, moveSpeed: 8 }), air = rate({ grounded: false });
-  assert.ok(steady > 0.95); assert.ok(running < 0.2 && air < running);
+  assert.ok(steady > 0.95); assert.ok(running < steady && air < running);
 });
 
 test('living players cannot change weapons via input, compatibility calls or loadout packets', () => {

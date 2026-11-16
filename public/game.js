@@ -18,12 +18,16 @@ import { ShotFeedback } from './shot-feedback.js';
 import { weaponMastery } from '/shared/progression.js';
 import { FootstepTracker, footstepMix } from './footsteps.js';
 import { drawThemedArena } from './themed-arena.js';
-import { VIEWMODEL_LAYER, compileViewmodelPrograms, renderViewmodelFrame } from './viewmodel-renderer.js';
+import { VIEWMODEL_LAYER, compileViewmodelPrograms, renderViewmodelFrame, normalizeWeaponHand } from './viewmodel-renderer.js';
 import { updateTutorialView } from './tutorial-view.js';
 import { BulletMarks } from './bullet-marks.js';
 import { TEAM_COLORS, TEAM_NAMES, sameTeam } from '/shared/teams.js';
 import { AvatarPoseSchedule, FrameStats, qualityPreset } from './performance.js';
 import { batchStaticBoxes } from './static-scenery.js';
+import { WeaponWallGuard } from './weapon-wall.js';
+import { drawTeamArena } from './team-arena.js';
+import { ObjectiveView, updateObjectiveHud } from './objective-view.js';
+import { isTeamGame, isObjectiveGame, gameTypeName } from '/shared/game-types.js';
 
 const $ = (id) => document.getElementById(id);
 const lerp = THREE.MathUtils.lerp;
@@ -93,6 +97,7 @@ export class FPSGame {
     this.renderer.setClearColor('#192e3b'); this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.18;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.localClippingEnabled = true;
     this.scene = new THREE.Scene(); this.scene.background = new THREE.Color(this.world.sky); this.scene.fog = new THREE.FogExp2(this.world.sky, 0.48 / Math.max(this.world.width, this.world.depth));
     this.camera = new THREE.PerspectiveCamera(settings.fov, 1, 0.04, Math.max(this.world.width, this.world.depth) * 3); this.camera.rotation.order = 'YXZ'; this.scene.add(this.camera);
     this.poseFrustum = new THREE.Frustum(); this.poseMatrix = new THREE.Matrix4(); this.poseSphere = new THREE.Sphere(new THREE.Vector3(), 2);
@@ -104,6 +109,7 @@ export class FPSGame {
     this.makeWeapon(); this.applySettings(); this.resize(); this.bindInput();
     this.combat = new CombatEffects(this.scene, this.models, this.world);
     this.bulletMarks = new BulletMarks(this.scene, impactMeshes);
+    this.objectiveView = new ObjectiveView(this.scene);
     if (this.world.id === 'training') { this.trainingMarker = new THREE.Mesh(new THREE.TorusGeometry(.6, .045, 6, 32), new THREE.MeshBasicMaterial({ color: '#b4f0cf', depthWrite: false })); this.trainingMarker.rotation.x = -Math.PI / 2; this.trainingMarker.visible = false; this.scene.add(this.trainingMarker); }
     this.graphicsReady = false; this.graphicsPromise = null; this.graphicsPreparing = false; this.retiredGraphics = [];
     this.previousFrame = performance.now(); this.fpsTime = this.previousFrame;
@@ -164,6 +170,7 @@ export class FPSGame {
     this.sun.shadow.camera.top = halfD + 8; this.sun.shadow.camera.bottom = -halfD - 8; this.sun.shadow.camera.near = 1; this.sun.shadow.camera.far = Math.max(world.width, world.depth) * 2.5;
     this.sun.shadow.bias = -0.0006; this.sun.shadow.normalBias = 0.035; this.scene.add(this.sun);
     const blueLight = new THREE.DirectionalLight('#a5d5ed', 0.7); blueLight.position.set(12, 14, -18); this.scene.add(blueLight);
+    if (world.terrain) { Object.assign(this, drawTeamArena(this.scene, world, this.material.bind(this))); return; }
     if (world.theme === 'greenhouse' || world.theme === 'market') {
       if (world.theme === 'market') { hemi.intensity = 1.8; this.sun.intensity = 2.4; }
       else { this.scene.background.set('#b6cbd0'); this.scene.fog.color.set('#b6cbd0'); hemi.color.set('#d2eee1'); hemi.groundColor.set('#4c6043'); this.sun.color.set('#ffe4a7'); blueLight.intensity = .45; }
@@ -289,13 +296,14 @@ export class FPSGame {
   }
 
   makeWeapon() {
-    this.weapon = new THREE.Group(); this.camera.add(this.weapon); this.weaponModels = new Map();
+    this.weaponHand = new THREE.Group(); this.weaponHand.name = 'first-person-handedness'; this.camera.add(this.weaponHand);
+    this.weapon = new THREE.Group(); this.weaponHand.add(this.weapon); this.weaponModels = new Map();
     for (const weapon of EQUIPMENT) {
       const model = this.models.create(weapon.id, this.skinId, true, this.outfitId, this.characterId); model.visible = false;
       model.traverse((object) => object.layers.set(VIEWMODEL_LAYER));
       this.weapon.add(model); this.weaponModels.set(weapon.id, model);
     }
-    this.muzzleLight = new THREE.PointLight('#ffad60', 0, 5); this.camera.add(this.muzzleLight); this.muzzleLight.position.set(0.2, -0.15, -0.75);
+    this.muzzleLight = new THREE.PointLight('#ffad60', 0, 5); this.weaponHand.add(this.muzzleLight); this.muzzleLight.position.set(0.2, -0.15, -0.75);
     this.muzzleLight.layers.enable(VIEWMODEL_LAYER); this.scene.traverse((object) => { if (object.isLight) object.layers.enable(VIEWMODEL_LAYER); });
     this.weapon.position.set(0.18, -0.20, -0.54); this.activateWeapon(this.requestedWeaponId);
   }
@@ -361,7 +369,7 @@ export class FPSGame {
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture, transparent: true, opacity: 0.8, depthWrite: false })); label.position.y = 2.15; label.scale.set(2.6, 0.325, 1); group.add(label);
     group.position.set(player.x, player.y, player.z); group.rotation.y = player.yaw; this.scene.add(group);
     const shield = new THREE.Mesh(new THREE.TorusGeometry(0.43, 0.02, 8, 32), new THREE.MeshBasicMaterial({ color: '#82d9ff', transparent: true, opacity: 0.75, depthWrite: false })); shield.rotation.x = -Math.PI / 2; shield.position.y = 0.035; shield.name = 'spawn-shield'; group.add(shield);
-    return { ...operator, label, shield, target: player, lastX: player.x, lastZ: player.z, flashUntil: 0, steps: new FootstepTracker(), poseSchedule: new AvatarPoseSchedule() };
+    return { ...operator, label, shield, target: player, lastX: player.x, lastZ: player.z, flashUntil: 0, steps: new FootstepTracker(), poseSchedule: new AvatarPoseSchedule(), weaponWall: new WeaponWallGuard(operator.weapon) };
   }
 
   bindInput() {
@@ -466,6 +474,9 @@ export class FPSGame {
   }
 
   applySettings() {
+    // Reflect the complete local rig, including reload/melee animation and
+    // flashes. Camera aiming and world/remote weapon models stay unchanged.
+    this.weaponHand.scale.x = normalizeWeaponHand(this.settings.weaponHand) === 'left' ? -1 : 1;
     const quality = qualityPreset(this.settings.quality), shadow = this.sun.shadow;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality.pixelRatio));
     if (!quality.shadowSize || shadow.mapSize.x !== quality.shadowSize) {
@@ -486,6 +497,7 @@ export class FPSGame {
     if (this.disposed || !this.snapshotOrder.accept(data)) return;
     const changedRound = !!this.room && this.room.roundId !== data.room.roundId;
     this.selfId = id; this.room = data.room; this.players = data.players;
+    this.objectiveView.update(data.room);
     this.online = data.online;
     this.tutorial = data.tutorial;
     updateTutorialView(data.tutorial);
@@ -513,7 +525,7 @@ export class FPSGame {
       reconcileMovement(this.predicted, local, this.world);
     }
     this.local = local;
-    const team = this.room.gameType === 'teams' ? local.teamId : null;
+    const team = isTeamGame(this.room.gameType) ? local.teamId : null;
     if (this.uniformTeam !== team) { this.uniformTeam = team; for (const model of this.weaponModels.values()) applyViewmodelUniform(model, team); }
     if (equipmentChanged && !respawned) {
       this.requestedWeaponId = local.weaponId; this.cancelAttack(); this.send(this.input());
@@ -537,6 +549,7 @@ export class FPSGame {
         const previous = avatar.weapon; avatar.group.remove(previous);
         if (this.graphicsPreparing) this.retiredGraphics.push(() => disposeModel(previous)); else disposeModel(previous);
         avatar.weapon = this.models.create(player.weaponId, player.weaponSkinId || player.skinId, false, player.outfitId, player.characterId); avatar.group.add(avatar.weapon);
+        avatar.weaponWall.setWeapon(avatar.weapon);
       }
     }
     for (const [remoteId, avatar] of this.remote) if (!present.has(remoteId)) { this.scene.remove(avatar.group); this.disposeObject(avatar.group, false); this.remote.delete(remoteId); }
@@ -551,7 +564,7 @@ export class FPSGame {
       this.clearInput(); if (this.locked) document.exitPointerLock();
       $('pause-overlay').hidden = true; $('round-overlay').hidden = false; $('respawn-overlay').hidden = true;
       const winner = data.players.find((player) => player.id === data.room.result?.winnerId) || [...data.players].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)[0];
-      $('round-winner').textContent = data.room.gameType === 'teams' ? `${TEAM_NAMES[data.room.result?.winnerTeam] || '무승부'}${data.room.result?.winnerTeam ? ' 승리' : ''} · BLUE ${data.room.teamScores.blue} : ${data.room.teamScores.red} RED` : winner ? `${data.room.result?.winnerName || winner.name} · ${data.room.result?.winnerKills ?? winner.kills} KILLS · 이번 라운드의 최고 기록` : '';
+      $('round-winner').textContent = data.room.gameType === 'defense' ? `${data.room.result?.winnerName} · ${data.room.result?.cleared}/${data.room.waves}공세 · 코어 ${data.room.result?.coreHealth}` : isTeamGame(data.room.gameType) ? `${TEAM_NAMES[data.room.result?.winnerTeam] || '무승부'}${data.room.result?.winnerTeam ? ' 승리' : ''} · BLUE ${data.room.teamScores.blue} : ${data.room.teamScores.red} RED` : winner ? `${data.room.result?.winnerName || winner.name} · ${data.room.result?.winnerKills ?? winner.kills} KILLS · 이번 라운드의 최고 기록` : '';
       $('restart-button').hidden = data.room.hostId !== id; $('wait-host').hidden = data.room.hostId === id;
       $('wait-host').textContent = ['casual', 'ranked'].includes(data.room.mode) ? '온라인 경기는 로비에서 다시 매칭할 수 있습니다.' : '방장이 다음 라운드를 시작할 때까지 기다려 주세요.';
       renderScoreboard($('round-table'), data.players, id);
@@ -569,12 +582,14 @@ export class FPSGame {
     $('hud-ammo-reserve').textContent = weapon.melee ? 'MELEE' : '/ ∞';
     this.hud['hud-ammo'].style.color = lowAmmo ? '#ff876a' : '';
     const training = this.room.mode === 'tutorial';
-    const waiting = ['waiting', 'countdown'].includes(this.room.phase), teams = this.room.gameType === 'teams';
+    const waiting = ['waiting', 'countdown'].includes(this.room.phase), teams = isTeamGame(this.room.gameType), objective = isObjectiveGame(this.room.gameType), defense = this.room.gameType === 'defense';
     this.hud['hud-timer'].textContent = training ? 'TRAINING' : waiting ? 'WAITING' : clockText(this.room.timeLeft); this.hud['hud-timer'].style.fontSize = training || waiting ? '22px' : '';
-    document.querySelector('.match-clock>span').textContent = training ? 'LOCAL LESSONS' : teams ? 'TEAM DEATHMATCH' : 'DEATHMATCH'; document.querySelector('.hud-location small').hidden = training; document.querySelector('.hud-location small').textContent = teams ? TEAM_NAMES[local.teamId] || 'TEAM DEATHMATCH' : 'FREE-FOR-ALL';
-    $('team-score-hud').hidden = !teams; $('team-score-blue').textContent = this.room.teamScores?.blue || 0; $('team-score-red').textContent = this.room.teamScores?.red || 0; $('hud-team-label').textContent = teams ? `${TEAM_NAMES[local.teamId]} · ${this.room.fragLimit}킬 목표` : ''; $('custom-progress-note').hidden = this.room.mode !== 'custom';
-    document.querySelector('.combat-awards').style.top = teams ? '175px' : '';
-    $('hud-frag-limit').textContent = training ? `${this.tutorial?.total || 7} STEPS · NO RATING / LP` : waiting ? `HUMANS ${this.online?.connected || 0}/${this.online?.expected || 0}` : `FIRST TO ${this.room.fragLimit}`;
+    document.querySelector('.match-clock>span').textContent = training ? 'LOCAL LESSONS' : gameTypeName(this.room.gameType); document.querySelector('.hud-location small').hidden = training; document.querySelector('.hud-location small').textContent = defense ? '수비팀 · 협동' : teams ? TEAM_NAMES[local.teamId] : 'FREE-FOR-ALL';
+    $('team-score-hud').hidden = !teams || defense; $('team-score-hud').setAttribute('aria-label', objective ? '팀 거점 점수' : '팀 누적 킬'); $('team-score-blue').textContent = this.room.teamScores?.blue || 0; $('team-score-red').textContent = this.room.teamScores?.red || 0; $('hud-team-label').textContent = teams ? `${TEAM_NAMES[local.teamId]} · ${this.room.gameType === 'hardpoint' ? `${this.room.scoreLimit}점 목표` : `${this.room.fragLimit}킬 목표`}` : ''; $('custom-progress-note').hidden = this.room.mode !== 'custom' && !objective;
+    $('custom-progress-note').textContent = `${objective ? gameTypeName(this.room.gameType) : '사용자 대전'} · 경쟁 점수·전적·숙련도·LP 미반영`;
+    document.querySelector('.combat-awards').style.top = this.room.gameType === 'hardpoint' ? '315px' : objective ? '245px' : teams ? '175px' : '';
+    $('hud-frag-limit').textContent = training ? `${this.tutorial?.total || 7} STEPS · NO RATING / LP` : waiting ? `HUMANS ${this.online?.connected || 0}/${this.online?.expected || 0}` : defense ? `DEFEND ${this.room.waves} WAVES` : this.room.gameType === 'hardpoint' ? `FIRST TO ${this.room.scoreLimit} POINTS` : `FIRST TO ${this.room.fragLimit}`;
+    updateObjectiveHud(this.room);
     this.hud['hud-timer'].style.color = this.room.timeLeft < 30 ? '#ff876a' : '';
     this.hud['hud-kd'].textContent = `${local.kills} K  /  ${local.deaths} D`;
     const reloading = local.hp > 0 && this.room.phase === 'active' && local.reloadUntil > this.serverNow;
@@ -583,7 +598,7 @@ export class FPSGame {
     this.hud['reload-hint'].textContent = reloading ? 'RELOADING...' : local.switchUntil > this.serverNow ? 'EQUIPPING...' : lowAmmo ? '[ R ] 재장전' : `${weapon.caliber} · ${weapon.type}`;
     $('hud-weapon-name').textContent = weapon.name; $('hud-weapon-action').textContent = weapon.action;
     $('hud-skin-name').textContent = getSkin(local.weaponSkinId || local.skinId).name;
-    $('hud-stance').hidden = !local.crouching || local.hp <= 0;
+    $('hud-stance').hidden = !local.crouching && !local.walking || local.hp <= 0; $('hud-stance').textContent = local.walking ? 'SILENT WALK · 발소리 없음' : 'CROUCHED · LOW PROFILE';
     $('hud-map-name').textContent = this.world.name; $('scoreboard-map-name').textContent = this.world.name;
     this.hud['reload-indicator'].querySelector('i').style.animationDuration = `${weapon.reloadSeconds}s`;
     if (reloading && !this.hadReload) {
@@ -775,7 +790,7 @@ export class FPSGame {
       type: 'input', forward: active ? Number(this.keys.has('KeyW')) - Number(this.keys.has('KeyS')) : 0,
       strafe: active ? Number(this.keys.has('KeyD')) - Number(this.keys.has('KeyA')) : 0,
       yaw: this.yaw, pitch: this.pitch, jump: active && (this.keys.has('Space') || performance.now() < this.jumpPressedUntil),
-      sprint: active && (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) && !this.ads,
+      walk: active && (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')),
       crouch,
       fire: active && this.fireHeld, reload: active && performance.now() < this.reloadPressedUntil,
       ads: active && this.ads, weaponId: this.requestedWeaponId, fireSeq: this.fireSeq, spawnCount: this.local?.spawnCount, equipmentSeq: this.local?.equipmentSeq, viewTime: this.viewTime ?? this.serverNow - 70,
@@ -792,12 +807,12 @@ export class FPSGame {
     if (now - this.lastSend >= 1000 / 30 && this.local) { this.send(input); this.lastSend = now; }
     if (this.predicted && this.local) {
       if (this.local.hp > 0 && this.room.phase === 'active') advancePredictedMovement(this.predicted, input, elapsed, this.world, this.serverNow);
-      const sprinting = this.predicted.sprinting;
+      const walking = this.predicted.walking;
       const step = this.localSteps.update(this.predicted, now, { active: this.local.hp > 0 && this.room.phase === 'active' && this.locked });
       if (step) this.audio.step(step.sprint, step.crouched, { foot: step.foot, volume: 1, pan: step.foot ? 0.06 : -0.06, distance: 0, remote: false, playerId: this.selfId });
       const moving = Math.abs(input.forward) + Math.abs(input.strafe) > 0;
       const ads = this.ads && !getWeapon(this.local.weaponId).melee && this.locked && !this.hadReload && this.local.switchUntil <= this.serverNow && this.requestedWeaponId === this.local.weaponId && this.local.hp > 0;
-      const bob = !ads && moving && this.predicted.grounded ? Math.sin(now * (sprinting ? 0.017 : 0.012)) : 0;
+      const bob = !ads && moving && this.predicted.grounded ? Math.sin(now * (walking ? 0.008 : 0.012)) : 0;
       // Recoil recovers toward mouse aim; the composed pitch is also sent to
       // the server, so recovery never creates a camera-only aiming offset.
       this.camera.position.set(this.predicted.x, this.predicted.y + playerPose(this.predicted).eyeHeight, this.predicted.z);
@@ -807,13 +822,13 @@ export class FPSGame {
       const weapon = getWeapon(this.local.weaponId), switching = this.local.switchUntil > this.serverNow || this.requestedWeaponId !== this.local.weaponId;
       const scoped = ads && weapon.type === 'SNIPER'; $('scope-overlay').hidden = !scoped;
       if (scoped) document.querySelector('.scope-lens>span').textContent = `${weapon.name} / PRECISION OPTICS`;
-      const desiredFov = ads ? this.settings.fov * weapon.zoom : sprinting && moving ? this.settings.fov + 5 : this.settings.fov;
+      const desiredFov = ads ? this.settings.fov * weapon.zoom : this.settings.fov;
       this.camera.fov = lerp(this.camera.fov, desiredFov, Math.min(1, dt * 12)); this.camera.updateProjectionMatrix();
       const reloadRemaining = this.local.reloadUntil - this.serverNow;
       const reloadTilt = reloadRemaining > 0 ? Math.sin(clamp(reloadRemaining / (weapon.reloadSeconds * 1000), 0, 1) * Math.PI) : 0;
       this.switchAnimation = lerp(this.switchAnimation, 0, dt * 10);
       this.weapon.position.x = lerp(this.weapon.position.x, (ads ? 0 : 0.18) + bob * 0.005, dt * 14);
-      this.weapon.position.y = lerp(this.weapon.position.y, (ads ? -this.activeModel.userData.aimHeight : -0.20) - reloadTilt * 0.18 - this.switchAnimation * 0.25 + bob * 0.007 - (sprinting && moving ? 0.08 : 0), dt * 14);
+      this.weapon.position.y = lerp(this.weapon.position.y, (ads ? -this.activeModel.userData.aimHeight : -0.20) - reloadTilt * 0.18 - this.switchAnimation * 0.25 + bob * 0.007, dt * 14);
       this.weapon.position.z = lerp(this.weapon.position.z, (ads ? -0.35 : -0.54) + this.recoil * 0.035, dt * 17);
       this.weapon.rotation.z = -reloadTilt * 0.65 + bob * 0.008;
       this.weapon.rotation.x = -reloadTilt * 0.25;
@@ -845,7 +860,7 @@ export class FPSGame {
       // Only the four arms spread; both hip-fire and ADS centers stay fixed.
       this.hud['crosshair'].style.scale = '1';
       this.hud['crosshair'].style.setProperty('--crosshair-gap', `${Math.min(26, spread * 170 + this.recoil * 2.5 + (weapon.type === 'SHOTGUN' ? 5 : 0))}px`);
-      this.hud['crosshair'].dataset.accuracy = !this.predicted.grounded ? 'airborne' : sprinting ? 'sprinting' : this.predicted.moveSpeed > 0.2 ? 'moving' : 'steady';
+      this.hud['crosshair'].dataset.accuracy = !this.predicted.grounded ? 'airborne' : walking ? 'walking' : this.predicted.moveSpeed > 0.2 ? 'moving' : 'steady';
       this.hud['protection-hint'].hidden = this.local.hp <= 0 || this.local.protectedUntil < this.serverNow;
       if (this.local.hp <= 0) this.hud['respawn-count'].textContent = Math.max(1, Math.ceil((this.local.respawnAt - this.serverNow) / 1000));
     }
@@ -868,7 +883,7 @@ export class FPSGame {
       // Keep interpolation/rewind time current through death, but skip hidden IK
       // and reset footsteps so a respawn cannot play queued movement sounds.
       if (target.hp <= 0) { avatar.steps.reset(); avatar.poseSchedule.reset(); avatar.lastX = position.x; avatar.lastZ = position.z; continue; }
-      const source = { x: position.x, y: position.y, z: position.z, hp: target.hp, grounded: target.grounded, moveSpeed: target.moveSpeed, stepDistance: target.stepDistance, spawnCount: target.spawnCount, crouching: target.crouching, sprinting: target.sprinting };
+      const source = { x: position.x, y: position.y, z: position.z, hp: target.hp, grounded: target.grounded, moveSpeed: target.moveSpeed, stepDistance: target.stepDistance, spawnCount: target.spawnCount, crouching: target.crouching, walking: target.walking };
       const step = avatar.steps.update(source, now, { active: this.room?.phase === 'active', teleport });
       if (step && this.predicted) {
         let mix = footstepMix(this.predicted, source, this.yaw);
@@ -885,6 +900,7 @@ export class FPSGame {
       if (avatar.poseSchedule.update(now, this.poseFrustum.intersectsSphere(this.poseSphere), position.distanceToSquared(this.camera.position), avatar.crouchAmount, stride, avatar.weapon.rotation.x, avatar.weapon)) {
         poseOperator(avatar, avatar.crouchAmount, stride); poseUpdates++;
       }
+      avatar.weaponWall.update(this.world, position, avatar.group.rotation.y);
       avatar.lastX = position.x; avatar.lastZ = position.z;
     }
     for (const item of this.groundItems.values()) item.group.position.y = lerp(item.group.position.y, item.target.y, Math.min(1, dt * 20));
@@ -894,7 +910,7 @@ export class FPSGame {
       const origin = { x: this.predicted.x, y: this.predicted.y + playerPose(this.predicted).eyeHeight, z: this.predicted.z };
       const visible = this.players.filter((p) => p.id !== this.selfId && p.hp > 0 && (sameTeam(p, this.local) || Math.hypot(p.x - origin.x, p.z - origin.z) < 25 && hasLineOfSight(origin, { x: p.x, y: p.y + playerPose(p).eyeHeight, z: p.z }, this.world)));
       for (const [id, avatar] of this.remote) avatar.label.visible = visible.some((p) => p.id === id);
-      drawTacticalMap(this.minimap, { world: this.world, gameType: this.room.gameType, players: visible, self: { ...this.predicted, teamId: this.local.teamId, id: this.selfId, hp: this.local.hp, yaw: this.yaw } });
+      drawTacticalMap(this.minimap, { world: this.world, gameType: this.room.gameType, objective: this.room.objective, players: visible, self: { ...this.predicted, teamId: this.local.teamId, id: this.selfId, hp: this.local.hp, yaw: this.yaw } });
       this.lastMap = now;
     }
     if (now > this.hitmarkerUntil) { this.hud.hitmarker.classList.remove('visible'); this.hitmarkerAnimation?.cancel(); this.hitmarkerAnimation = null; }
@@ -947,6 +963,7 @@ export class FPSGame {
     else { this.releaseGraphics(); this.disposalPromise = Promise.resolve(); }
     $('scope-overlay').hidden = true; $('ads-reticle').hidden = true;
     $('team-score-hud').hidden = true; $('custom-progress-note').hidden = true;
+    $('objective-hud').hidden = true;
     this.clearDamageDirections();
     this.clearKillFeedback();
     updateTutorialView(null);

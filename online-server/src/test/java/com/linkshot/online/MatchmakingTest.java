@@ -32,7 +32,7 @@ class MatchmakingTest {
     @Autowired CustomAccessService custom;
     @Autowired JdbcTemplate db;
     @BeforeEach void isolateQueues() { db.update("DELETE FROM match_queue"); db.update("DELETE FROM engines"); engines.heartbeat(new EngineRegistry.Heartbeat("test-queue-engine", "ws://127.0.0.1:8090/play", 24, 0)); }
-    private AccountService.Profile account() { return accounts.register("q_" + UUID.randomUUID().toString().replace("-", "").substring(0, 18), "test-only-long-passphrase", "TESTER"); }
+    private AccountService.Profile account() { return accounts.register("q_" + UUID.randomUUID().toString().replace("-", "").substring(0, 18), "test-only-long-passphrase"); }
     private void age(UUID id, int seconds) { db.update("UPDATE match_queue SET queued_at = CURRENT_TIMESTAMP - (? * INTERVAL '1 second') WHERE account_id = ?", seconds, id); }
     private void settle(MatchService.Plan plan, List<MatchService.Performance> players) { matches.claim(plan.id(), "test-queue-engine"); assertTrue(matches.complete(plan.id(), new MatchService.Completion("test-queue-engine", plan.id().toString(), players))); }
 

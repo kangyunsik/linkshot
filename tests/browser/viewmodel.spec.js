@@ -91,3 +91,45 @@ test('peers leaving or a local exit during shader preparation cannot dispose in-
   });
   expect(result.beforeExit).toBe(0); expect(result.beforeRelease).toBe(0); expect(result.materialDisposals).toBe(result.expected); expect(result.rendererDisposals).toBe(1); expect(result.pending).toBe(0); expect(result.released).toBe(true); expect(errors).toEqual([]);
 });
+
+test('left/right weapon display is saved in settings and restored after refresh', async ({ page }) => {
+  await page.goto('/'); await page.getByRole('button', { name: '설정', exact: true }).first().click();
+  await expect(page.getByLabel('총기 표시 위치')).toHaveValue('right'); await page.getByLabel('총기 표시 위치').selectOption('left');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('sector07-settings')).weaponHand)).toBe('left');
+  await page.reload(); await page.getByRole('button', { name: '설정', exact: true }).first().click(); await expect(page.getByLabel('총기 표시 위치')).toHaveValue('left');
+  await page.getByLabel('총기 표시 위치').selectOption('right'); await page.reload(); await page.getByRole('button', { name: '설정', exact: true }).first().click(); await expect(page.getByLabel('총기 표시 위치')).toHaveValue('right');
+});
+
+test('left hand mirrors every local gun, hands, reload pose and flash without changing ADS aim or the world', async ({ page }) => {
+  const errors = []; page.on('pageerror', (error) => errors.push(error.message)); await page.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: '' })); await page.goto('/');
+  try {
+    const result = await page.evaluate(async () => {
+      const [THREE, { FPSGame }, { Room }, { EQUIPMENT }] = await Promise.all([import('/vendor/three.module.js'), import('/game.js'), import('/shared/simulation.js'), import('/shared/catalog.js')]);
+      const room = new Room('MIRROR', { bots: 0 }), player = room.addPlayer('viewer', 'VIEWER'), peer = room.addPlayer('peer', 'PEER'); Object.assign(peer, { x: 4, y: 0, z: -10 });
+      document.getElementById('lobby').hidden = true; document.getElementById('game-shell').hidden = false;
+      const settings = { sensitivity: 1, fov: 82, quality: 'low', weaponHand: 'right' }, game = new FPSGame({ canvas: document.getElementById('game-canvas'), minimap: document.getElementById('minimap'), mapId: 'foundry', settings, audio: { step() {}, stopReload() {} }, send() {}, onMenu() {}, onFatal(message) { throw new Error(message); } });
+      window.__mirrorGame = game; game.applySnapshot(room.snapshot(), player.id); await game.prepareGraphics(); cancelAnimationFrame(game.frameId);
+      game.camera.position.set(0, 1.62, 0); game.camera.rotation.set(0, 0, 0); game.scene.updateMatrixWorld(true);
+      const worldMatrix = game.remote.get(peer.id).group.matrixWorld.clone(), cameraMatrix = game.camera.matrixWorld.clone(), checks = [];
+      const relative = (object) => object.getWorldPosition(new THREE.Vector3()).applyMatrix4(game.camera.matrixWorldInverse);
+      for (const weapon of EQUIPMENT) {
+        game.activateWeapon(weapon.id); game.weapon.position.set(.18, -.2, -.54); game.weapon.rotation.set(.12, 0, -.4);
+        settings.weaponHand = 'right'; game.applySettings(); game.scene.updateMatrixWorld(true);
+        const objects = [game.weapon, game.activeModel.getObjectByName('left-hand'), game.activeModel.getObjectByName('right-hand'), game.muzzleFlash, game.muzzleLight], right = objects.map(relative);
+        settings.weaponHand = 'left'; game.applySettings(); game.scene.updateMatrixWorld(true); const left = objects.map(relative);
+        checks.push(...right.map((point, i) => new THREE.Vector3(-point.x, point.y, point.z).distanceTo(left[i])));
+        game.weapon.position.set(0, -game.activeModel.userData.aimHeight, -.35); game.weapon.rotation.set(0, 0, 0); game.scene.updateMatrixWorld(true);
+        const aim = game.activeModel.localToWorld(new THREE.Vector3(0, game.activeModel.userData.aimHeight, 0)).project(game.camera); checks.push(Math.abs(aim.x), Math.abs(aim.y));
+      }
+      game.activateWeapon('rifle'); game.weapon.position.set(.18, -.2, -.54); game.weapon.rotation.set(0, 0, 0);
+      const target = new THREE.WebGLRenderTarget(320, 240); game.renderer.setRenderTarget(target);
+      const pixels = () => { const data = new Uint8Array(320 * 240 * 4); game.renderer.setRenderTarget(target); game.renderFrame(); game.renderer.readRenderTargetPixels(target, 0, 0, 320, 240, data); return data; };
+      game.weapon.visible = false; const worldLeft = pixels(); settings.weaponHand = 'right'; game.applySettings(); const worldRight = pixels(); game.weapon.visible = true; const right = pixels(); settings.weaponHand = 'left'; game.applySettings(); const left = pixels();
+      const visiblePixels = (image, background) => { let count = 0; for (let i = 0; i < image.length; i += 4) if (Math.abs(image[i] - background[i]) + Math.abs(image[i + 1] - background[i + 1]) + Math.abs(image[i + 2] - background[i + 2]) > 12) count++; return count; };
+      game.renderer.setRenderTarget(null); target.dispose(); game.scene.updateMatrixWorld(true); game.renderFrame();
+      return { maximumMirrorError: Math.max(...checks), worldPixelsUnchanged: worldLeft.every((value, i) => value === worldRight[i]), cameraUnchanged: cameraMatrix.equals(game.camera.matrixWorld), peerUnchanged: worldMatrix.equals(game.remote.get(peer.id).group.matrixWorld), rightPixels: visiblePixels(right, worldRight), leftPixels: visiblePixels(left, worldLeft) };
+    });
+    expect(result.maximumMirrorError).toBeLessThan(1e-8); expect(result.worldPixelsUnchanged, JSON.stringify(result)).toBe(true); expect(result.cameraUnchanged && result.peerUnchanged).toBe(true); expect(result.rightPixels).toBeGreaterThan(1500); expect(result.leftPixels).toBeGreaterThan(1500); expect(errors).toEqual([]);
+    await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/first-person-left-hand.png' });
+  } finally { await page.evaluate(async () => { await window.__mirrorGame?.dispose(); delete window.__mirrorGame; }); }
+});

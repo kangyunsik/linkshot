@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAPS, WORLD, getMap, bounds, aimDirection, RULES } from '../shared/world.js';
+import { MATCHMAKING_MAPS as MAPS, WORLD, getMap, bounds, aimDirection, RULES } from '../shared/world.js';
 import { WEAPONS, SKINS, getWeapon, getSkin, freshMagazines, shotAngles, damageAtDistance } from '../shared/catalog.js';
 import { Room, traceShot } from '../shared/simulation.js';
 import { movePlayer, EMPTY_INPUT, sanitizeInput } from '../shared/movement.js';

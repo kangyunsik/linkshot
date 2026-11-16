@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { WEAPONS, FREE_WEAPON_IDS } from '../shared/catalog.js';
-import { MAPS } from '../shared/world.js';
+import { MATCHMAKING_MAPS as MAPS } from '../shared/world.js';
 import { POINT_RULES } from '../shared/progression.js';
 
 test('Spring server catalogue and rewards exactly match the shared game rules without adding knife ownership', async () => {

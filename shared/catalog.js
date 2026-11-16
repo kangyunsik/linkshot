@@ -81,8 +81,8 @@ export function shotSpread(weapon, ads = false, state = {}) {
   const base = ads ? weapon.adsSpread : weapon.spread;
   const moving = (state.moveSpeed || 0) > 0.2;
   const movement = weapon.type === 'SNIPER'
-    ? state.grounded === false ? 0.18 : state.sprinting ? 0.12 : moving ? ads ? 0.045 : 0.065 : 0
-    : state.grounded === false ? 0.105 : state.sprinting ? 0.075 : moving ? ads ? 0.014 : 0.024 : 0;
+    ? state.grounded === false ? 0.18 : moving ? ads ? 0.045 : 0.065 : 0
+    : state.grounded === false ? 0.105 : moving ? ads ? 0.014 : 0.024 : 0;
   const bloom = Math.min(1, Math.max(0, state.shotHeat || 0)) * (weapon.type === 'ASSAULT' ? 0.023 : 0.012);
   return base + movement + bloom;
 }

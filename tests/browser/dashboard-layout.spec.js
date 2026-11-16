@@ -6,6 +6,7 @@ for (const edition of ['LAN', 'SOLO']) test(`${edition} dashboard fits every mod
   test.setTimeout(90_000); const errors = []; page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(edition === 'LAN' ? '/' : `http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}`);
   await expect(page.getByText(edition === 'LAN' ? 'LAN SERVER ONLINE' : 'SOLO READY · LOCAL SIMULATION')).toBeVisible();
+  await expect(page.locator('.page-heading h1, .page-heading p')).toHaveCount(0);
   for (const [width,height] of sizes) {
     await page.setViewportSize({ width,height });
     for (const mode of ['튜토리얼','혼자 연습','LAN 대전','일반','랭크','사용자 대전']) {

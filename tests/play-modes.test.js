@@ -11,4 +11,5 @@ test('six modes separate browser-local lessons/practice, LAN, rated matchmaking 
 test('tutorial and online snapshots cannot write local kill, mastery, point or round-award ledgers', () => {
   for (const mode of ['tutorial', 'casual', 'ranked', 'custom', undefined, 'unknown']) assert.equal(recordsLocalProgress({ mode }), false);
   for (const mode of ['lan', 'practice']) assert.equal(recordsLocalProgress({ mode }), true);
+  for (const mode of ['lan', 'practice']) for (const gameType of ['hardpoint', 'defense']) assert.equal(recordsLocalProgress({ mode, gameType }), false);
 });

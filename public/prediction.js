@@ -1,5 +1,6 @@
 import { RULES, WORLD, bounds, playerPose } from '../shared/world.js';
 import { supportHeight, movePlayer, advanceTime } from '../shared/movement.js';
+import { topHeight, horizontalOverlap } from '../shared/terrain.js';
 
 export function advancePredictedMovement(player, input, elapsed, world = WORLD, now = Date.now()) {
   // The old RAF path discarded everything above 33ms. At 15 FPS the client
@@ -31,7 +32,7 @@ export function reconcileMovement(predicted, local, world = WORLD) {
   const height = playerPose(next).height;
   const blocked = world.obstacles.some((box) => {
     const b = bounds(box, RULES.playerRadius - 0.00001);
-    return next.x > b.minX && next.x < b.maxX && next.z > b.minZ && next.z < b.maxZ && next.y < b.maxY - 0.00001 && next.y + height > b.minY + 0.00001;
+    return horizontalOverlap(next, b) && next.y < topHeight(b, next) - .00001 && next.y + height > b.minY + .00001;
   });
   if (!blocked) for (const key of ['x', 'y', 'z', 'vy', 'grounded']) predicted[key] = next[key];
 }

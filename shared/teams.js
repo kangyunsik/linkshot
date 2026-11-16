@@ -6,11 +6,12 @@ export const TEAM_UNIFORMS = Object.freeze({
   red: Object.freeze({ suit: '#a12e35', armor: '#c9474d', dark: '#3b2026', visor: '#ffd0ce' }),
 });
 export const sameTeam = (a, b) => TEAM_IDS.includes(a?.teamId) && a.teamId === b?.teamId;
-export const normalizeGameType = (value) => value === 'teams' ? 'teams' : 'ffa';
+export { normalizeGameType, isTeamGame } from './game-types.js';
 
 const zones = new WeakMap();
 export function teamSpawnZones(world) {
   if (zones.has(world)) return zones.get(world);
+  if (world.spawns.some((point) => point.teamId)) { const result = { axis: 'x', blue: world.spawns.filter((point) => point.teamId === 'blue'), red: world.spawns.filter((point) => point.teamId === 'red') }; zones.set(world, result); return result; }
   const axis = world.width >= world.depth ? 'x' : 'z', extent = axis === 'x' ? world.width : world.depth;
   const sorted = [...world.spawns].sort((a, b) => a[axis] - b[axis]);
   const blue = sorted.filter((point) => point[axis] <= -extent * .2), red = sorted.filter((point) => point[axis] >= extent * .2);
