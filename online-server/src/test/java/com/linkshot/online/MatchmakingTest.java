@@ -32,7 +32,7 @@ class MatchmakingTest {
     @Autowired CustomAccessService custom;
     @Autowired RankBadgeService badges;
     @Autowired JdbcTemplate db;
-    @BeforeEach void isolateQueues() { db.update("DELETE FROM match_queue"); db.update("DELETE FROM engines"); engines.heartbeat(new EngineRegistry.Heartbeat("test-queue-engine", "ws://127.0.0.1:8090/play", 24, 0)); }
+    @BeforeEach void isolateQueues() { db.update("DELETE FROM match_queue"); db.update("UPDATE profiles SET active_match_id = NULL"); db.update("UPDATE online_matches SET status = 'CANCELLED' WHERE status IN ('PENDING', 'CLAIMED')"); db.update("DELETE FROM engines"); engines.heartbeat(new EngineRegistry.Heartbeat("test-queue-engine", "ws://127.0.0.1:8090/play", 24, 0)); }
     private AccountService.Profile account() { return accounts.register("q_" + UUID.randomUUID().toString().replace("-", "").substring(0, 18), "test-only-long-passphrase"); }
     private void age(UUID id, int seconds) { db.update("UPDATE match_queue SET queued_at = CURRENT_TIMESTAMP - (? * INTERVAL '1 second') WHERE account_id = ?", seconds, id); }
     private void settle(MatchService.Plan plan, List<MatchService.Performance> players) {
@@ -58,7 +58,7 @@ class MatchmakingTest {
         var people = List.of(account(), account(), account(), account(), account(), account()); for (var person : people.subList(0, 5)) queue.join(person.id(), MatchService.Mode.RANKED);
         queue.matchmake(); assertNull(matches.active(people.getFirst().id()));
         queue.join(people.get(5).id(), MatchService.Mode.RANKED); queue.matchmake(); var plan = matches.active(people.getFirst().id()); assertEquals(0, plan.bots()); assertEquals(6, plan.players().size());
-        assertEquals(3, plan.teams().values().stream().filter("blue"::equals).count()); assertEquals(3, plan.teams().values().stream().filter("red"::equals).count());
+        assertEquals(3, plan.teams().values().stream().filter("blue"::equals).count()); assertEquals(3, plan.teams().values().stream().filter("red"::equals).count()); assertEquals(40, plan.fragLimit());
     }
     @Test void separateQueuesAndGraduallyWidenedServerRatingsCannotBeMixed() {
         var a = account(); var b = account(); var c = account(); var d = account(); var e = account(); var f = account();
@@ -214,8 +214,86 @@ class MatchmakingTest {
     @Test void rankedMapsAreSelectedByTheServerFromTheFullRandomPoolNotTheLobbySelection() {
         var a = account(); var seen = new java.util.HashSet<String>();
         for (int i = 0; i < 16; i++) {
-            queue.join(a.id(), MatchService.Mode.RANKED); age(a.id(), 31); queue.matchmake(); var plan = matches.active(a.id()); assertTrue(catalog.maps().contains(plan.mapId())); assertNotEquals("training", plan.mapId()); seen.add(plan.mapId()); matches.claim(plan.id(), "test-queue-engine"); matches.cancel(plan.id(), "test-queue-engine");
+            queue.join(a.id(), MatchService.Mode.RANKED); age(a.id(), 31); queue.matchmake(); var plan = matches.active(a.id()); assertTrue(catalog.maps().contains(plan.mapId())); assertNotEquals("training", plan.mapId()); seen.add(plan.mapId()); queue.respond(a.id(), plan.id(), true); matches.claim(plan.id(), "test-queue-engine"); matches.cancel(plan.id(), "test-queue-engine");
         }
         assertTrue(seen.size() > 1, "Ranked matchmaking must not stick to a fixed map");
+    }
+    @Test void offersCannotBeClaimedOrTicketedBeforeExplicitAcceptanceAndRejectsNeverProgress() {
+        var a = account(); var b = account(); var outsider = account();
+        var offer = matches.offer(MatchService.Mode.CASUAL, List.of(a.id(), b.id()), 2, "foundry", 20, 60);
+        assertEquals("OFFERED", queue.status(a.id()).state()); assertNotNull(queue.status(a.id()).acceptanceDeadline());
+        assertFalse(matches.pending().contains(offer.id()));
+        assertThrows(IllegalArgumentException.class, () -> matches.claim(offer.id(), "test-queue-engine"));
+        assertThrows(IllegalArgumentException.class, () -> matches.ticket(a.id()));
+        assertThrows(IllegalArgumentException.class, () -> queue.respond(outsider.id(), offer.id(), true));
+        assertEquals("ACCEPTED", queue.respond(a.id(), offer.id(), true).state());
+        assertEquals("IDLE", queue.respond(b.id(), offer.id(), false).state());
+        assertEquals("ASSIGNED", queue.status(a.id()).state());
+        assertTrue(matches.pending().contains(offer.id())); assertEquals(3, matches.plan(offer.id()).bots());
+        matches.claim(offer.id(), "test-queue-engine"); assertNotNull(matches.ticket(a.id()));
+        assertThrows(IllegalArgumentException.class, () -> matches.ticket(b.id()));
+        assertEquals(0, accounts.profile(b.id()).points()); assertEquals(0, accounts.profile(b.id()).roundsPlayed()); assertTrue(matches.history(b.id()).isEmpty());
+        queue.respond(b.id(), offer.id(), true); assertNull(matches.active(b.id())); assertEquals(3, matches.plan(offer.id()).bots());
+        assertTrue(matches.complete(offer.id(), new MatchService.Completion("test-queue-engine", offer.id().toString(), List.of(
+            new MatchService.Performance(a.id().toString(), false, 0, 0, Map.of()),
+            new MatchService.Performance("bot-declined-01", true, 0, 0, Map.of()),
+            new MatchService.Performance("bot-declined-02", true, 0, 0, Map.of()),
+            new MatchService.Performance("bot-declined-03", true, 0, 0, Map.of())))));
+        assertTrue(matches.history(b.id()).isEmpty()); assertEquals(0, accounts.profile(b.id()).points()); assertEquals(0, accounts.profile(b.id()).competitive().get("ffa").placementsPlayed());
+    }
+    @Test void expiredSlotsBecomeAiEvenWhenSearchFillingIsDisabledAndAcceptedTeamsArePreserved() {
+        var people = List.of(account(), account(), account(), account(), account(), account());
+        var strict = new MatchService(db, accounts, catalog, properties, ratings, engines, false);
+        var offer = strict.offer(MatchService.Mode.RANKED, people.stream().map(AccountService.Profile::id).toList(), 0, "foundry", 40, 60);
+        var accepted = people.get(0); queue.respond(accepted.id(), offer.id(), true);
+        db.update("UPDATE online_matches SET acceptance_deadline = CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE id = ?", offer.id());
+        queue.respond(people.get(1).id(), offer.id(), true); // A late click cannot claim an expired slot.
+        queue.matchmake(); var plan = matches.plan(offer.id());
+        assertEquals(1, plan.players().size()); assertEquals(5, plan.bots()); assertTrue(plan.rankedAiEnabled()); assertEquals(40, plan.fragLimit());
+        assertEquals(offer.teams().get(accepted.id().toString()), plan.teams().get(accepted.id().toString()));
+        for (var p : people.subList(1, 6)) { assertNull(matches.active(p.id())); assertEquals(0, accounts.profile(p.id()).placementsPlayed()); assertEquals(0, accounts.profile(p.id()).points()); }
+        assertEquals(offer.id(), matches.claim(offer.id(), "test-queue-engine").id());
+    }
+    @Test void nobodyAcceptingCancelsInsteadOfRunningABotOnlyRankedMatch() {
+        var a = account(); queue.join(a.id(), MatchService.Mode.RANKED); age(a.id(), 31); queue.matchmake();
+        var id = matches.active(a.id()).id();
+        db.update("UPDATE online_matches SET acceptance_deadline = CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE id = ?", id);
+        queue.matchmake();
+        assertEquals("IDLE", queue.status(a.id()).state()); assertEquals("CANCELLED", matches.plan(id).status()); assertFalse(matches.pending().contains(id));
+        assertEquals(0, accounts.profile(a.id()).points()); assertTrue(matches.history(a.id()).isEmpty());
+    }
+    @Test void disablingNewSearchesStillClosesExistingExpiredOffers() {
+        var a = account(); var offer = matches.offer(MatchService.Mode.CASUAL, List.of(a.id()), 3, "foundry", 20, 60);
+        db.update("UPDATE online_matches SET acceptance_deadline = CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE id = ?", offer.id());
+        var disabled = new MatchmakingService(db, matches, engines, catalog, properties, false, 30, 20, 300);
+        disabled.matchmake(); assertNull(matches.active(a.id())); assertEquals("CANCELLED", matches.plan(offer.id()).status()); assertEquals(0, accounts.profile(a.id()).points());
+    }
+    @Test void concurrentFinalRepliesAndDuplicateAcceptsResolveOneRosterOnly() throws Exception {
+        var a = account(); var b = account(); var offer = matches.offer(MatchService.Mode.CASUAL, List.of(a.id(), b.id()), 2, "foundry", 20, 60);
+        try (var threads = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var first = threads.submit(() -> queue.respond(a.id(), offer.id(), true));
+            var second = threads.submit(() -> queue.respond(b.id(), offer.id(), false));
+            first.get(); second.get();
+            var duplicates = java.util.stream.IntStream.range(0, 4).mapToObj(n -> threads.submit(() -> queue.respond(a.id(), offer.id(), true))).toList();
+            for (var reply : duplicates) reply.get();
+        }
+        assertEquals(1, matches.plan(offer.id()).players().size()); assertEquals(3, matches.plan(offer.id()).bots());
+        assertEquals("ASSIGNED", queue.status(a.id()).state()); assertNull(matches.active(b.id()));
+    }
+    @Test void accountPurchasesDebitCanonicalPricesOnceAndNeverChangeRatingOrImportDeviceOwnership() throws Exception {
+        var a = account(); db.update("UPDATE profiles SET points = 5000 WHERE account_id = ?", a.id());
+        try (var threads = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var one = threads.submit(() -> accounts.purchaseWeapon(a.username(), "m82"));
+            var two = threads.submit(() -> accounts.purchaseWeapon(a.username(), "m82"));
+            one.get(); two.get();
+        }
+        var after = accounts.profile(a.id()); assertEquals(3000, after.points()); assertEquals(1, after.ownedWeapons().stream().filter("m82"::equals).count());
+        assertThrows(IllegalArgumentException.class, () -> accounts.purchaseWeapon(a.username(), "knife"));
+        assertThrows(IllegalArgumentException.class, () -> accounts.selectOutfit(a.username(), "orbital", false));
+        after = accounts.selectOutfit(a.username(), "orbital", true); assertEquals(2100, after.points()); assertTrue(after.ownedOutfits().contains("orbital")); assertEquals("orbital", after.outfitId());
+        assertEquals(2100, accounts.selectOutfit(a.username(), "orbital", true).points());
+        assertEquals("female", accounts.selectCharacter(a.username(), "female").characterId());
+        assertEquals(1000, after.casualRating()); assertEquals(0, after.placementsPlayed());
+        var poor = account(); assertThrows(IllegalArgumentException.class, () -> accounts.purchaseWeapon(poor.username(), "m82")); assertFalse(accounts.profile(poor.id()).ownedWeapons().contains("m82")); assertEquals(0, accounts.profile(poor.id()).points());
     }
 }

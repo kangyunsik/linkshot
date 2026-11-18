@@ -64,6 +64,35 @@ class OnlineServerTest {
     private String base() { return "http://127.0.0.1:" + port; }
     private String username() { return "u_" + UUID.randomUUID().toString().replace("-", "").substring(0, 18); }
     private AccountService.Profile account() { return accounts.register(username(), "test-only-long-passphrase"); }
+    @Test void acceptanceRequiresOwnerSessionAndCsrfAndCannotImportAnAccountOrBotFlag() throws Exception {
+        var owner = new Browser(); String name = username(); owner.register(name); owner.login(name); owner.csrf();
+        var stranger = new Browser(); String other = username(); stranger.register(other); stranger.login(other); stranger.csrf();
+        var id = accounts.credentials(name).id();
+        var offer = matches.offer(MatchService.Mode.CASUAL, List.of(id), 3, "foundry", 20, 60);
+        var request = Map.of("matchId", offer.id(), "accept", true);
+        var anonymous = new Browser(); anonymous.csrf();
+        assertEquals(401, anonymous.request("POST", "/api/queue/respond", request, true).statusCode());
+        assertEquals(403, owner.request("POST", "/api/queue/respond", request, false).statusCode());
+        assertEquals(400, stranger.request("POST", "/api/queue/respond", request, true).statusCode());
+        assertEquals(400, owner.request("POST", "/api/queue/respond", Map.of("matchId", offer.id(), "accept", true, "rankedAiEnabled", true), true).statusCode());
+        assertEquals("OFFERED", json(owner.request("GET", "/api/queue", null, false)).get("state").asString());
+        var response = owner.request("POST", "/api/queue/respond", request, true);
+        assertEquals(200, response.statusCode()); assertEquals("ASSIGNED", json(response).get("state").asString());
+        assertEquals(200, owner.request("POST", "/api/queue/respond", request, true).statusCode());
+        matches.claim(offer.id(), "test-acceptance-engine"); matches.cancel(offer.id(), "test-acceptance-engine");
+    }
+    @Test void accountShopRequiresCsrfUsesServerPricesAndNeverDeductsTwice() throws Exception {
+        var client = new Browser(); String name = username(); client.register(name); client.login(name); client.csrf();
+        var id = accounts.credentials(name).id(); db.update("UPDATE profiles SET points = 5000 WHERE account_id = ?", id);
+        assertEquals(401, client.request("GET", "/internal/accounts/" + id + "/equipment", null, false).statusCode());
+        assertEquals(403, client.request("POST", "/api/account/weapons/m82/purchase", null, false).statusCode());
+        assertEquals(200, client.request("POST", "/api/account/weapons/m82/purchase", Map.of("price", 0, "points", 1000000), true).statusCode());
+        assertEquals(3000, accounts.profile(id).points()); assertTrue(accounts.profile(id).ownedWeapons().contains("m82"));
+        assertEquals(200, client.request("POST", "/api/account/weapons/m82/purchase", null, true).statusCode()); assertEquals(3000, accounts.profile(id).points());
+        assertEquals(400, client.request("POST", "/api/account/weapons/knife/purchase", null, true).statusCode());
+        assertEquals(200, client.request("POST", "/api/account/outfit", Map.of("outfitId", "runner", "purchase", true), true).statusCode()); assertEquals(2750, accounts.profile(id).points());
+        assertEquals(400, client.request("POST", "/api/account/character", Map.of("characterId", "admin", "points", 123), true).statusCode());
+    }
     private JsonNode json(HttpResponse<String> response) { return JSON.readTree(response.body()); }
     private final class Browser {
         final CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ALL);

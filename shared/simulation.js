@@ -8,6 +8,7 @@ import { sameTeam, normalizeGameType, teamSpawnZones, balancedTeam, TEAM_NAMES }
 import { findPath, canTraverse, followBotPath, steerBot, nearBotCover } from './bot-navigation.js';
 import { isTeamGame, isObjectiveGame, assertMapGameType } from './game-types.js';
 import { ObjectiveRound, objectiveOptions, OBJECTIVE_RULES } from './objectives.js';
+import { alertBotsToShot, botRouteSeed, botLongRange } from './bot-awareness.js';
 export { findPath } from './bot-navigation.js';
 
 const BOT_NAMES = ['GHOST', 'RIVET', 'ECHO', 'CINDER', 'STATIC', 'ONYX', 'NOVA'];
@@ -320,6 +321,8 @@ export class Room {
   botInput(bot, now, dt) {
     const behavior = bot.botDifficulty ? getBotDifficulty(bot.botDifficulty).behavior : this.botBehavior;
     const brain = bot.botBrain ||= freshBotBrain();
+    brain.routeSeed ??= botRouteSeed(bot.id, bot.spawnCount);
+    const alert = brain.alert && now >= brain.alert.reactAt && now < brain.alert.until ? brain.alert : null;
     while (bot.spawnExitPath?.length && Math.hypot(bot.spawnExitPath[0].x - bot.x, bot.spawnExitPath[0].z - bot.z) < 0.25) bot.spawnExitPath.shift();
     if (bot.spawnExitPath?.length) {
       const point = bot.spawnExitPath[0], targetYaw = Math.atan2(-(point.x - bot.x), -(point.z - bot.z));
@@ -335,12 +338,13 @@ export class Room {
       const distance = Math.hypot(target.x - bot.x, target.z - bot.z);
       const pose = playerPose(target);
       const visible = target.isObjective ? this.objectives.coreVisible(origin, target) : hasLineOfSight(origin, { x: target.x, y: target.y + pose.aimHeight, z: target.z }, this.world) || hasLineOfSight(origin, { x: target.x, y: target.y + pose.eyeHeight, z: target.z }, this.world);
-      return { target, distance, visible, score: distance * (visible ? .65 : 1) * (target.isObjective ? .8 : bot.isWaveEnemy && distance > 12 ? 2.5 : 1) };
+      return { target, distance, visible, score: distance * (visible ? .65 : 1) * (alert?.sourceId === target.id ? alert.nearMiss ? .4 : .65 : 1) * (target.isObjective ? .8 : bot.isWaveEnemy && distance > 12 ? 2.5 : 1) };
     }).sort((a, b) => a.score - b.score);
     if (!candidates.length && objectiveGoal) candidates.push({ target: { ...objectiveGoal, id: `navigate-${objectiveGoal.id || 'defense'}`, isNavigation: true }, distance: Math.hypot(objectiveGoal.x - bot.x, objectiveGoal.z - bot.z), visible: false, score: 0 });
     if (!candidates.length) {
       Object.assign(brain, freshBotBrain());
-      return { ...EMPTY_INPUT, yaw: bot.yaw, pitch: bot.pitch, weaponId: bot.weaponId };
+      const look = alert ? Math.atan2(-(alert.x - bot.x), -(alert.z - bot.z)) : bot.yaw;
+      return { ...EMPTY_INPUT, yaw: bot.yaw + clamp(angleDelta(look, bot.yaw), -dt * behavior.turnRadiansPerSecond * 1.5, dt * behavior.turnRadiansPerSecond * 1.5), pitch: bot.pitch, weaponId: bot.weaponId };
     }
     const current = candidates.find((candidate) => candidate.target.id === brain.targetId);
     // Keep a reasonable current target instead of flicking between nearby enemies.
@@ -368,15 +372,30 @@ export class Room {
           bot.botPath = up ? [...(inside ? [] : findPath(bot, building.entry, this.world)), ...building.route.filter((point) => point.y >= bot.y - 0.15 && point.y <= movementTarget.y + 0.15), destination] : [...building.route.slice().reverse().filter((point) => point.y <= bot.y + 0.15 && point.y >= destinationY - 0.15), ...findPath(building.entry, movementTarget, this.world), destination];
           bot.stairRouteKey = key;
         }
-      } else { bot.stairRouteKey = null; bot.botPath = findPath(bot, movementTarget, this.world); }
-      bot.nextPathAt = now + 850;
+      } else {
+        bot.stairRouteKey = null;
+        const movedGoal = !brain.routeGoal || Math.hypot(brain.routeGoal.x - movementTarget.x, brain.routeGoal.z - movementTarget.z) > 2.5 || Math.abs(brain.routeGoal.y - (movementTarget.y || 0)) > .6;
+        if (!bot.botPath.length || movedGoal || now >= (brain.routeChoiceAt || 0)) {
+          brain.routeChoiceAt = now + 2600 + this.random() * 2200;
+          brain.routeGoal = { x: movementTarget.x, y: movementTarget.y || 0, z: movementTarget.z };
+          brain.routeVariant = (brain.routeSeed + Math.floor(this.random() * 65536)) >>> 0;
+          bot.botPath = findPath(bot, movementTarget, this.world, brain.routeVariant);
+        }
+      }
+      bot.nextPathAt = now + 650 + this.random() * 400;
     }
     const pathPoint = followBotPath(bot, this.world), direct = visible && Math.abs(target.y - bot.y) < .2 && canTraverse(bot, target, this.world, RULES.crouchHeight);
     const objectiveMoving = objectiveGoal && (bot.isWaveEnemy ? Math.hypot(objectiveGoal.x - bot.x, objectiveGoal.z - bot.z) > 18 || !this.objectives.coreVisible(origin, objectiveGoal) : Math.hypot(objectiveGoal.x - bot.x, objectiveGoal.z - bot.z) > 1.1 || Math.abs((objectiveGoal.y || 0) - bot.y) > .2);
     const navigating = objectiveGoal ? objectiveMoving : !direct || !!(bot.stairRouteKey && bot.botPath.length), waypoint = navigating ? pathPoint : target;
     const navigationYaw = Math.atan2(-(waypoint.x - bot.x), -(waypoint.z - bot.z));
     const targetYaw = Math.atan2(-(target.x - bot.x), -(target.z - bot.z));
-    const perceived = visible && Math.abs(angleDelta(targetYaw, bot.yaw)) <= behavior.viewHalfAngle;
+    const botWeapon = getWeapon(bot.weaponId), effectiveRange = botLongRange(botWeapon, behavior), distant = distance > behavior.firingRange;
+    if (now >= (brain.nextLongScanAt ?? 0)) {
+      brain.longScanUntil = now + 1900 + this.random() * 1000;
+      brain.nextLongScanAt = brain.longScanUntil + 2400 + this.random() * 2800;
+    }
+    const longObservation = !distant || now < brain.longScanUntil || alert?.sourceId === target.id;
+    const perceived = visible && longObservation && distance <= effectiveRange && Math.abs(angleDelta(targetYaw, bot.yaw)) <= behavior.viewHalfAngle;
     if (!perceived) {
       brain.visibleSince = null; brain.reactAt = 0; brain.aimPoint = null;
       brain.nextAimSampleAt = 0; brain.burstLeft = 0;
@@ -397,39 +416,53 @@ export class Room {
       }
     }
     const aim = brain.aimPoint;
-    const desiredYaw = aim ? Math.atan2(-(aim.x - bot.x), -(aim.z - bot.z)) + brain.yawError : navigationYaw;
+    const desiredYaw = aim ? Math.atan2(-(aim.x - bot.x), -(aim.z - bot.z)) + brain.yawError : alert ? Math.atan2(-(alert.x - bot.x), -(alert.z - bot.z)) : navigationYaw;
     const desiredPitch = aim ? Math.atan2(aim.y - origin.y, Math.max(Math.hypot(aim.x - bot.x, aim.z - bot.z), 0.01)) + brain.pitchError : 0;
-    const yaw = bot.yaw + clamp(angleDelta(desiredYaw, bot.yaw), -dt * behavior.turnRadiansPerSecond, dt * behavior.turnRadiansPerSecond);
+    const turnRate = behavior.turnRadiansPerSecond * (!aim && alert ? alert.nearMiss ? 1.8 : 1.5 : 1);
+    const yaw = bot.yaw + clamp(angleDelta(desiredYaw, bot.yaw), -dt * turnRate, dt * turnRate);
     const pitch = bot.pitch + clamp(desiredPitch - bot.pitch, -dt * behavior.pitchRadiansPerSecond, dt * behavior.pitchRadiansPerSecond);
     const facing = aim && Math.abs(angleDelta(desiredYaw, yaw)) < behavior.firingAngle && Math.abs(desiredPitch - pitch) < behavior.firingAngle;
-    const ready = perceived && facing && now >= brain.reactAt && distance < behavior.firingRange;
+    const ready = perceived && facing && now >= brain.reactAt && distance < effectiveRange;
     if (ready && brain.burstLeft === 0 && now >= brain.nextBurstAt) {
       brain.burstLeft = behavior.burstMinShots + Math.floor(this.random() * (behavior.burstMaxShots - behavior.burstMinShots + 1));
       brain.triggerPending = true;
     }
     const bearing = angleDelta(navigationYaw, yaw);
-    const botWeapon = getWeapon(bot.weaponId), preferred = botWeapon.type === 'SNIPER' ? 30 : botWeapon.type === 'SHOTGUN' ? 7 : botWeapon.type === 'SMG' || botWeapon.type === 'SIDEARM' ? 10 : 16;
+    const preferred = botWeapon.type === 'SNIPER' ? 30 : botWeapon.type === 'SHOTGUN' ? 7 : botWeapon.type === 'SMG' || botWeapon.type === 'SIDEARM' ? 10 : 16;
     brain.moveSeed ??= [...bot.id].reduce((value, letter) => (value * 31 + letter.charCodeAt(0)) >>> 0, 0);
     brain.strafeSide ||= brain.moveSeed % 2 ? 1 : -1;
     brain.nextStrafeAt ||= now + 1200 + brain.moveSeed % 800;
-    if (now >= brain.nextStrafeAt) { brain.strafeSide *= -1; brain.nextStrafeAt = now + 1200 + brain.moveSeed % 800; }
+    if (now >= brain.nextStrafeAt) { if (this.random() < .78) brain.strafeSide *= -1; brain.nextStrafeAt = now + 700 + this.random() * 1900; }
     const sniper = botWeapon.type === 'SNIPER'; let hold = false;
     if (sniper) {
       if (bot.lastShot > (brain.sniperLastShot || 0)) { brain.sniperLastShot = bot.lastShot; brain.repositionUntil = now + Math.min(650, Math.max(350, botWeapon.fireSeconds * 500)); brain.sniperSettleAt = 0; }
-      hold = perceived && now >= brain.reactAt && distance < behavior.firingRange && bot.grounded && !navigating && now >= bot.nextFireAt - 250 && now >= (brain.repositionUntil || 0) && bot.reloadUntil <= now;
+      hold = perceived && now >= brain.reactAt && distance < effectiveRange && bot.grounded && !navigating && now >= bot.nextFireAt - 250 && now >= (brain.repositionUntil || 0) && bot.reloadUntil <= now;
       if (hold) brain.sniperSettleAt ||= now + 220; else brain.sniperSettleAt = 0;
     }
     brain.nextDuckAt ||= now + 3500 + brain.moveSeed % 2000;
     if (now >= brain.nextDuckAt && perceived && bot.grounded && !navigating && nearBotCover(bot, this.world)) { brain.duckUntil = now + 550; brain.nextDuckAt = now + 4500 + brain.moveSeed % 1500; }
     const crouch = bot.grounded && !navigating && (sniper && hold && distance > 18 || now < (brain.duckUntil || 0) || bot.reloadUntil > now && nearBotCover(bot, this.world));
     const fire = !!(ready && brain.burstLeft > 0 && now >= brain.nextBurstAt && now >= bot.nextFireAt && (!sniper || hold && now >= brain.sniperSettleAt && bot.moveSpeed < .2));
-    return steerBot(bot, {
+    const longHold = distant && perceived && !navigating && bot.grounded && now >= brain.reactAt && ['ASSAULT','LMG','DMR'].includes(botWeapon.type);
+    brain.longRangeFocused = distant && perceived && now >= brain.reactAt + 300;
+    const input = {
       ...EMPTY_INPUT, weaponId: bot.weaponId, yaw, pitch,
-      forward: hold || target.isNavigation && !navigating ? 0 : navigating ? Math.cos(bearing) * .8 : objectiveGoal && !bot.isWaveEnemy ? Math.sin(now / 1600 + brain.moveSeed % 11) * .1 : distance > preferred + 3 ? .65 : distance < preferred - 4 ? -.35 : Math.sin(now / 1600 + brain.moveSeed % 11) * .12,
-      strafe: hold ? 0 : navigating ? -Math.sin(bearing) * .8 : perceived ? brain.strafeSide * (sniper || botWeapon.type === 'DMR' ? .28 : .5) : 0,
+      forward: hold || longHold || target.isNavigation && !navigating ? 0 : navigating ? Math.cos(bearing) * .8 : objectiveGoal && !bot.isWaveEnemy ? Math.sin(now / 1600 + brain.moveSeed % 11) * .1 : distance > preferred + 3 ? .65 : distance < preferred - 4 ? -.35 : Math.sin(now / 1600 + brain.moveSeed % 11) * .12,
+      strafe: hold || longHold ? 0 : navigating ? -Math.sin(bearing) * .8 : perceived ? brain.strafeSide * (sniper || botWeapon.type === 'DMR' ? .28 : .5) : 0,
       ads: sniper ? hold : ready && distance > 12 && ['ASSAULT', 'DMR', 'LMG'].includes(botWeapon.type),
       fire, crouch, reload: bot.ammo < 1,
-    }, this.world, now);
+    };
+    if (navigating && !bot.stairRouteKey && !hold) {
+      for (const peer of this.players.values()) {
+        if (peer.id === bot.id || peer.hp <= 0 || Math.abs(peer.y - bot.y) > .6) continue;
+        const dx = bot.x - peer.x, dz = bot.z - peer.z, separation = Math.hypot(dx, dz);
+        if (separation < .1 || separation > 1.8) continue;
+        const strength = (1.8 - separation) / 1.8 * .32;
+        input.forward += (-dx * Math.sin(yaw) - dz * Math.cos(yaw)) / separation * strength;
+        input.strafe += (dx * Math.cos(yaw) - dz * Math.sin(yaw)) / separation * strength;
+      }
+    }
+    return steerBot(bot, input, this.world, now);
   }
 
   tick(dt) {
@@ -481,7 +514,8 @@ export class Room {
     }
     const hits = new Map(), rays = [];
     const origin = { x: player.x, y: player.y + playerPose(player).eyeHeight, z: player.z };
-    const firingWeapon = player.isBot ? { ...weapon, spread: weapon.spread + behavior.shotSpread, adsSpread: weapon.adsSpread + behavior.shotSpread } : weapon;
+    const botSpread = behavior.shotSpread * (player.botBrain?.longRangeFocused && ads && player.moveSpeed < .2 ? .55 : 1);
+    const firingWeapon = player.isBot ? { ...weapon, spread: weapon.spread + botSpread, adsSpread: weapon.adsSpread + botSpread } : weapon;
     const targets = shot?.viewTime != null && !player.isBot ? this.playersAt(clamp(shot.viewTime, now - 200, now)) : [...this.players.values()];
     const firingState = shot?.movement ? { ...player, ...shot.movement, grounded: player.grounded && shot.movement.grounded } : player;
     for (const angle of shotAngles(firingWeapon, ads, this.random, firingState)) {
@@ -502,6 +536,7 @@ export class Room {
     }
     player.shotHeat = Math.min(1, (player.shotHeat || 0) + (weapon.type === 'ASSAULT' ? 0.25 : 0.17));
     this.events.push({ type: 'shot', shotId: `${this.roundId}-${player.id}-${player.shotSerial}`, spawnCount: player.spawnCount, equipmentSeq: player.equipmentSeq, fireSeq: player.triggerSeq, shotIndex: player.triggerShotIndex, id: player.id, weaponId: weapon.id, suppressor: player.suppressor === true, origin, rays, end: rays[0].end, hit: rays.find((r) => r.hit)?.hit || null, headshot: rays.some((r) => r.hit && r.headshot) });
+    alertBotsToShot(this.players, player, origin, rays, this.world, now, this.random);
     for (const { victim, damage: rawDamage, headshot } of hits.values()) this.applyDamage(player, victim, rawDamage, headshot, origin, weapon, now);
     if (player.ammo === 0) this.startReload(player, now);
     return true;

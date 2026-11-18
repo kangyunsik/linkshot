@@ -31,6 +31,13 @@ test('recorded firearm samples have verified CC0 provenance, valid PCM and safe 
       let low = 0, bass = 0; const alpha = 1 - Math.exp(-2 * Math.PI * 350 / 44100);
       for (let i = 44; i < data.length; i += 2) { low += (data.readInt16LE(i) / 32768 - low) * alpha; bass += low * low; }
       assert.ok(bass / energy > 0.25, `${item.file}: a heavy low-frequency body`);
+    } else if (item.soundProfile === 'heavy-shotgun') {
+      assert.equal(weapon.type, 'SHOTGUN'); assert.equal(item.recording, 'shotty.wav');
+      assert.ok(Math.max(...rms.slice(15)) < Math.max(...rms.slice(0, 8)) * 0.4, `${item.file}: the decay must not become a second shot`);
+      let low = 0, bass = 0; const alpha = 1 - Math.exp(-2 * Math.PI * 650 / 44100);
+      for (let i = 44; i < data.length; i += 2) { low += (data.readInt16LE(i) / 32768 - low) * alpha; bass += low * low; }
+      assert.ok(bass / energy > 0.25, `${item.file}: retain a broad low-mid body`);
+      assert.ok(rms.slice(12, 30).some(value => value > .001), `${item.file}: natural short decay, not a hard cut`);
     } else assert.ok(Math.max(...rms.slice(15)) < Math.max(...rms.slice(0, 8)) * 0.12, `${item.file}: a later blast/mechanical attack is audible`);
   }
 });

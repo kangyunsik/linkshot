@@ -36,10 +36,10 @@ async function fixture(t, { mode = 'RANKED', bots = 0, humans = 2, rankedAiEnabl
   };
   if (gameType) Object.assign(plan, { gameType, teams: gameType === 'teams' ? Object.fromEntries(players.map((p, i) => [p.id, i % 2 ? 'red' : 'blue'])) : {} });
   const app = createOnlineEngine({ client, port: 0, host: '127.0.0.1', loop: false, countdownMs, ...(clock ? { clock } : {}) }), info = await app.listen(); t.after(() => app.close());
-  const join = async (profile, extra = {}) => {
+  const join = async (profile, extra = {}, readyNow = true) => {
     const socket = new WebSocket(`ws://127.0.0.1:${info.port}/play`); t.after(() => socket.terminate()); await message(socket, 'hello');
     const ticket = Buffer.from(randomUUID()).toString('base64url').slice(0, 43); tickets.set(ticket, profile); const joined = message(socket, 'joined'); socket.send(JSON.stringify({ type: 'authenticate', matchId: id, ticket, ...extra })); socket.joined = await joined;
-    const ready = message(socket, 'pong'); socket.send(JSON.stringify({ type: 'ready' })); socket.send(JSON.stringify({ type: 'ping' })); await ready; return socket;
+    if (readyNow) { const ready = message(socket, 'pong'); socket.send(JSON.stringify({ type: 'ready' })); socket.send(JSON.stringify({ type: 'ping' })); await ready; } return socket;
   };
   return { app, id, players, plan, client, join, results, port: info.port };
 }
@@ -61,19 +61,24 @@ test('a LAN-configured combat server also accepts matching-port loopback origins
 
 test('the online gateway consumes Spring tickets, ignores spoofed identity/ownership and requires every assigned human before starting', async (t) => {
   const f = await fixture(t, { mode: 'CASUAL' }); const a = await f.join(f.players[0], { ownedWeapons: ['m82'], weaponId: 'm82', id: f.players[1].id });
-  const match = f.app.matches.get(f.id); assert.equal(match.room.phase, 'waiting'); assert.equal(match.room.players.get(f.players[0].id).weaponId, 'm82');
-  assert.equal(match.room.players.get(f.players[0].id).ownedWeapons.length, WEAPONS.length); assert.equal(f.players[0].ownedWeapons.includes('m82'), false);
+  const match = f.app.matches.get(f.id); assert.equal(match.room.phase, 'countdown'); assert.equal(match.room.players.get(f.players[0].id).weaponId, 'rifle');
+  assert.equal(match.room.players.get(f.players[0].id).ownedWeapons.length, 4); assert.equal(f.players[0].ownedWeapons.includes('m82'), false);
   assert.equal([...match.room.players.values()].some((player) => player.isBot), false);
   await f.join(f.players[1]); assert.equal(match.room.phase, 'active'); assert.equal(match.room.hostId, null); assert.equal(match.room.roundId, f.id);
   const error = message(a, 'error'); a.send(JSON.stringify({ type: 'create', mode: 'ranked', bots: 7 })); assert.match((await error).message, /중앙 서버/);
 });
 
-test('ranked weapon access is temporary and does not mutate the canonical online ownership profile', async (t) => {
-  const f = await fixture(t); await f.join(f.players[0], { weaponId: 'm82' }); await f.join(f.players[1]);
-  const player = f.app.matches.get(f.id).room.players.get(f.players[0].id); assert.equal(player.weaponId, 'm82'); assert.equal(player.ownedWeapons.length, WEAPONS.length); assert.equal(f.players[0].ownedWeapons.includes('m82'), false);
+test('ranked permits only starters and canonical purchases, ignoring forged ownership at entry and respawn', async (t) => {
+  const f = await fixture(t); f.players[1].ownedWeapons.push('m82');
+  const a = await f.join(f.players[0], { weaponId: 'm82', ownedWeapons: WEAPONS.map(w => w.id) }); await f.join(f.players[1], { weaponId: 'm82' });
+  const room = f.app.matches.get(f.id).room, player = room.players.get(f.players[0].id);
+  assert.equal(player.weaponId, 'rifle'); assert.equal(player.ownedWeapons.length, 4); assert.equal(room.players.get(f.players[1].id).weaponId, 'm82');
+  player.hp = 0; const done = message(a, 'pong'); a.send(JSON.stringify({ type: 'loadout', weaponId: 'm82', ownedWeapons: ['m82'] })); a.send(JSON.stringify({ type: 'ping' })); await done;
+  room.spawn(player); assert.equal(player.weaponId, 'rifle'); assert.equal(f.players[0].ownedWeapons.includes('m82'), false);
 });
 test('ranked assignments deploy exactly three per side, preserve chosen skins and reward the winning team rather than an individual MVP', async (t) => {
   const f = await fixture(t, { humans: 6, gameType: 'teams' });
+  for (const profile of f.players) profile.ownedWeapons.push('awp');
   for (const profile of f.players) await f.join(profile, { weaponId: 'awp', skinId: 'arctic' });
   const match = f.app.matches.get(f.id), room = match.room, players = [...room.players.values()]; room.fragLimit = 20;
   assert.equal(room.gameType, 'teams'); assert.equal(players.filter((p) => p.teamId === 'blue').length, 3); assert.equal(players.filter((p) => p.teamId === 'red').length, 3);
@@ -89,12 +94,12 @@ test('new competitive assignments cannot silently fall back to a four-player tea
 });
 
 test('WAN ranked suppressors use canonical per-weapon mastery, ignore forged unlocks and retain temporary ownership boundaries', async (t) => {
-  const f = await fixture(t); Object.assign(f.players[0], { weaponKills: { vector: 1549 }, suppressedWeapons: ['vector'] }); Object.assign(f.players[1], { weaponKills: { vector: 1550 }, suppressedWeapons: ['vector'] });
+  const f = await fixture(t); for (const profile of f.players) profile.ownedWeapons.push('vector'); Object.assign(f.players[0], { weaponKills: { vector: 1549 }, suppressedWeapons: ['vector'] }); Object.assign(f.players[1], { weaponKills: { vector: 1550 }, suppressedWeapons: ['vector'] });
   const a = await f.join(f.players[0], { weaponId: 'vector', suppressor: true, weaponKills: { vector: 999999 }, suppressedWeapons: ['vector'] });
   await f.join(f.players[1], { weaponId: 'vector', suppressor: true });
   const room = f.app.matches.get(f.id).room, locked = room.players.get(f.players[0].id), earned = room.players.get(f.players[1].id);
   assert.equal(locked.suppressor, false); assert.deepEqual(locked.suppressedWeapons, []); assert.equal(earned.suppressor, true);
-  assert.equal(earned.ownedWeapons.length, WEAPONS.length); assert.equal(f.players[1].ownedWeapons.includes('vector'), false); assert.equal(f.players[1].weaponKills.vector, 1550);
+  assert.equal(earned.ownedWeapons.length, 5); assert.equal(f.players[1].ownedWeapons.includes('vector'), true); assert.equal(f.players[1].weaponKills.vector, 1550);
   const barrier = async (data) => { const done = message(a, 'pong'); a.send(JSON.stringify(data)); a.send(JSON.stringify({ type: 'ping' })); await done; };
   await barrier({ type: 'input', suppressor: true, weaponKills: { vector: 1550 } }); assert.equal(locked.suppressor, false);
   await barrier({ type: 'loadout', weaponId: 'vector', suppressor: true }); assert.equal(locked.suppressor, false);
@@ -109,9 +114,32 @@ test('ready players are frozen for the complete five-second countdown and the ma
   now = 6000; f.app.tick(1 / 60); assert.equal(match.room.phase, 'active'); assert.equal(match.room.startedAt, 6000); assert.equal(match.room.endsAt, 66_000); assert.equal(p.hp, 100); assert.equal(p.ammo, initial.ammo); assert.equal(p.protectedUntil, 7500);
 });
 
-test('a disconnect before entry cancels the countdown and a ready reconnect starts a fresh full five seconds', async (t) => {
-  let now = 1000; const f = await fixture(t, { clock: () => now, countdownMs: 5000 }), a = await f.join(f.players[0]); await f.join(f.players[1]); const match = f.app.matches.get(f.id); now = 2000; await disconnect(a, match, f.players[0].id); assert.equal(match.room.phase, 'waiting'); assert.equal(match.countdownEndsAt, null);
-  await f.join(f.players[0]); assert.equal(match.room.phase, 'countdown'); assert.equal(match.countdownEndsAt, 7000); now = 6999; f.app.tick(1 / 60); assert.equal(match.room.phase, 'countdown'); now++; f.app.tick(1 / 60); assert.equal(match.room.phase, 'active');
+test('late loaders and reconnects share the first ready deadline without a restarted countdown', async (t) => {
+  let now = 1000; const f = await fixture(t, { clock: () => now, countdownMs: 5000 }), a = await f.join(f.players[0]); const match = f.app.matches.get(f.id);
+  assert.equal(match.countdownEndsAt, 6000);
+  now = 3000; const late = await f.join(f.players[1]); assert.equal(late.joined.online.countdownEndsAt - late.joined.serverTime, 3000);
+  await disconnect(a, match, f.players[0].id); assert.equal(match.room.phase, 'countdown'); assert.equal(match.countdownEndsAt, 6000);
+  now = 6500; f.app.tick(1 / 60); assert.equal(match.room.phase, 'countdown'); // Fairness: never fight an unready human.
+  await f.join(f.players[0]); assert.equal(match.room.phase, 'active'); assert.equal(match.room.startedAt, 6500);
+});
+
+test('preparation loadouts are authenticated, preserve position and life, freeze combat and close on activation', async (t) => {
+  let now = 1000; const f = await fixture(t, { clock: () => now, countdownMs: 5000 }), a = await f.join(f.players[0]);
+  const match = f.app.matches.get(f.id), player = match.room.players.get(f.players[0].id), before = [player.x, player.y, player.z, player.spawnCount];
+  const barrier = async data => { const done = message(a, 'pong'); a.send(JSON.stringify(data)); a.send(JSON.stringify({ type: 'ping' })); await done; };
+  await barrier({ type: 'prepare-loadout', roundId: f.id, weaponId: 'awp', id: f.players[1].id, suppressor: true, weaponKills: { awp: 999999 }, x: 9999 });
+  assert.equal(player.weaponId, 'rifle');
+  f.players[0].ownedWeapons.push('awp'); f.client.accountEquipment = async () => ({ ...f.players[0], suppressedWeapons: [] });
+  await barrier({ type: 'prepare-loadout', roundId: f.id, weaponId: 'awp', suppressor: true });
+  assert.equal(player.weaponId, 'awp'); assert.equal(player.ammo, 10); assert.equal(player.suppressor, false);
+  assert.deepEqual([player.x, player.y, player.z, player.spawnCount], before);
+  await barrier({ type: 'input', forward: 1, fire: true, spawnCount: player.spawnCount, equipmentSeq: player.equipmentSeq });
+  f.app.tick(1 / 60); assert.deepEqual([player.x, player.y, player.z, player.spawnCount], before); assert.equal(player.ammo, 10);
+  now = 3500; const b = await f.join(f.players[1], { weaponId: 'sniper' }, false);
+  assert.equal(match.room.players.get(f.players[1].id).weaponId, 'sniper'); now = 6000; f.app.tick(1 / 60); assert.equal(match.room.phase, 'countdown');
+  const done = message(b, 'pong'); b.send(JSON.stringify({ type: 'ready' })); b.send(JSON.stringify({ type: 'ping' })); await done;
+  assert.equal(match.room.phase, 'active');
+  const error = message(a, 'error'); a.send(JSON.stringify({ type: 'prepare-loadout', roundId: f.id, weaponId: 'rifle' })); assert.match((await error).message, /준비 중/); assert.equal(player.weaponId, 'awp');
 });
 
 test('ranked AI assignments still require explicit permission from the authoritative plan', async (t) => {

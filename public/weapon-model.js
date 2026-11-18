@@ -108,18 +108,31 @@ export class ArmoryPreview {
     this.camera.position.set(getWeapon(weaponId).type === 'SNIPER' ? 1.9 : getWeapon(weaponId).type === 'LMG' ? 1.65 : 1.45, .48, 1.25); this.camera.lookAt(0, -.01, -.25);
   }
   drawThumbnails(cards, skinId) {
-    if (this.thumbnailSkin === skinId || !this.model) return;
-    this.thumbnailSkin = skinId;
-    const selected = { weaponId: this.model.userData.weaponId, skinId: this.model.userData.skinId, suppressor: this.model.userData.suppressor === true };
-    for (const card of cards) {
-      const canvas = card.querySelector('canvas'); if (!canvas) continue;
-      this.set(card.dataset.weapon, skinId); this.renderer.render(this.scene, this.camera);
-      canvas.getContext('2d').drawImage(this.canvas, 0, 0, canvas.width, canvas.height);
-    }
-    this.set(selected.weaponId, selected.skinId, selected.suppressor); this.renderer.render(this.scene, this.camera);
+    if (this.thumbnailSkin === skinId || this.thumbnailPendingSkin === skinId || !this.model || this.stopped) return;
+    cancelAnimationFrame(this.thumbnailFrame); this.thumbnailPendingSkin = skinId;
+    const queue = [...cards].filter(card => card.querySelector('canvas'));
+    const draw = () => {
+      if (this.stopped) return;
+      const card = queue.shift();
+      if (!card) { this.thumbnailSkin = skinId; this.thumbnailPendingSkin = null; return; }
+      const model = this.models.create(card.dataset.weapon, skinId), selected = this.model;
+      const position = this.camera.position.clone(), rotation = this.camera.quaternion.clone();
+      if (selected) selected.visible = false;
+      this.scene.add(model);
+      this.camera.position.set(getWeapon(card.dataset.weapon).type === 'SNIPER' ? 1.9 : 1.45, .48, 1.25); this.camera.lookAt(0, -.01, -.25);
+      this.renderer.render(this.scene, this.camera);
+      const canvas = card.querySelector('canvas'); canvas.getContext('2d').drawImage(this.canvas, 0, 0, canvas.width, canvas.height);
+      this.scene.remove(model); disposeModel(model);
+      if (selected) selected.visible = true;
+      this.camera.position.copy(position); this.camera.quaternion.copy(rotation);
+      // One thumbnail per frame; never block entry by rendering all 23 at once.
+      if (this.visible) this.renderer.render(this.scene, this.camera);
+      this.thumbnailFrame = requestAnimationFrame(draw);
+    };
+    this.thumbnailFrame = requestAnimationFrame(draw);
   }
   dispose() {
-    this.stopped = true; cancelAnimationFrame(this.frame); this.observer.disconnect(); this.visibility.disconnect();
+    this.stopped = true; cancelAnimationFrame(this.frame); cancelAnimationFrame(this.thumbnailFrame); this.observer.disconnect(); this.visibility.disconnect();
     if (this.model) disposeModel(this.model); this.models.dispose(); this.renderer.dispose();
   }
 }

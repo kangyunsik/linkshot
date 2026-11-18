@@ -15,6 +15,16 @@ test('loopback previews use their own host for private HTTP APIs and combat sock
   assert.equal(onlineBrowserUrl(lan, { hostname: '127.0.0.1' }).href, lan);
 });
 
+test('another LAN computer resolves local API and combat tickets against the server IP, never its own localhost', () => {
+  for (const configured of ['localhost', '127.0.0.1']) for (const scheme of ['http', 'ws']) {
+    const url = onlineBrowserUrl(`${scheme}://${configured}:8181/api/path`, { hostname: lanHost, protocol: 'http:' }, 'http://localhost:4173');
+    assert.equal(url.href, `${scheme}://${lanHost}:8181/api/path`);
+    assert.equal(url.port, '8181'); assert.equal(url.pathname, '/api/path');
+  }
+  for (const value of ['https://localhost:8080/api', 'wss://localhost:8090/play', `http://${otherHost}:8080/api`, 'https://api.example.invalid/api']) assert.equal(onlineBrowserUrl(value, { hostname: lanHost, protocol: 'http:' }).href, value);
+  assert.equal(onlineBrowserUrl('http://localhost:8080', { hostname: 'game.example.invalid', protocol: 'http:' }).href, 'http://localhost:8080/');
+});
+
 test('LAN origin allowlists include only matching-port loopback aliases, never arbitrary origins or production aliases', () => {
   assert.deepEqual(onlineBrowserOrigins([`http://${lanHost}:4181`]), [`http://${lanHost}:4181`, 'http://127.0.0.1:4181', 'http://localhost:4181']);
   assert.deepEqual(onlineBrowserOrigins(['http://127.0.0.1:4173', 'http://localhost:4173']), ['http://127.0.0.1:4173', 'http://localhost:4173']);

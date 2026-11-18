@@ -103,3 +103,11 @@
   .deployment-actions > .primary-button { height: 24px; }.deployment-actions > .secondary-button { height: 22px; }
   .operation-rail .briefing-grid { grid-template-rows: minmax(24px,1fr); }.operation-rail .weapon-info { min-height: 24px; }
 }
+@media(max-width:740px) and (max-height:660px) {
+  .operation-rail .deploy-card { position: relative; }
+  .deploy-card > .card-eyebrow { display: contents; }
+  .deploy-card > .card-eyebrow > #deploy-title { display: none; }
+  #mode-information-button { position: absolute; right: 5px; bottom: 5px; width: 23px; height: 23px; padding: 4px; justify-content: center; }
+  #mode-information-button > span { display: none; }
+  .operation-rail .deployment-actions { padding-right: 28px; }
+}

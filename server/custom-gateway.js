@@ -5,10 +5,11 @@ import { isWeaponId } from '../shared/catalog.js';
 import { NETWORK_PROTOCOL } from '../shared/world.js';
 import { isTeamGame } from '../shared/game-types.js';
 import { highestRank } from '../shared/ranks.js';
+import { normalizeSuppressedWeapons } from '../shared/progression.js';
 
 export class CustomGateway {
-  constructor({ send, clock, capacity }) {
-    this.send = send; this.directory = new RoomDirectory({ mode: 'custom', clock, capacity }); this.accounts = new Map();
+  constructor({ send, clock, capacity, fetchProfile }) {
+    this.send = send; this.fetchProfile = fetchProfile; this.directory = new RoomDirectory({ mode: 'custom', clock, capacity }); this.accounts = new Map();
   }
   attach(connection, profile) {
     if (this.accounts.has(profile.id)) throw new Error('이 계정은 이미 사용자 대전에 연결되어 있습니다.');
@@ -22,6 +23,20 @@ export class CustomGateway {
   publishList() { const state = { type: 'rooms', rooms: this.directory.list() }; for (const connection of this.accounts.values()) if (!connection.roomCode) this.send(connection.socket, state); }
   async handle(connection, data) {
     const room = this.directory.rooms.get(connection.roomCode);
+    if (this.fetchProfile && ['create', 'join', 'room-loadout'].includes(data.type)) {
+      if (connection.refreshingProfile) throw new Error('장비 정보를 확인 중입니다. 잠시 후 다시 선택해 주세요.');
+      connection.refreshingProfile = true;
+      try {
+        const profile = await this.fetchProfile(connection.account);
+        if (profile.id !== connection.account || this.accounts.get(connection.account) !== connection || connection.socket.readyState !== WebSocket.OPEN) throw new Error('장비 계정 인증을 확인해 주세요.');
+        connection.profile = profile;
+        const member = room?.players.get(connection.account);
+        if (member) {
+          member.ownedWeapons = [...profile.ownedWeapons]; member.masteryKills = { ...profile.weaponKills }; member.suppressedWeapons = normalizeSuppressedWeapons(profile.suppressedWeapons, profile.weaponKills);
+          if (member.roomStatus === 'waiting') { member.outfitId = profile.outfitId; member.characterId = profile.characterId; }
+        }
+      } finally { connection.refreshingProfile = false; }
+    }
     if (data.type === 'list') { this.send(connection.socket, { type: 'rooms', rooms: this.directory.list() }); return; }
     if (data.type === 'leave') { this.directory.leave(connection.account, connection.roomCode); connection.roomCode = null; this.send(connection.socket, { type: 'left' }); this.publishList(); return; }
     if (roomLobbyAction(room, connection.account, data)) { this.publishList(); return; }

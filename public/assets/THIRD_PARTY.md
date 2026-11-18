@@ -42,6 +42,7 @@ The circular bullet-scar atlas in `public/bullet-marks.js` is also project-autho
 - Original recordings: CZ-52 pistol, SKS rifle, Mosin Nagant rifle, shotgun.
 - Changes: one audited isolated muzzle blast per weapon, spectral noise reduction, filtering, fixed mono resampling, exponential suppression of late echoes/mechanical tails, peak normalization and fades. No random sample or pitch variations are used during gameplay.
 - SR–1, AWP and M82 additionally use bass-weighted processing and a deterministic dense diffuse 1.65–2.20 second decay. The tail is processed from the single isolated blast, not another recorded shot or bolt click. Fixed resampling is baked into each file; playback always uses rate 1.
+- SG–12, SPAS-12 and S686 add a broad non-tonal low-mid body and short dense early reflections, with separate fixed profiles. No additional recorded blast or random playback pitch is added. The same CC0 shotgun source and safe peak normalization remain applicable.
 - The 23 gameplay sound profiles are artistic edits of the four listed source recordings; they are not claimed to be original recordings of each named real-world weapon.
 - Prepared file list and hashes: `sounds/manifest.json`.
 - Reproduction tools: `scripts/prepare-character.py`, `scripts/prepare-audio.py` in the source repository. Downloaded archives and working files are not distributed.

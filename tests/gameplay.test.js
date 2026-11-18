@@ -36,8 +36,8 @@ test('ADS does not erase running or airborne shot spread; rifle spray blooms and
   assert.equal(p.shotHeat, 0);
 });
 
-test('snipers have wide hip fire and stronger movement penalties while stationary scope precision is unchanged', () => {
-  for (const [id, precision] of [['sniper', .0004], ['awp', .00025], ['m82', .001]]) {
+test('snipers retain weapon-specific scoped precision and stronger movement penalties than mobile firearms', () => {
+  for (const [id, precision] of [['sniper', .0004], ['awp', .00025], ['m82', .0008]]) {
     const weapon = getWeapon(id), steady = shotSpread(weapon, true, { grounded: true, moveSpeed: 0 });
     const hip = shotSpread(weapon, false, { grounded: true }), walking = shotSpread(weapon, true, { grounded: true, moveSpeed: 2 });
     const running = shotSpread(weapon, true, { grounded: true, moveSpeed: RULES.runSpeed }), air = shotSpread(weapon, true, { grounded: false });
@@ -47,7 +47,8 @@ test('snipers have wide hip fire and stronger movement penalties while stationar
   }
   for (const weapon of WEAPONS.filter((weapon) => weapon.type !== 'SNIPER')) for (const ads of [false, true]) {
     const base = ads ? weapon.adsSpread : weapon.spread;
-    assert.equal(shotSpread(weapon, ads, { grounded: true, moveSpeed: 2 }), base + (ads ? .014 : .024), weapon.id);
+    const penalty = weapon.type === 'SMG' ? ads ? .011 : .018 : weapon.type === 'SIDEARM' ? ads ? .012 : .020 : ads ? .014 : .024;
+    assert.equal(shotSpread(weapon, ads, { grounded: true, moveSpeed: 2 }), base + penalty, weapon.id);
     assert.equal(shotSpread(weapon, ads, { grounded: false }), base + .105, weapon.id);
   }
 });

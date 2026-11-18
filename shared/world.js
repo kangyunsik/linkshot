@@ -2,7 +2,7 @@ import { expandBuildings } from './buildings.js';
 import { addSpawnZones } from './spawns.js';
 import { TEAM_WORLDS } from './team-worlds.js';
 import { surfaceBounds, surfaceRay, surfaceNormal } from './terrain.js';
-export const NETWORK_PROTOCOL = 22;
+export const NETWORK_PROTOCOL = 23;
 export const BULLET_MARK_RULES = Object.freeze({ lifetimeMs: 60_000, fadeMs: 6000, maxMarks: 6144, historyLimit: 2048, cellScale: 40 });
 
 export const RULES = Object.freeze({

@@ -13,7 +13,7 @@ async function fixture(t) {
   const client = { pending: async () => [], async consumeCustom(token) { const profile = tickets.get(token); tickets.delete(token); if (!profile) throw new Error('Invalid custom ticket'); return profile; }, async complete(...args) { settlements.push(args); } };
   const app = createOnlineEngine({ client, port: 0, loop: false }), info = await app.listen(); t.after(() => app.close());
   const connect = async (profile) => { const socket = new WebSocket(`ws://127.0.0.1:${info.port}/play`); t.after(() => socket.terminate()); await frame(socket, 'hello'); const token = Buffer.from(randomUUID()).toString('base64url').slice(0, 43); tickets.set(token, profile); const ready = frame(socket, 'custom-ready'); socket.send(JSON.stringify({ type: 'authenticate-custom', ticket: token, id: 'forged', ownedWeapons: ['m82'] })); await ready; return socket; };
-  return { app, profiles, connect, settlements };
+  return { app, profiles, connect, settlements, client };
 }
 
 test('authenticated WAN users list password-protected team rooms, join with canonical identities and never settle custom results as competitive progress', async (t) => {
@@ -41,6 +41,13 @@ test('custom rooms display the highest canonical rank and ignore a forged badge 
   const socket = await f.connect(f.profiles[0]); const pending = frame(socket, 'joined');
   socket.send(JSON.stringify({ type: 'create', bots: 0, rankBadge: { tier: 'CHALLENGER', ladder: 'teams', division: 1 } }));
   const state = await pending; assert.deepEqual(state.players[0].rankBadge, { tier: 'PLATINUM', ladder: 'ffa', division: 4 });
+});
+test('custom staging refreshes newly purchased equipment from Spring, never browser ownership flags', async (t) => {
+  const f = await fixture(t), socket = await f.connect(f.profiles[0]);
+  let pending = frame(socket, 'joined'); socket.send(JSON.stringify({ type: 'create', staging: true, bots: 0 })); const joined = await pending, room = f.app.custom.directory.rooms.get(joined.room.code);
+  f.app.custom.fetchProfile = async id => ({ ...f.profiles.find(p => p.id === id), ownedWeapons: [...f.profiles[0].ownedWeapons, 'm82'], suppressedWeapons: [], outfitId: 'runner' });
+  pending = frame(socket, 'pong'); socket.send(JSON.stringify({ type: 'room-loadout', weaponId: 'm82', ownedWeapons: ['awp'], outfitId: 'orbital' })); socket.send(JSON.stringify({ type: 'ping' })); await pending;
+  const player = room.players.get(f.profiles[0].id); assert.equal(player.weaponId, 'm82'); assert.equal(player.outfitId, 'runner'); assert.equal(player.ownedWeapons.includes('awp'), false);
 });
 
 test('WAN staging keeps canonical accounts in a server-owned team lobby until readiness/start or explicit late entry', async (t) => {

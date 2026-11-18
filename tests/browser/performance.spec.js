@@ -49,8 +49,23 @@ test('menu FPS counts actual renders and dead avatars do not run visual IK', asy
     const result = { poses, frames: game.frameStats.count, fps: game.performanceStats.fps, title: game.hud['hud-fps'].title, deadHidden: !avatar.group.visible, timeAdvanced: avatar.renderTime > beforeTime + 1900 };
     await game.dispose(); delete window.__performance; return result;
   });
-  expect(result.poses).toBe(0); expect(result.frames).toBeGreaterThan(10); expect(result.frames).toBeLessThan(21);
-  expect(result.fps).toBeGreaterThanOrEqual(8); expect(result.fps).toBeLessThanOrEqual(10); expect(result.title).toContain('CPU p95'); expect(result.deadHidden && result.timeAdvanced).toBe(true);
+  expect(result.poses).toBe(0); expect(result.frames).toBeGreaterThan(55); expect(result.frames).toBeLessThan(65);
+  expect(result.fps).toBeGreaterThanOrEqual(28); expect(result.fps).toBeLessThanOrEqual(31); expect(result.title).toContain('CPU p95'); expect(result.deadHidden && result.timeAdvanced).toBe(true);
+});
+
+test('settlement snapshots never rebuild the final scoreboard or send repeated input, but still settle falling drops', async ({ page }) => {
+  await fixture(page);
+  const result = await page.evaluate(async () => {
+    const { game, room, player } = window.__performance;
+    room.dropWeapon(player); room.finish(); game.applySnapshot(room.snapshot());
+    let inputs = 0; game.send = data => { if (data.type === 'input') inputs++; };
+    const table = document.getElementById('round-table'), first = table.firstChild;
+    const observer = new MutationObserver(() => {}); observer.observe(table, { childList: true, subtree: true });
+    for (let i = 0; i < 100; i++) { room.tick(1 / 60); game.applySnapshot(room.snapshot()); }
+    const result = { mutations: observer.takeRecords().length, inputs, sameTable: table.firstChild === first, dropHeight: game.droppedWeapons[0]?.y, actualHeight: [...room.droppedWeapons.values()][0]?.y };
+    observer.disconnect(); await game.dispose(); return result;
+  });
+  expect(result.mutations).toBe(0); expect(result.inputs).toBe(0); expect(result.sameTable).toBe(true); expect(result.dropHeight).toBe(result.actualHeight);
 });
 
 test('corpse warmup and retirement reuse models, restore opacity and release bounded pools', async ({ page }) => {

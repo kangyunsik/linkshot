@@ -3,9 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Room } from '../shared/simulation.js';
 import { NETWORK_PROTOCOL, RULES, MATCHMAKING_MAPS as MAPS } from '../shared/world.js';
-import { isWeaponId, getSkin, WEAPONS } from '../shared/catalog.js';
+import { isWeaponId, getWeapon, getSkin, ownsWeapon } from '../shared/catalog.js';
 import { EMPTY_INPUT, advanceTime } from '../shared/movement.js';
-import { roundReward } from '../shared/progression.js';
+import { roundReward, normalizeSuppressedWeapons } from '../shared/progression.js';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { CustomGateway } from './custom-gateway.js';
@@ -38,6 +38,7 @@ export class SpringEngineClient {
   abandon(id, accountId) { return this.request(`/internal/matches/${id}/abandon`, { engineId: this.engineId, accountId }); }
   consumeCustom(ticket) { return this.request('/internal/custom/consume-ticket', { engineId: this.engineId, ticket }); }
   consumeRankBadge(ticket) { return this.request('/internal/lan/rank-badge', { engineId: this.engineId, ticket }); }
+  accountEquipment(id) { return this.request(`/internal/accounts/${id}/equipment`); }
 }
 
 class OnlineRoom extends Room {
@@ -64,7 +65,7 @@ class OnlineRoom extends Room {
 export function createOnlineEngine({ client = new SpringEngineClient(), host = process.env.ENGINE_BIND || '127.0.0.1', port = process.env.ENGINE_PORT === undefined ? 8090 : Number(process.env.ENGINE_PORT), publicUrl = process.env.ENGINE_PUBLIC_URL, origins = (process.env.FRONTEND_ORIGINS || 'http://127.0.0.1:4173,http://localhost:4173,http://127.0.0.1:3000,http://localhost:3000').split(','), loop = true, clock = () => Date.now(), countdownMs = 5000 } = {}) {
   if (!Number.isFinite(countdownMs) || countdownMs < 0 || countdownMs > 10_000) throw new Error('Invalid countdown duration.');
   const matches = new Map(), loading = new Map(), connections = new Set(), timers = []; let closed = false, syncing = false;
-  const custom = new CustomGateway({ send, clock, capacity: () => Math.max(0, 24 - matches.size - loading.size - lan.directory.rooms.size) });
+  const custom = new CustomGateway({ send, clock, fetchProfile: client.accountEquipment ? id => client.accountEquipment(id) : null, capacity: () => Math.max(0, 24 - matches.size - loading.size - lan.directory.rooms.size) });
   origins = onlineBrowserOrigins(origins);
   const lan = new LanGateway({ send, clock, origins, engineId: client.engineId, verifyBadge: client.consumeRankBadge ? ticket => client.consumeRankBadge(ticket) : null, capacity: () => Math.max(0, 24 - matches.size - loading.size - custom.directory.rooms.size) });
   const server = http.createServer((request, response) => {
@@ -95,7 +96,7 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
       if (!['ffa', 'teams'].includes(gameType) || gameType === 'teams' && (plan.mode !== 'RANKED' || plan.players.some((p) => !['blue', 'red'].includes(plan.teams?.[p.id])))) throw new Error('Invalid authoritative teams.');
       const room = new OnlineRoom(id.slice(0, 5).toUpperCase(), { mode: plan.mode.toLowerCase(), gameType, mapId: plan.mapId, bots: 0, fragLimit: plan.fragLimit, roundSeconds: plan.roundSeconds, botDifficulty: average >= 1500 ? 'advanced' : average >= 1100 ? 'intermediate' : 'beginner', clock });
       for (const profile of plan.players) {
-        const player = room.addPlayer(profile.id, profile.callsign, false, { ownedWeapons: WEAPONS.map((weapon) => weapon.id), weaponKills: profile.weaponKills, suppressedWeapons: profile.suppressedWeapons, outfitId: profile.outfitId, characterId: profile.characterId });
+        const player = room.addPlayer(profile.id, profile.callsign, false, { ownedWeapons: profile.ownedWeapons, weaponKills: profile.weaponKills, suppressedWeapons: profile.suppressedWeapons, outfitId: profile.outfitId, characterId: profile.characterId });
         player.rankBadge = highestRank(profile);
         if (gameType === 'teams') player.teamId = plan.teams[profile.id];
       }
@@ -117,12 +118,30 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
     room.events.push({ type: 'online-start' });
   }
   function start(match) {
-    if (match.room.phase !== 'waiting' || match.sockets.size !== match.plan.players.length || match.ready.size !== match.plan.players.length) return;
-    const room = match.room; room.phase = 'countdown'; match.countdownEndsAt = clock() + countdownMs;
-    for (const player of room.players.values()) player.hp = 0;
-    for (const player of room.players.values()) room.spawn(player);
-    room.events.push({ type: 'online-countdown', startsAt: match.countdownEndsAt });
-    if (!countdownMs) activate(match);
+    if (!['waiting', 'countdown'].includes(match.room.phase) || !match.ready.size) return;
+    const room = match.room;
+    // One shared deadline, not five fresh seconds per loader/reconnect.
+    if (match.countdownEndsAt === null) {
+      room.phase = 'countdown'; match.countdownEndsAt = clock() + countdownMs;
+      for (const player of room.players.values()) player.hp = 0;
+      for (const player of room.players.values()) room.spawn(player);
+      room.events.push({ type: 'online-countdown', startsAt: match.countdownEndsAt });
+    }
+    if (clock() >= match.countdownEndsAt && match.sockets.size === match.plan.players.length && match.ready.size === match.plan.players.length) activate(match);
+  }
+  function prepareLoadout(match, account, data) {
+    if (!['waiting', 'countdown'].includes(match.room.phase) || !isWeaponId(data.weaponId)) return false;
+    const player = match.room.players.get(account);
+    if (!player || !ownsWeapon(player, data.weaponId)) return false;
+    player.weaponId = player.nextWeaponId = data.weaponId;
+    player.skinId = player.weaponSkinId = getSkin(data.skinId ?? player.skinId).id;
+    if (typeof data.suppressor === 'boolean') match.room.setSuppressor(player, data.weaponId, data.suppressor);
+    player.suppressor = player.suppressedWeapons.includes(data.weaponId);
+    player.ammo = getWeapon(data.weaponId).magazine;
+    player.magazines[data.weaponId] = player.ammo;
+    player.reloadUntil = player.switchUntil = player.nextFireAt = player.shotHeat = 0;
+    player.input = neutral(player); player.pendingShot = null; player.burstLeft = 0; player.equipmentSeq++;
+    return true;
   }
   async function cancel(match) {
     if (match.cancelling) return; match.cancelling = true;
@@ -141,8 +160,8 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
   function tick(dt) {
     for (const match of matches.values()) {
       const now = clock();
-      if (match.room.phase === 'waiting' && now > match.deadline || now - match.lastHealthy > 60_000) { void cancel(match); continue; }
-      if (match.room.phase === 'countdown' && now >= match.countdownEndsAt) activate(match);
+      if (['waiting', 'countdown'].includes(match.room.phase) && now > match.deadline || now - match.lastHealthy > 60_000) { void cancel(match); continue; }
+      if (match.room.phase === 'countdown') start(match);
       if (match.room.phase === 'active') for (const [id, until] of match.disconnected) if (now >= until) { const player = match.room.players.get(id); player.hp = 0; player.respawnAt = Infinity; player.abandoned = true; match.disconnected.delete(id); match.abandoned.add(id); if (client.abandon) void client.abandon(match.id, id).catch(() => {}); }
       const remaining = match.plan.players.length - match.abandoned.size;
       const active = [...match.room.players.values()].filter((p) => !p.abandoned), forfeited = match.room.gameType === 'teams' ? !active.some((p) => p.teamId === 'blue') || !active.some((p) => p.teamId === 'red') : match.plan.bots === 0 && remaining <= 1;
@@ -198,12 +217,9 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
           if (socket.readyState !== WebSocket.OPEN || match.sockets.has(profile.id) || match.abandoned.has(profile.id) || !match.room.players.has(profile.id) || match.room.phase === 'ended') throw new Error('Match access denied.');
           connection.account = profile.id; connection.kind = 'online'; connection.match = match; socket.preJoinEvents = new Set(match.room.events); match.sockets.set(profile.id, socket); match.disconnected.delete(profile.id); clearTimeout(timeout);
           const player = match.room.players.get(profile.id);
-          if (match.room.phase === 'waiting' && isWeaponId(data.weaponId)) {
-            player.nextWeaponId = data.weaponId;
-            player.skinId = getSkin(data.skinId).id;
-            if (typeof data.suppressor === 'boolean') match.room.setSuppressor(player, data.weaponId, data.suppressor);
-            match.room.spawn(player);
-          }
+          player.ownedWeapons = [...profile.ownedWeapons];
+          player.masteryKills = { ...profile.weaponKills }; player.suppressedWeapons = normalizeSuppressedWeapons(profile.suppressedWeapons, profile.weaponKills);
+          prepareLoadout(match, profile.id, data);
           start(match); send(socket, { ...snapshot(match, false), type: 'joined', id: profile.id, events: [], impacts: match.room.impactHistory() });
         } catch { socket.close(1008, 'Invalid or expired match ticket'); }
         finally { connection.pending = false; }
@@ -214,7 +230,19 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
         return;
       }
       const { room } = connection.match;
-      if (data.type === 'ready') { if (room.phase === 'waiting') { connection.match.ready.add(connection.account); start(connection.match); } }
+      if (data.type === 'ready') { if (['waiting', 'countdown'].includes(room.phase)) { connection.match.ready.add(connection.account); start(connection.match); } }
+      else if (data.type === 'prepare-loadout') {
+        const player = room.players.get(connection.account);
+        if (['waiting', 'countdown'].includes(room.phase) && isWeaponId(data.weaponId) && !ownsWeapon(player, data.weaponId) && client.accountEquipment && !connection.equipmentRefreshPending && clock() >= (connection.equipmentRefreshAt || 0)) {
+          connection.equipmentRefreshPending = true; connection.equipmentRefreshAt = clock() + 1000;
+          try {
+            const profile = await client.accountEquipment(connection.account);
+            if (profile.id === connection.account) { player.ownedWeapons = [...profile.ownedWeapons]; player.masteryKills = { ...profile.weaponKills }; player.suppressedWeapons = normalizeSuppressedWeapons(profile.suppressedWeapons, profile.weaponKills); }
+          } catch { /* The old validated inventory remains authoritative on failure. */ }
+          finally { connection.equipmentRefreshPending = false; }
+        }
+        if (data.roundId !== connection.match.id || !prepareLoadout(connection.match, connection.account, data)) send(socket, { type: 'error', message: '준비 중에는 보유한 총기만 변경할 수 있습니다.' });
+      }
       else if (data.type === 'input') room.setInput(connection.account, data);
       else if (data.type === 'equipment') room.interactEquipment(connection.account, data);
       else if (data.type === 'loadout') room.selectLoadout(connection.account, data);
@@ -227,7 +255,6 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
       const match = connection.match; if (!match || match.sockets.get(connection.account) !== socket) return;
       match.sockets.delete(connection.account);
       match.ready.delete(connection.account);
-      if (match.room.phase === 'countdown') { match.room.phase = 'waiting'; match.countdownEndsAt = null; match.deadline = clock() + 30_000; }
       const player = match.room.players.get(connection.account); player.input = neutral(player); player.pendingShot = null; player.burstLeft = 0;
       if (match.room.phase === 'active') match.disconnected.set(connection.account, clock() + 30_000);
     });

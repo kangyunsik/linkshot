@@ -24,6 +24,13 @@ test('HTTP serves the client and whitelisted modules without exposing project fi
   assert.match(await (await fetch(base)).text(), /LINKSHOT/);
   const shared = await fetch(`${base}/shared/world.js`); assert.equal(shared.status, 200); assert.match(shared.headers.get('content-type'), /javascript/);
   const spawns = await fetch(`${base}/shared/spawns.js`); assert.equal(spawns.status, 200); assert.match(spawns.headers.get('content-type'), /javascript/); assert.match(await spawns.text(), /export function addSpawnZones/);
+  const seen = new Set();
+  async function publicModule(url) {
+    if (seen.has(url)) return; seen.add(url);
+    const response = await fetch(url); assert.equal(response.status, 200, url); const source = await response.text();
+    for (const match of source.matchAll(/from\s+['"](\.\.?\/[^'"]+\.js)['"]/g)) await publicModule(new URL(match[1], url).href);
+  }
+  await publicModule(`${base}/shared/simulation.js`); assert.ok(seen.has(`${base}/shared/bot-awareness.js`));
   assert.equal((await fetch(`${base}/vendor/three.core.js`)).status, 200);
   assert.equal((await fetch(`${base}/package.json`)).status, 404);
   assert.equal((await fetch(`${base}/server/index.js`)).status, 404);

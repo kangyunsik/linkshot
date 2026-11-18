@@ -7,14 +7,15 @@ export function isPrivateOnlineHost(host) {
   return [a, b, c, d].every((part) => part <= 255) && (a === 10 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168);
 }
 
-// Local previews may retain a LAN address from an earlier network. Keep API
-// cookies and combat tickets on the browser's loopback host without rewriting
-// LAN clients, public servers or HTTPS/WSS certificate hostnames.
+// Keep same-machine development URLs on the host used by the browser, in both
+// directions: loopback previews of a LAN build, and LAN clients of a local build.
+// Explicit remote APIs and HTTPS/WSS certificate hostnames are never rewritten.
 export function onlineBrowserUrl(value, page = globalThis.location, frontendOrigin = '') {
   const url = new URL(value);
   const frontend = frontendOrigin ? new URL(frontendOrigin) : null;
   const sameDevelopmentComputer = isLoopbackHost(url.hostname) || frontend?.protocol === 'http:' && frontend.hostname === url.hostname && isPrivateOnlineHost(url.hostname);
   if (page && isLoopbackHost(page.hostname) && ['http:', 'ws:'].includes(url.protocol) && sameDevelopmentComputer) url.hostname = page.hostname;
+  else if (page && isPrivateOnlineHost(page.hostname) && !isLoopbackHost(page.hostname) && (!page.protocol || page.protocol === 'http:') && isLoopbackHost(url.hostname) && ['http:', 'ws:'].includes(url.protocol)) url.hostname = page.hostname;
   return url;
 }
 

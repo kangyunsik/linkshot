@@ -54,7 +54,8 @@ test('server combines location multipliers with distance falloff for each shotgu
   for (const [point, front, expected] of [[{ x: 0, y: 1, z: 0 }, false, 1.2], [playerBodyVolumes(victim).find((v) => v.part === 'leftHand').b, true, .5], [{ x: 0, y: 1.58, z: 0 }, true, 1]]) {
     Object.assign(shooter, aimAt(victim, point, front), { weaponId: 'rifle', ammo: 30, shotHeat: 0 }); room.events.length = 0; room.shoot(shooter, 1000, true);
     const ray = room.events.find((event) => event.type === 'shot').rays[0]; assert.ok(Math.abs(ray.damageMultiplier - expected) < 1e-9);
-    assert.equal(room.events.find((event) => event.type === 'damage').damage, Math.round((ray.headshot ? 48 : 28) * expected));
+    const weapon = getWeapon('rifle');
+    assert.equal(room.events.find((event) => event.type === 'damage').damage, Math.round((ray.headshot ? weapon.headDamage : weapon.damage) * expected));
   }
   Object.assign(shooter, aimAt(victim, { x: 0, y: 1, z: 0 }, false, 70), { weaponId: 'rifle', ammo: 30, shotHeat: 0 }); room.events.length = 0; room.shoot(shooter, 1000, true);
   let shot = room.events.find((event) => event.type === 'shot'); const distance = Math.hypot(shot.rays[0].end.x - shot.origin.x, shot.rays[0].end.y - shot.origin.y, shot.rays[0].end.z - shot.origin.z);

@@ -72,6 +72,35 @@ def heavy_sniper(clip, weapon):
     return dry + body + tail * (0.22 + rank * 0.025)
 
 
+def heavy_shotgun(clip, weapon):
+    # Keep a single recorded muzzle attack, but give it a broad, short body.
+    # The old 30ms gate removed almost all of a shotgun's low report/decay.
+    rank = ['shotgun', 'spas12', 's686'].index(weapon)
+    frequency = np.fft.rfftfreq(len(clip), 1 / SAMPLE_RATE)
+    equalizer = (1 + 1.35 / (1 + (frequency / 420) ** 2))
+    equalizer *= (1 - np.exp(-(frequency / 42) ** 4)) / np.sqrt(1 + (frequency / 8500) ** 6)
+    dry = np.fft.irfft(np.fft.rfft(clip) * equalizer, len(clip))
+    time = np.maximum(0, np.arange(len(clip)) / SAMPLE_RATE - 0.009)
+    noise = np.random.default_rng(3012 + rank).normal(size=len(clip))
+    band = np.exp(-(frequency / 820) ** 2) * (1 - np.exp(-(frequency / 70) ** 4))
+    body = np.fft.irfft(np.fft.rfft(noise) * band, len(clip))
+    body /= max(1e-9, np.max(np.abs(body)))
+    body *= (1 - np.exp(-time / .002)) * np.exp(-time / [.065, .083, .048][rank])
+    body *= np.max(np.abs(dry)) * [.48, .58, .42][rank]
+    # Dense, nonperiodic early reflections rather than a second shot, a beep,
+    # or the long sniper echo. S686 stays the shortest and sharpest report.
+    impulse = np.random.default_rng(4020 + rank).normal(size=len(clip))
+    band = (1 - np.exp(-(frequency / 150) ** 4)) / np.sqrt(1 + (frequency / 3700) ** 6)
+    impulse = np.fft.irfft(np.fft.rfft(impulse) * band, len(clip))
+    age = np.maximum(0, time - .012)
+    impulse *= (1 - np.exp(-age / .006)) * np.exp(-age / [.09, .115, .065][rank])
+    impulse[time < .012] = 0
+    impulse /= max(1e-9, np.sqrt(np.sum(impulse ** 2)))
+    size = 1 << (2 * len(clip) - 2).bit_length()
+    tail = np.fft.irfft(np.fft.rfft(dry, size) * np.fft.rfft(impulse, size), size)[:len(clip)]
+    return dry + body + tail * .32
+
+
 profiles = {
     'rifle': ('sks.wav', 0.72, 1.03), 'smg': ('cz.wav', 0.46, 1.12),
     'shotgun': ('shotty.wav', 0.78, 0.93), 'sniper': ('mosin.wav', 1.65, 0.82),
@@ -113,8 +142,12 @@ for weapon, (name, duration, pitch) in profiles.items():
         clip *= np.exp(-np.maximum(0, source_time - 0.045) / 0.03)
         clip[source_time >= 0.32] = 0
         heavy = weapon in ('sniper', 'awp', 'm82')
+        shotgun = weapon in ('shotgun', 'spas12', 's686')
         if heavy:
             clip = heavy_sniper(clip, weapon)
+            clip -= clip.mean()
+        elif shotgun:
+            clip = heavy_shotgun(clip, weapon)
             clip -= clip.mean()
         fade = min(int(SAMPLE_RATE * 0.09), len(clip)); clip[-fade:] *= np.linspace(1, 0, fade) ** 2
         clip[:90] *= np.linspace(0, 1, min(90, len(clip)))
@@ -123,6 +156,6 @@ for weapon, (name, duration, pitch) in profiles.items():
         with wave.open(str(OUTPUT / file), 'wb') as stream:
             stream.setnchannels(1); stream.setsampwidth(2); stream.setframerate(SAMPLE_RATE)
             stream.writeframes((np.clip(clip, -0.95, 0.95) * 32767).astype('<i2').tobytes())
-        files.append({'file': file, 'recording': name, 'sourceAttack': ISOLATED_BLASTS[name], 'singleShot': True, **({'soundProfile': 'heavy-sniper', 'diffuseTailSeconds': duration, 'fixedPitch': pitch} if heavy else {}), 'variant': variant + 1, 'seconds': duration, 'sha256': hashlib.sha256((OUTPUT / file).read_bytes()).hexdigest()})
+        files.append({'file': file, 'recording': name, 'sourceAttack': ISOLATED_BLASTS[name], 'singleShot': True, **({'soundProfile': 'heavy-sniper' if heavy else 'heavy-shotgun', 'diffuseTailSeconds': duration, 'fixedPitch': pitch} if heavy or shotgun else {}), 'variant': variant + 1, 'seconds': duration, 'sha256': hashlib.sha256((OUTPUT / file).read_bytes()).hexdigest()})
         print(file, 'prepared from', name)
-(OUTPUT / 'manifest.json').write_text(json.dumps({'creator': 'Tabasco', 'license': 'CC0-1.0', 'source': 'https://opengameart.org/content/gunshot-sounds', 'archive': 'https://opengameart.org/sites/default/files/sounds.zip', 'processing': 'One audited isolated muzzle blast per weapon, 9ms lead-in, spectral noise reduction, filtering, fixed resampling, mechanical-tail suppression, peak normalization and fade. The three sniper profiles add a bass-weighted body and deterministic dense diffuse 1.65–2.20s decay, never a second recorded shot. No runtime sample/pitch variations or paid API.', 'files': files}, indent=2) + '\n')
+(OUTPUT / 'manifest.json').write_text(json.dumps({'creator': 'Tabasco', 'license': 'CC0-1.0', 'source': 'https://opengameart.org/content/gunshot-sounds', 'archive': 'https://opengameart.org/sites/default/files/sounds.zip', 'processing': 'One audited isolated muzzle blast per weapon, 9ms lead-in, spectral noise reduction, filtering, fixed resampling, mechanical-tail suppression, peak normalization and fade. Snipers add a bass-weighted body and dense diffuse 1.65–2.20s decay. Shotguns add a broad non-tonal low-mid punch and short dense early reflections; SG-12, SPAS-12 and S686 have separate fixed profiles. Never a second recorded shot. No runtime sample/pitch variations or paid API.', 'files': files}, indent=2) + '\n')

@@ -20,7 +20,7 @@ export class RoundEffects {
     this.root.hidden = false; this.root.dataset.kind = kind; this.root.style.setProperty('--effect-duration', `${duration}ms`);
     this.root.querySelector('.eyebrow').textContent = label; this.root.querySelector('h2').textContent = title; this.root.querySelector('p').textContent = detail;
     if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      this.root.querySelector('.round-effect-card').animate([{ opacity: 0, transform: 'scale(1.18)', filter: 'blur(8px)' }, { opacity: 1, transform: 'scale(1)', filter: 'blur(0)' }], { duration: 550, easing: 'cubic-bezier(.16,1,.3,1)' });
+      this.root.querySelector('.round-effect-card').animate([{ opacity: 0, transform: 'scale(1.08)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 550, easing: 'cubic-bezier(.16,1,.3,1)' });
       this.root.querySelector('.round-effect-track').animate([{ transform: 'scaleX(1)' }, { transform: 'scaleX(0)' }], { duration, fill: 'forwards' });
     }
     this.timer = setTimeout(() => { this.root.hidden = true; this.resultActive = false; done?.(); }, duration);

@@ -15,6 +15,8 @@ public class MatchmakingController {
     private final EngineRegistry engines;
     public MatchmakingController(MatchmakingService matchmaking, AccountService accounts, EngineRegistry engines) { this.matchmaking = matchmaking; this.accounts = accounts; this.engines = engines; }
     public record QueueRequest(MatchService.Mode mode) {}
+    public record Acceptance(java.util.UUID matchId, boolean accept) {}
+    @PostMapping("/api/queue/respond") public MatchmakingService.Status respond(Authentication user, @RequestBody Acceptance response) { return matchmaking.respond(accounts.credentials(user.getName()).id(), response.matchId(), response.accept()); }
     @PostMapping("/api/queue") public MatchmakingService.Status join(Authentication user, @RequestBody QueueRequest request) { return matchmaking.join(accounts.credentials(user.getName()).id(), request.mode()); }
     @GetMapping("/api/queue") public MatchmakingService.Status status(Authentication user) { return matchmaking.status(accounts.credentials(user.getName()).id()); }
     @DeleteMapping("/api/queue") public MatchmakingService.Status cancel(Authentication user) { return matchmaking.cancel(accounts.credentials(user.getName()).id()); }

@@ -3,7 +3,7 @@ import { NETWORK_PROTOCOL } from '/shared/world.js';
 import { footstepSignal, killSignal } from './sound-design.js';
 import { gunshotMix } from './gunshot-mix.js';
 
-const SOUND_REVISION = 3;
+const SOUND_REVISION = 4;
 
 export class GameAudio {
   constructor(settings) {
@@ -144,7 +144,7 @@ export class GameAudio {
       this.reloadReady?.then(() => { const elapsed = (performance.now() - queued) / 1000; if (this.reloadSamples.has(weapon.id) && elapsed < remainingSeconds - 0.02 && (!allowed || allowed())) this.reload(weapon.id, remainingSeconds - elapsed, allowed); });
       return null;
     }
-    const c = this.context, source = c.createBufferSource(), gain = c.createGain(); source.buffer = buffer; source.playbackRate.value = 1; gain.gain.value = 0.62;
+    const c = this.context, source = c.createBufferSource(), gain = c.createGain(); source.buffer = buffer; source.playbackRate.value = 1; gain.gain.value = weapon.type === 'SHOTGUN' ? 0.78 : 0.62;
     const offset = Math.max(0, Math.min(buffer.duration - 0.005, weapon.reloadSeconds - remainingSeconds)); source.connect(gain).connect(this.master);
     const voice = { source, gain, weaponId: weapon.id, offset }; this.reloadVoice = voice;
     source.onended = () => { if (this.reloadVoice === voice) this.reloadVoice = null; source.disconnect(); gain.disconnect(); };

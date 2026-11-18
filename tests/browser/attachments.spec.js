@@ -21,9 +21,10 @@ test('local armory unlocks suppressors per weapon at Lv.5, saves the free choice
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1')).points)).toBe(832); expect(errors).toEqual([]);
 });
 
-test('online attachment choices use online mastery and CSRF while ranked weapons stay temporary and local preferences stay separate', async ({ context, page, baseURL }) => {
+test('online attachment choices use account mastery and CSRF without granting unpurchased ranked equipment or changing device records', async ({ context, page, baseURL }) => {
   const origin = new URL(baseURL).origin, api = 'http://127.0.0.1:18080', local = createProfile('separate-attachment-0001'); Object.assign(local, { points: 511, weaponKills: { rifle: SUPPRESSOR_KILLS }, suppressedWeapons: ['rifle'] });
   const account = { id: 'online-attachment', username: 'attachment', callsign: 'ONLINE', points: 0, kills: 0, deaths: 0, casualRating: 1000, rankTier: 'UNRANKED', placementsPlayed: 0, ownedWeapons: ['rifle', 'pistol', 'shotgun', 'sniper'], weaponKills: { rifle: 1549, vector: 1550 }, suppressedWeapons: [] }, writes = [];
+  account.competitive = { ffa: { rankTier: 'UNRANKED', placementsPlayed: 0 }, teams: { rankTier: 'UNRANKED', placementsPlayed: 0 } };
   await context.addInitScript((profile) => { if (!localStorage.getItem('linkshot-profile-v1')) localStorage.setItem('linkshot-profile-v1', JSON.stringify(profile)); }, local);
   await context.route('**/runtime-config.js', (route) => route.fulfill({ contentType: 'text/javascript', body: `export const APP_MODE = 'solo'; export const PROFILE_STORAGE = 'browser'; export const ONLINE_SERVER_URL = ${JSON.stringify(api)};` }));
   await context.route(api + '/api/**', async (route) => {
@@ -39,12 +40,12 @@ test('online attachment choices use online mastery and CSRF while ranked weapons
     } else status = 404;
     return route.fulfill({ status, headers, contentType: 'application/json', body: JSON.stringify(body) });
   });
-  const errors = []; page.on('pageerror', (error) => errors.push(error.message)); await page.goto('/'); await expect(page.locator('#profile-casual-rating')).toHaveText('1,000');
+  const errors = []; page.on('pageerror', (error) => errors.push(error.message)); await page.goto('/'); await expect(page.locator('#profile-casual-rating')).toHaveText('배치 중');
   await page.getByRole('tab', { name: '랭크: 팀전 랭크', exact: true }).click(); await page.locator('#online-loadout-button').click();
-  await expect(page.locator('#online-weapon-choice option')).toHaveCount(WEAPONS.length); await expect(page.getByLabel('온라인 소음기 장착')).toBeDisabled(); await expect(page.getByLabel('온라인 소음기 장착')).not.toBeChecked();
-  await page.locator('#online-weapon-choice').selectOption('vector'); await expect(page.getByLabel('온라인 소음기 장착')).toBeEnabled(); await page.getByLabel('온라인 소음기 장착').check(); await expect(page.getByLabel('온라인 소음기 장착')).toBeEnabled();
+  await expect(page.locator('#weapon-choices button')).toHaveCount(WEAPONS.length); await expect(page.getByLabel('온라인 소음기 장착')).toBeDisabled(); await expect(page.getByLabel('온라인 소음기 장착')).not.toBeChecked();
+  await page.locator('#weapon-choices [data-weapon=vector]').click(); await expect(page.getByLabel('온라인 소음기 장착')).toBeEnabled(); await page.getByLabel('온라인 소음기 장착').check(); await expect(page.getByLabel('온라인 소음기 장착')).toBeEnabled();
   expect(writes).toEqual([{ body: { equipped: true }, csrf: 'attachment-csrf' }]); expect(account.ownedWeapons).not.toContain('vector');
-  await page.reload(); await page.getByRole('tab', { name: '랭크: 팀전 랭크', exact: true }).click(); await page.locator('#online-loadout-button').click(); await page.locator('#online-weapon-choice').selectOption('vector'); await expect(page.getByLabel('온라인 소음기 장착')).toBeChecked();
+  await page.reload(); await page.getByRole('tab', { name: '랭크: 팀전 랭크', exact: true }).click(); await page.locator('#online-loadout-button').click(); await page.locator('#weapon-choices [data-weapon=vector]').click(); await expect(page.getByLabel('온라인 소음기 장착')).toBeChecked();
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1'))); expect(saved.points).toBe(511); expect(saved.suppressedWeapons).toEqual(['rifle']); expect(saved.ownedWeapons).not.toContain('vector');
   await page.getByLabel('온라인 소음기 장착').uncheck(); await expect(page.getByLabel('온라인 소음기 장착')).toBeEnabled(); expect(writes.at(-1)).toEqual({ body: { equipped: false }, csrf: 'attachment-csrf' }); expect(errors).toEqual([]);
 });

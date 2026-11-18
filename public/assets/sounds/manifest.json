@@ -3,7 +3,7 @@
   "license": "CC0-1.0",
   "source": "https://opengameart.org/content/gunshot-sounds",
   "archive": "https://opengameart.org/sites/default/files/sounds.zip",
-  "processing": "One audited isolated muzzle blast per weapon, 9ms lead-in, spectral noise reduction, filtering, fixed resampling, mechanical-tail suppression, peak normalization and fade. The three sniper profiles add a bass-weighted body and deterministic dense diffuse 1.65\u20132.20s decay, never a second recorded shot. No runtime sample/pitch variations or paid API.",
+  "processing": "One audited isolated muzzle blast per weapon, 9ms lead-in, spectral noise reduction, filtering, fixed resampling, mechanical-tail suppression, peak normalization and fade. Snipers add a bass-weighted body and dense diffuse 1.65\u20132.20s decay. Shotguns add a broad non-tonal low-mid punch and short dense early reflections; SG-12, SPAS-12 and S686 have separate fixed profiles. Never a second recorded shot. No runtime sample/pitch variations or paid API.",
   "files": [
     {
       "file": "rifle-1.wav",
@@ -22,15 +22,6 @@
       "variant": 1,
       "seconds": 0.46,
       "sha256": "a3311c0ffe316614da99436d99959d79d282fe94cc285d572799d5d3e897a45c"
-    },
-    {
-      "file": "shotgun-1.wav",
-      "recording": "shotty.wav",
-      "sourceAttack": 0.245,
-      "singleShot": true,
-      "variant": 1,
-      "seconds": 0.78,
-      "sha256": "a43b65b17a8cfca86ab7ba074015ee806b52a6000e458768db7f196869e64878"
     },
     {
       "file": "sniper-1.wav",
@@ -150,15 +141,6 @@
       "sha256": "4584a42306f8977f4994140468207b26e0e12b5c532ea7700c32268374e9ea73"
     },
     {
-      "file": "spas12-1.wav",
-      "recording": "shotty.wav",
-      "sourceAttack": 0.245,
-      "singleShot": true,
-      "variant": 1,
-      "seconds": 0.9,
-      "sha256": "1dfda8f5dfd3feca5d133e64096dc1f3ab608d51541b9c711fc8da2fa30e61ff"
-    },
-    {
       "file": "deagle-1.wav",
       "recording": "cz.wav",
       "sourceAttack": 0.275,
@@ -204,15 +186,6 @@
       "sha256": "42d4bc06b01964fe481be2e7ca041e956f925913449f53217274c7fd440414c3"
     },
     {
-      "file": "s686-1.wav",
-      "recording": "shotty.wav",
-      "sourceAttack": 0.245,
-      "singleShot": true,
-      "variant": 1,
-      "seconds": 0.65,
-      "sha256": "5cfc990df329d8afb0cfc7f86d5d6dc4e9c0b6f7f90051f64f625b33cc316867"
-    },
-    {
       "file": "vector-1.wav",
       "recording": "cz.wav",
       "sourceAttack": 0.275,
@@ -220,6 +193,42 @@
       "variant": 1,
       "seconds": 0.36,
       "sha256": "2cb9c5b987d4996ccab1cb9d21eec0467708c26aa265096f4c68caffe1e2a3e8"
+    },
+    {
+      "file": "shotgun-1.wav",
+      "recording": "shotty.wav",
+      "sourceAttack": 0.245,
+      "singleShot": true,
+      "soundProfile": "heavy-shotgun",
+      "diffuseTailSeconds": 0.78,
+      "fixedPitch": 0.93,
+      "variant": 1,
+      "seconds": 0.78,
+      "sha256": "f850acfa1cdd22a186f3088c2d1db9487cc8ba5978a88acfe9b1761a26bc9947"
+    },
+    {
+      "file": "spas12-1.wav",
+      "recording": "shotty.wav",
+      "sourceAttack": 0.245,
+      "singleShot": true,
+      "soundProfile": "heavy-shotgun",
+      "diffuseTailSeconds": 0.9,
+      "fixedPitch": 0.84,
+      "variant": 1,
+      "seconds": 0.9,
+      "sha256": "71ab6dcf8b4c92dbcd32511a4e4ae99a80c5a2b55c71f5653a2fcf2f7c40859a"
+    },
+    {
+      "file": "s686-1.wav",
+      "recording": "shotty.wav",
+      "sourceAttack": 0.245,
+      "singleShot": true,
+      "soundProfile": "heavy-shotgun",
+      "diffuseTailSeconds": 0.65,
+      "fixedPitch": 1.02,
+      "variant": 1,
+      "seconds": 0.65,
+      "sha256": "526b8eb6bc820ce6c0b8457cf0ae61c1e5a44f34a5fc8bd15485e204838382e5"
     }
   ]
 }

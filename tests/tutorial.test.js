@@ -56,7 +56,7 @@ test('the final dummy never moves or attacks and repeatedly respawns at its exac
   advance(5000); assert.deepEqual(position(), initial); assert.equal(p.hp, 100); assert.equal(p.deaths, 0); assert.equal(bot.shotSerial, 0); assert.equal(bot.stepDistance, 0); assert.equal(t.room.phase, 'active');
   assert.equal(t.room.shoot(bot, t.room.clock(), true), false);
   for (let i = 0; i < 3; i++) {
-    const spawn = bot.spawnCount, kills = p.kills; advance(900, { ...aimAtTarget(t), fire: true, ads: true }); assert.equal(bot.hp, 0); assert.equal(p.kills, kills + 1); assert.equal(bot.respawnAt - bot.diedAt, RULES.respawnSeconds * 1000);
+    const spawn = bot.spawnCount, kills = p.kills; advance(900, { ...aimAtTarget(t), fire: true, ads: true }); assert.equal(bot.hp, 0); assert.equal(p.kills, kills + 1); assert.ok(Math.abs(bot.respawnAt - bot.diedAt - RULES.respawnSeconds * 1000) < 1e-6);
     advance(3100); assert.equal(bot.spawnCount, spawn + 1); assert.equal(bot.hp, 100); assert.equal(bot.weaponId, 'rifle'); assert.equal(bot.protectedUntil, 0); assert.deepEqual(position(), initial); assert.equal(bot.history.every((sample) => sample.x === initial.x && sample.z === initial.z), true); assert.equal(bot.shotSerial, 0); assert.equal(p.hp, 100); assert.equal(p.spawnCount, life); assert.equal(t.completed, false); assert.equal(t.room.phase, 'active'); assert.equal(t.room.result, null);
   }
   const command = { action: 'finish-training', roundId: t.room.roundId, spawnCount: p.spawnCount };

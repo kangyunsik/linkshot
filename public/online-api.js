@@ -23,10 +23,14 @@ export class OnlineApi {
   queue(mode) { return this.request('/api/queue', { method: 'POST', body: { mode } }); }
   queueStatus() { return this.request('/api/queue'); }
   cancelQueue() { return this.request('/api/queue', { method: 'DELETE' }); }
+  respondToMatch(matchId, accept) { return this.request('/api/queue/respond', { method: 'POST', body: { matchId, accept } }); }
   queueHeartbeat() { return this.request('/api/queue/heartbeat', { method: 'POST' }); }
   ticket() { return this.request('/api/match/ticket', { method: 'POST' }); }
   customTicket() { return this.request('/api/custom/ticket', { method: 'POST' }); }
   rankBadgeTicket(engineId) { return this.request('/api/account/rank-badge-ticket', { method: 'POST', body: { engineId } }); }
+  purchaseWeapon(weaponId) { return this.request(`/api/account/weapons/${encodeURIComponent(weaponId)}/purchase`, { method: 'POST' }); }
+  selectCharacter(characterId) { return this.request('/api/account/character', { method: 'POST', body: { characterId } }); }
+  selectOutfit(outfitId, purchase = false) { return this.request('/api/account/outfit', { method: 'POST', body: { outfitId, purchase } }); }
   receipt(id) { return this.request(`/api/results/${encodeURIComponent(id)}`); }
   history() { return this.request('/api/results'); }
   register(username, password) { return this.request('/api/auth/register', { method: 'POST', body: { username, password } }); }

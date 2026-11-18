@@ -77,7 +77,7 @@ function gridFor(world) {
   grids.set(data, grid); return grid;
 }
 
-export function findPath(from, to, world = WORLD) {
+export function findPath(from, to, world = WORLD, variant = 0) {
   const grid = gridFor(world), { width, height, minX, minZ, cells, floors, layers, cellCount, checked, links, visited, parents, queue } = grid;
   const point = (index, overrideY) => { const cell = index % cellCount; return { x: minX + cell % width * GRID, z: minZ + Math.floor(cell / width) * GRID, y: overrideY ?? floors[index] }; };
   const cell = (p) => ({ x: clamp(Math.round((p.x - minX) / GRID), 0, width - 1), z: clamp(Math.round((p.z - minZ) / GRID), 0, height - 1) });
@@ -99,7 +99,11 @@ export function findPath(from, to, world = WORLD) {
   for (let i = 0; i < count; i++) {
     const current = queue[i], flat = current % cellCount, x = flat % width, z = Math.floor(flat / width), distance = Math.abs(b.x - x) + Math.abs(b.z - z) + Math.abs(floors[current] - (to.y || 0)) * 6;
     if (distance < best) { best = distance; closest = current; } if (current === end) break;
-    for (let side = 0; side < 4; side++) {
+    // Equal-length routes need not use the same side of every obstacle. Keep
+    // variant=0 stable for tools/tests, and vary only tie order, not walkability.
+    const rotation = variant ? ((Math.imul(current + 1, variant | 1) >>> 16) ^ variant) & 3 : 0;
+    for (let order = 0; order < 4; order++) {
+      const side = (rotation + order * (variant & 4 ? 3 : 1)) & 3;
       const [dx, dz] = DIRECTIONS[side], nx = x + dx, nz = z + dz;
       if (nx < 0 || nx >= width || nz < 0 || nz >= height) continue;
       for (let layer = 0; layer < layers.length; layer++) {

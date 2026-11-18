@@ -38,6 +38,9 @@ const lerp = THREE.MathUtils.lerp;
 const clockText = (seconds) => `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`;
 
 export function renderScoreboard(element, players, selfId) {
+  const signature = JSON.stringify([selfId, players.map(p => [p.id, p.name, p.kills, p.deaths, p.abandoned, p.connected, p.teamId, p.isBot, p.rankBadge])]);
+  if (element.dataset.score === signature) return;
+  element.dataset.score = signature;
   const table = document.createElement('table'); table.className = 'score-table';
   const head = table.createTHead().insertRow();
   for (const title of ['#', 'OPERATOR', 'KILLS', 'DEATHS', 'K/D']) { const cell = document.createElement('th'); cell.textContent = title; head.append(cell); }
@@ -78,9 +81,9 @@ function signTexture(title, subtitle, orange = false) {
 }
 
 export class FPSGame {
-  constructor({ canvas, minimap, settings, audio, send, onMenu, onFatal, mapId, world, weaponId = 'rifle', skinId = 'standard', outfitId = 'field', characterId = 'male' }) {
+  constructor({ canvas, minimap, settings, audio, send, onMenu, onFatal, onResults, onPrepareLoadout, mapId, world, weaponId = 'rifle', skinId = 'standard', outfitId = 'field', characterId = 'male' }) {
     this.canvas = canvas; this.minimap = minimap; this.settings = settings; this.audio = audio;
-    this.send = send; this.onMenu = onMenu; this.onFatal = onFatal;
+    this.send = send; this.onMenu = onMenu; this.onFatal = onFatal; this.onResults = onResults; this.onPrepareLoadout = onPrepareLoadout;
     this.abort = new AbortController(); this.keys = new Set(); this.remote = new Map(); this.effects = [];
     this.players = []; this.selfId = null; this.local = null; this.predicted = null; this.room = null;
     this.snapshotOrder = new SnapshotOrder(); this.lookInput = new LookInput(); this.uniformTeam = null;
@@ -126,9 +129,11 @@ export class FPSGame {
   set pitch(value) { this.aimRecoil.reset(value); }
   get locked() { return document.pointerLockElement === this.canvas; }
   get serverNow() { return Date.now() + this.serverOffset; }
+  get preparing() { return ['casual', 'ranked'].includes(this.room?.mode) && ['waiting', 'countdown'].includes(this.room?.phase); }
 
   prepareGraphics() {
     if (this.graphicsPromise) return this.graphicsPromise;
+    if (this.predicted) { this.camera.position.set(this.predicted.x, this.predicted.y + playerPose(this.predicted).eyeHeight, this.predicted.z); this.camera.rotation.set(this.pitch, this.yaw, 0); }
     const warmup = this.combat.prepareWarmup(this.players), visibility = [];
     this.bulletMarks.prepareWarmup();
     visibility.push([this.weapon, this.weapon.visible]); this.weapon.visible = true;
@@ -353,6 +358,10 @@ export class FPSGame {
   }
 
   selectWeapon(id) {
+    if (this.preparing && ownsWeapon(this.local, id)) {
+      this.send({ type: 'prepare-loadout', roundId: this.room.roundId, weaponId: id });
+      this.closeLoadout(false); return;
+    }
     if (!this.local || this.local.hp > 0 || this.room?.phase !== 'active' || !ownsWeapon(this.local, id)) return;
     this.send({ type: 'loadout', weaponId: getWeapon(id).id, open: false });
     this.closeLoadout(false);
@@ -360,15 +369,19 @@ export class FPSGame {
   }
 
   openLoadout() {
-    if (!this.local || this.local.hp > 0 || this.room?.phase !== 'active') return;
-    this.loadoutOpen = true; this.clearInput(); this.send({ type: 'loadout', open: true });
+    if (this.preparing && this.onPrepareLoadout) { this.onPrepareLoadout(); return; }
+    if (!this.local || !this.preparing && (this.local.hp > 0 || this.room?.phase !== 'active')) return;
+    this.loadoutOpen = true; this.clearInput(); if (!this.preparing) this.send({ type: 'loadout', open: true });
+    document.querySelector('.respawn-loadout-card>h2').textContent = this.preparing ? '출격 무기 선택' : '다음 부활 무기 선택';
+    document.querySelector('.respawn-loadout-card>p').textContent = this.preparing ? '경기 시작 전까지 출격 무기를 바꿀 수 있습니다. F로 전체화면을 전환하세요.' : '선택은 다음 부활부터 적용됩니다. 생존 중에는 G로 바닥 총기만 교체할 수 있습니다.';
+    document.querySelector('.respawn-loadout-card>small').textContent = this.preparing ? '출격 무기 선택 · 시작 전까지 변경 가능 · E로 닫기' : '사망 후 최대 15초 대기 · 목록을 클릭해 선택 · 처음 10종은 숫자 1–9, 0 지원';
     if (this.locked) document.exitPointerLock();
     $('pause-overlay').hidden = true; $('respawn-loadout').hidden = false;
   }
 
   closeLoadout(notify = true) {
     this.loadoutOpen = false; $('respawn-loadout').hidden = true;
-    if (notify && this.local?.hp <= 0) { this.send({ type: 'loadout', open: false }); this.lock(); }
+    if (notify && !this.preparing && this.local?.hp <= 0) { this.send({ type: 'loadout', open: false }); this.lock(); }
   }
 
   makeAvatar(player) {
@@ -436,8 +449,15 @@ export class FPSGame {
       // No live switching, including wheel input.
     }, { ...options, passive: false });
     document.addEventListener('keydown', (event) => {
+      const editing = event.target.matches('input, select, textarea, [contenteditable=true]');
+      if (event.code === 'KeyF' && !event.repeat && !editing) {
+        event.preventDefault();
+        if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+        else $('game-shell').requestFullscreen?.().catch(() => {});
+        return;
+      }
       if (event.target.matches('input, select, textarea') || document.querySelector('dialog[open]')) return;
-      if (event.code === 'KeyE' && !event.repeat && this.local?.hp <= 0) { event.preventDefault(); this.loadoutOpen ? this.closeLoadout() : this.openLoadout(); return; }
+      if (event.code === 'KeyE' && !event.repeat && (this.preparing || this.local?.hp <= 0)) { event.preventDefault(); this.loadoutOpen ? this.closeLoadout() : this.openLoadout(); return; }
       if (event.code === 'Escape' && this.loadoutOpen) { event.preventDefault(); this.closeLoadout(); return; }
       if (this.loadoutOpen) {
         const item = WEAPONS.find((weapon) => weapon.slot <= 10 && (`Digit${weapon.slot % 10}` === event.code || `Numpad${weapon.slot % 10}` === event.code));
@@ -457,20 +477,21 @@ export class FPSGame {
       this.keys.add(event.code);
       if (event.code === 'Space' && !event.repeat) { this.jumpPressedUntil = performance.now() + 120; this.send(this.input()); }
       if (event.code === 'KeyR' && !event.repeat) this.reloadPressedUntil = performance.now() + 180;
-      if (event.code === 'KeyF' && !event.repeat) {
-        if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
-        else this.canvas.parentElement.requestFullscreen?.().catch(() => {});
-      }
     }, options);
     document.addEventListener('keyup', (event) => { this.keys.delete(event.code); if (event.code === 'Tab') $('scoreboard-overlay').hidden = true; }, options);
     document.addEventListener('pointerlockchange', () => {
       this.lookInput.transition(performance.now());
       if (!this.locked) this.clearInput();
-      if (this.room?.phase !== 'ended' && !this.loadoutOpen && this.local?.hp > 0) this.onMenu(!this.locked);
+      if (this.locked) { this.controlEngaged = true; $('combat-focus-hint').hidden = true; $('combat-focus-menu').hidden = true; }
+      if (this.room?.phase === 'active' && !this.loadoutOpen && this.local?.hp > 0 && (this.locked || this.controlEngaged)) this.onMenu(!this.locked);
     }, options);
     window.addEventListener('blur', () => { this.clearInput(); if (this.locked) document.exitPointerLock(); }, options);
     document.addEventListener('visibilitychange', () => { if (document.hidden) { this.clearInput(); if (this.locked) document.exitPointerLock(); } }, options);
     this.canvas.addEventListener('webglcontextlost', (event) => { event.preventDefault(); this.onFatal('그래픽 연결이 중단되었습니다. 페이지를 새로고침한 후 다시 참가해 주세요.'); }, options);
+    this.canvas.addEventListener('click', () => { if (this.room?.phase === 'active' && !$('combat-focus-hint').hidden) void this.lock(); }, options);
+    $('match-intro-loadout').addEventListener('click', () => this.openLoadout(), options);
+    $('combat-focus-hint').addEventListener('click', () => void this.lock(), options);
+    $('combat-focus-menu').addEventListener('click', () => this.onMenu(true), options);
     $('respawn-loadout-close').addEventListener('click', () => this.closeLoadout(), options);
     $('respawn-weapon-choices').replaceChildren();
     for (const weapon of WEAPONS) {
@@ -531,13 +552,25 @@ export class FPSGame {
 
   resize() {
     const width = window.innerWidth, height = window.innerHeight;
+    if (this.renderWidth === width && this.renderHeight === height && this.renderPixelRatio === this.renderer.getPixelRatio()) return;
+    this.renderWidth = width; this.renderHeight = height; this.renderPixelRatio = this.renderer.getPixelRatio();
     this.camera.aspect = width / height; this.camera.updateProjectionMatrix(); this.renderer.setSize(width, height, false);
   }
 
   applySnapshot(data, id = this.selfId) {
     if (this.disposed || !this.snapshotOrder.accept(data)) return;
     const changedRound = !!this.room && this.room.roundId !== data.room.roundId;
+    const previousPhase = this.room?.phase;
     this.selfId = id; this.room = data.room; this.players = data.players;
+    this.online = data.online;
+    // Final combat state is immutable; settlement heartbeats must not rebuild
+    // the entire HUD/table or emit another neutral input at 20Hz.
+    if (!changedRound && previousPhase === 'ended' && data.room.phase === 'ended') {
+      this.serverOffset = data.serverTime - Date.now();
+      this.syncDroppedWeapons(data.droppedWeapons || []);
+      return;
+    }
+    if (previousPhase === 'countdown' && data.room.phase === 'active') this.closeLoadout(false);
     this.objectiveView.update(data.room);
     this.online = data.online;
     this.tutorial = data.tutorial;
@@ -567,7 +600,9 @@ export class FPSGame {
     }
     this.local = local;
     const roundId = data.room.roundId;
-    this.roundEffects.update(data.room, data.players, id, () => { if (!this.disposed && this.room.roundId === roundId && this.room.phase === 'ended') $('round-overlay').hidden = false; });
+    this.roundEffects.update(data.room, data.players, id, () => {
+      if (!this.disposed && this.room.roundId === roundId && this.room.phase === 'ended') { $('round-overlay').hidden = false; this.onResults?.(); }
+    });
     const team = isTeamGame(this.room.gameType) ? local.teamId : null;
     if (this.uniformTeam !== team) { this.uniformTeam = team; for (const model of this.weaponModels.values()) applyViewmodelUniform(model, team); }
     if (equipmentChanged && !respawned) {
@@ -605,6 +640,7 @@ export class FPSGame {
       this.handleEvent(event);
     }
     if (data.room.phase === 'ended') {
+      $('combat-focus-hint').hidden = true; $('combat-focus-menu').hidden = true;
       this.closeLoadout(false);
       this.clearInput(); if (this.locked) document.exitPointerLock();
       $('pause-overlay').hidden = true; $('round-overlay').hidden = this.roundEffects.resultActive; $('respawn-overlay').hidden = true;
@@ -652,7 +688,7 @@ export class FPSGame {
       this.audio.reload(weapon.id, Math.max(0, until - this.serverNow) / 1000, () => !this.disposed && this.local?.hp > 0 && this.local.spawnCount === life && this.local.reloadUntil === until && this.serverNow < until && this.room?.phase === 'active');
     }
     if (!reloading && this.hadReload) this.audio.stopReload?.(); this.hadReload = reloading;
-    this.hud['respawn-overlay'].hidden = local.hp > 0 || this.room.phase === 'ended';
+    this.hud['respawn-overlay'].hidden = local.hp > 0 || this.room.phase !== 'active';
     $('respawn-next-weapon').textContent = `${getWeapon(local.nextWeaponId || local.weaponId).name} · 다음 부활 장비`;
     const death = local.lastDeath;
     updateRankBadge($('death-rank-badge'), death?.attackerRankBadge);
@@ -848,12 +884,17 @@ export class FPSGame {
 
   animate(now) {
     if (this.disposed) return;
-    const frameStarted = performance.now(); let poseUpdates = 0, viewTime = Infinity;
     this.frameId = requestAnimationFrame(this.animate);
+    if (!this.graphicsReady) { this.previousFrame = now; return; }
+    // Menus/preparation/results need smooth backgrounds, not full-rate IK,
+    // visibility raycasts and DOM work with most renders then thrown away.
+    const interval = document.hidden ? 250 : this.locked && this.room?.phase === 'active' ? 0 : 1000 / 30;
+    if (now - this.previousFrame < interval - 0.25) return;
+    const frameStarted = performance.now(); let poseUpdates = 0, viewTime = Infinity;
     const elapsed = Math.max(0, (now - this.previousFrame) / 1000), dt = Math.min(elapsed, 1 / 30); this.previousFrame = now;
     this.aimRecoil.update(now);
     const input = this.input();
-    if (now - this.lastSend >= 1000 / 30 && this.local) { this.send(input); this.lastSend = now; }
+    if (now - this.lastSend >= 1000 / 30 && this.local && this.room.phase === 'active') { this.send(input); this.lastSend = now; }
     if (this.predicted && this.local) {
       if (this.local.hp > 0 && this.room.phase === 'active') advancePredictedMovement(this.predicted, input, elapsed, this.world, this.serverNow);
       const walking = this.predicted.walking;
@@ -911,7 +952,7 @@ export class FPSGame {
       // Only the four arms spread; both hip-fire and ADS centers stay fixed.
       this.hud['crosshair'].style.scale = '1';
       this.hud['crosshair'].style.setProperty('--crosshair-gap', `${Math.min(26, spread * 170 + this.recoil * 2.5 + (weapon.type === 'SHOTGUN' ? 5 : 0))}px`);
-      this.hud['crosshair'].dataset.accuracy = !this.predicted.grounded ? 'airborne' : walking ? 'walking' : this.predicted.moveSpeed > 0.2 ? 'moving' : 'steady';
+      this.hud['crosshair'].dataset.accuracy = !this.predicted.grounded ? 'airborne' : this.predicted.crouching ? 'crouched' : walking ? 'walking' : this.predicted.moveSpeed > 0.2 ? 'moving' : 'steady';
       this.hud['protection-hint'].hidden = this.local.hp <= 0 || this.local.protectedUntil < this.serverNow;
       if (this.local.hp <= 0) this.hud['respawn-count'].textContent = Math.max(1, Math.ceil((this.local.respawnAt - this.serverNow) / 1000));
     }
@@ -976,7 +1017,7 @@ export class FPSGame {
       const effect = this.effects[i]; this.scene.remove(effect.object); effect.object.geometry.dispose(); effect.object.material.dispose(); this.effects.splice(i, 1);
     }
     this.dust.rotation.y = Math.sin(now / 50000) * 0.03;
-    if (this.graphicsReady && (this.locked || !this.lastRender || now - this.lastRender > 1000 / 10)) {
+    if (!document.hidden) {
       this.renderFrame(); this.lastRender = now;
       this.frameStats.record(now, performance.now() - frameStarted, this.renderer.info.render, poseUpdates);
     }
@@ -1012,8 +1053,9 @@ export class FPSGame {
     this.hitmarkerAnimation?.cancel();
     this.audio.stopReload?.();
     if (this.locked) document.exitPointerLock();
-    if (this.graphicsPreparing) this.disposalPromise = this.graphicsPromise.catch(() => {}).then(() => this.releaseGraphics());
-    else { this.releaseGraphics(); this.disposalPromise = Promise.resolve(); }
+    // Let the destination UI paint before releasing thousands of GPU objects.
+    const retired = this.graphicsPreparing ? this.graphicsPromise.catch(() => {}) : Promise.resolve();
+    this.disposalPromise = retired.then(() => new Promise(resolve => setTimeout(() => { this.releaseGraphics(); resolve(); }, 32)));
     $('scope-overlay').hidden = true; $('ads-reticle').hidden = true;
     $('team-score-hud').hidden = true; $('custom-progress-note').hidden = true;
     $('objective-hud').hidden = true;
@@ -1023,6 +1065,7 @@ export class FPSGame {
     this.remote.clear(); this.groundItems.clear(); this.effects.length = 0; $('equipment-hint').hidden = true;
     this.rankImages?.clear();
     this.closeLoadout(false);
+    $('combat-focus-hint').hidden = true; $('combat-focus-menu').hidden = true;
     for (const id of ['pause-overlay', 'round-overlay', 'scoreboard-overlay', 'respawn-overlay']) $(id).hidden = true;
     $('killfeed').replaceChildren();
     this.hud.hitmarker.classList.remove('visible'); this.hud['damage-vignette'].classList.remove('visible');

@@ -31,7 +31,9 @@ public class MatchmakingService {
         this.db = db; this.matches = matches; this.engines = engines; this.catalog = catalog; this.properties = properties; this.enabled = enabled; this.waitSeconds = waitSeconds; this.fragLimit = fragLimit; this.roundSeconds = roundSeconds;
     }
     public record Entry(UUID account, MatchService.Mode mode, int rating, Instant queuedAt) {}
-    public record Status(String state, MatchService.Mode mode, int elapsedSeconds, int playersFound, int requiredPlayers, Integer aiInSeconds, int ratingGap, UUID matchId, String reason) {}
+    public record Status(String state, MatchService.Mode mode, int elapsedSeconds, int playersFound, int requiredPlayers, Integer aiInSeconds, int ratingGap, UUID matchId, String reason, Instant acceptanceDeadline, Instant serverTime, int acceptedPlayers) {
+        public Status(String state, MatchService.Mode mode, int elapsedSeconds, int playersFound, int requiredPlayers, Integer aiInSeconds, int ratingGap, UUID matchId, String reason) { this(state, mode, elapsedSeconds, playersFound, requiredPlayers, aiInSeconds, ratingGap, matchId, reason, null, Instant.now(), 0); }
+    }
     public boolean configured() { return enabled && properties.engineEnabled(); }
     public boolean available() { return configured() && engines.online(); }
     public int players() { return 4; }
@@ -59,6 +61,8 @@ public class MatchmakingService {
     public Status status(UUID account) {
         var active = matches.active(account);
         if (active != null) {
+            var offer = matches.offerStatus(active.id(), account);
+            if (offer != null) return new Status("ACCEPTED".equals(offer.decision()) ? "ACCEPTED" : "OFFERED", active.mode(), 0, active.players().size(), players(active.mode()), null, 0, active.id(), "수락하지 않은 자리는 AI로 대체됩니다. 미수락은 전적과 RP에 반영되지 않습니다.", offer.deadline(), Instant.now(), offer.accepted());
             boolean abandoned = db.queryForObject("SELECT abandoned FROM match_players WHERE match_id = ? AND account_id = ?", Boolean.class, active.id(), account);
             return new Status(abandoned ? "ABANDONED" : active.status().equals("CLAIMED") ? "READY" : "ASSIGNED", active.mode(), 0, active.players().size(), players(active.mode()), null, 0, active.id(), abandoned ? "탈주 처리되었습니다. 경기 종료와 정산을 기다려 주세요." : "");
         }
@@ -70,16 +74,26 @@ public class MatchmakingService {
     }
     @Transactional public Status cancel(UUID account) {
         db.queryForObject("SELECT id FROM matchmaking_lock WHERE id = 1 FOR UPDATE", Integer.class);
-        db.queryForObject("SELECT account_id FROM profiles WHERE account_id = ? FOR UPDATE", UUID.class, account);
-        if (matches.active(account) != null) throw new IllegalArgumentException("이미 배정된 경기는 취소할 수 없습니다. 경기 입장/재접속을 이용하세요.");
+        var active = matches.active(account);
+        if (active != null) {
+            if (matches.offerStatus(active.id(), account) == null) throw new IllegalArgumentException("이미 수락한 경기는 취소할 수 없습니다. 경기 입장/재접속을 이용하세요.");
+            matches.respond(active.id(), account, false);
+            return status(account);
+        }
         db.update("DELETE FROM match_queue WHERE account_id = ?", account); return status(account);
+    }
+    @Transactional public Status respond(UUID account, UUID matchId, boolean accept) {
+        db.queryForObject("SELECT id FROM matchmaking_lock WHERE id = 1 FOR UPDATE", Integer.class);
+        matches.respond(matchId, account, accept);
+        return status(account);
     }
     public void heartbeat(UUID account) { db.update("UPDATE match_queue SET heartbeat_at = CURRENT_TIMESTAMP WHERE account_id = ?", account); }
 
     @Scheduled(fixedDelay = 1000, initialDelay = 1000) @Transactional
     public void matchmake() {
-        if (!configured()) return;
         db.queryForObject("SELECT id FROM matchmaking_lock WHERE id = 1 FOR UPDATE", Integer.class);
+        matches.resolveOffers();
+        if (!configured()) return;
         db.update("DELETE FROM match_queue WHERE heartbeat_at < CURRENT_TIMESTAMP - INTERVAL '20 seconds'");
         if (!engines.online()) return;
         int slots = engines.freeSlots(); if (slots <= 0) return;
@@ -91,7 +105,7 @@ public class MatchmakingService {
             boolean ready = group.size() == required || fillsWithAi(anchor.mode()) && waited(anchor) >= waitSeconds;
             if (!ready) continue;
             int bots = required - group.size();
-            matches.create(anchor.mode(), group.stream().map(Entry::account).toList(), bots, catalog.maps().get(random.nextInt(catalog.maps().size())), fragLimit, roundSeconds); slots--;
+            matches.offer(anchor.mode(), group.stream().map(Entry::account).toList(), bots, catalog.maps().get(random.nextInt(catalog.maps().size())), anchor.mode() == MatchService.Mode.RANKED ? 40 : fragLimit, roundSeconds); slots--;
             for (Entry item : group) { used.add(item.account()); db.update("DELETE FROM match_queue WHERE account_id = ?", item.account()); }
         }
     }

@@ -44,6 +44,46 @@ public class MatchService {
     private final JsonMapper json = JsonMapper.builder().build();
     public MatchService(JdbcTemplate db, AccountService accounts, GameCatalog catalog, OnlineProperties properties, RatingService ratings, EngineRegistry engines, @Value("${linkshot.matchmaking.ranked-ai-enabled:true}") boolean rankedAiEnabled) { this.db = db; this.accounts = accounts; this.catalog = catalog; this.properties = properties; this.ratings = ratings; this.engines = engines; this.rankedAiEnabled = rankedAiEnabled; }
     public boolean rankedAiEnabled() { return rankedAiEnabled; }
+    public record Offer(String decision, Instant deadline, int accepted) {}
+
+    @Transactional
+    public Plan offer(Mode mode, List<UUID> players, int bots, String mapId, int fragLimit, int roundSeconds) {
+        Plan plan = create(mode, players, bots, mapId, fragLimit, roundSeconds);
+        db.update("UPDATE online_matches SET acceptance_required = TRUE, acceptance_deadline = CURRENT_TIMESTAMP + INTERVAL '15 seconds' WHERE id = ?", plan.id());
+        for (UUID account : players) db.update("INSERT INTO match_acceptances(match_id, account_id) VALUES (?, ?)", plan.id(), account);
+        return plan;
+    }
+    public Offer offerStatus(UUID id, UUID account) {
+        return db.query("SELECT a.decision, m.acceptance_deadline, (SELECT COUNT(*) FROM match_acceptances WHERE match_id = m.id AND decision = 'ACCEPTED') AS accepted FROM online_matches m JOIN match_acceptances a ON a.match_id = m.id WHERE m.id = ? AND a.account_id = ? AND m.status = 'PENDING' AND m.acceptance_required AND m.acceptance_closed_at IS NULL",
+            (row, index) -> new Offer(row.getString("decision"), row.getTimestamp("acceptance_deadline").toInstant(), row.getInt("accepted")), id, account).stream().findFirst().orElse(null);
+    }
+    @Transactional
+    public void respond(UUID id, UUID account, boolean accept) {
+        if (id == null) throw new IllegalArgumentException("매칭을 확인해 주세요.");
+        if (db.queryForList("SELECT id FROM online_matches WHERE id = ? FOR UPDATE", UUID.class, id).isEmpty()) throw new IllegalArgumentException("매칭을 확인해 주세요.");
+        var decisions = db.queryForList("SELECT decision FROM match_acceptances WHERE match_id = ? AND account_id = ?", String.class, id, account);
+        if (decisions.isEmpty()) throw new IllegalArgumentException("본인에게 배정된 매칭만 응답할 수 있습니다.");
+        Offer offer = offerStatus(id, account);
+        if (offer == null) return; // Idempotent retries never alter a resolved roster.
+        db.update("UPDATE match_acceptances SET decision = ?, responded_at = CURRENT_TIMESTAMP WHERE match_id = ? AND account_id = ? AND decision = 'PENDING' AND EXISTS (SELECT 1 FROM online_matches WHERE id = ? AND acceptance_deadline > CURRENT_TIMESTAMP)", accept ? "ACCEPTED" : "DECLINED", id, account, id);
+        resolveOffer(id);
+    }
+    @Transactional
+    public void resolveOffers() {
+        for (UUID id : db.queryForList("SELECT id FROM online_matches WHERE status = 'PENDING' AND acceptance_required AND acceptance_closed_at IS NULL ORDER BY created_at FOR UPDATE SKIP LOCKED", UUID.class)) resolveOffer(id);
+    }
+    private void resolveOffer(UUID id) {
+        db.update("UPDATE match_acceptances SET decision = 'EXPIRED', responded_at = CURRENT_TIMESTAMP WHERE match_id = ? AND decision = 'PENDING' AND EXISTS (SELECT 1 FROM online_matches WHERE id = ? AND acceptance_deadline <= CURRENT_TIMESTAMP)", id, id);
+        var rejected = db.queryForList("DELETE FROM match_players p USING match_acceptances a WHERE p.match_id = ? AND a.match_id = p.match_id AND a.account_id = p.account_id AND a.decision IN ('DECLINED', 'EXPIRED') RETURNING p.account_id", UUID.class, id);
+        for (UUID account : rejected) {
+            db.update("UPDATE profiles SET active_match_id = NULL WHERE account_id = ? AND active_match_id = ?", account, id);
+            db.update("DELETE FROM match_tickets WHERE match_id = ? AND account_id = ?", id, account);
+        }
+        if (!rejected.isEmpty()) db.update("UPDATE online_matches SET bot_count = bot_count + ?, ranked_ai_enabled = CASE WHEN mode = 'RANKED' THEN TRUE ELSE ranked_ai_enabled END WHERE id = ?", rejected.size(), id);
+        if (db.queryForObject("SELECT COUNT(*) FROM match_acceptances WHERE match_id = ? AND decision = 'PENDING'", Integer.class, id) != 0) return;
+        db.update("UPDATE online_matches SET acceptance_closed_at = CURRENT_TIMESTAMP WHERE id = ?", id);
+        if (db.queryForObject("SELECT COUNT(*) FROM match_players WHERE match_id = ?", Integer.class, id) == 0) release(id);
+    }
 
     // Only trusted server-side matchmaking may call this. There is deliberately
     // no browser endpoint which creates an online match or imports a LAN room.
@@ -70,7 +110,7 @@ public class MatchService {
         db.query("SELECT account_id, team_id FROM match_players WHERE match_id = ? AND team_id IS NOT NULL", (org.springframework.jdbc.core.RowCallbackHandler) row -> teams.put(row.getObject(1).toString(), row.getString(2)), id);
         return db.query("SELECT * FROM online_matches WHERE id = ?", (row, index) -> new Plan(id, Mode.valueOf(row.getString("mode")), row.getString("map_id"), row.getInt("bot_count"), row.getInt("frag_limit"), row.getInt("round_seconds"), row.getString("status"), row.getString("engine_id"), players.stream().map(accounts::profile).toList(), row.getBoolean("ranked_ai_enabled"), row.getInt("bot_rating"), row.getString("game_type"), teams), id).stream().findFirst().orElseThrow(() -> new IllegalArgumentException("Unknown match"));
     }
-    public List<UUID> pending() { return db.queryForList("SELECT id FROM online_matches WHERE status = 'PENDING' ORDER BY created_at LIMIT 32", UUID.class); }
+    public List<UUID> pending() { return db.queryForList("SELECT id FROM online_matches WHERE status = 'PENDING' AND (NOT acceptance_required OR acceptance_closed_at IS NOT NULL) ORDER BY created_at LIMIT 32", UUID.class); }
     public Plan active(UUID account) {
         UUID id = db.queryForObject("SELECT active_match_id FROM profiles WHERE account_id = ?", UUID.class, account);
         return id == null ? null : plan(id);
@@ -79,7 +119,7 @@ public class MatchService {
     @Transactional
     public Plan claim(UUID id, String engineId) {
         validateEngineId(engineId);
-        int changed = db.update("UPDATE online_matches SET status = 'CLAIMED', engine_id = ?, heartbeat_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'PENDING'", engineId, id);
+        int changed = db.update("UPDATE online_matches SET status = 'CLAIMED', engine_id = ?, heartbeat_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'PENDING' AND (NOT acceptance_required OR acceptance_closed_at IS NOT NULL)", engineId, id);
         Plan plan = plan(id);
         if (changed != 1 && !(plan.status().equals("CLAIMED") && engineId.equals(plan.engineId()))) throw new IllegalArgumentException("Match is not available to this engine");
         if (plan.mode() == Mode.RANKED && plan.bots() != 0 && !plan.rankedAiEnabled()) throw new IllegalArgumentException("Ranked AI is not enabled for this assignment");
@@ -182,7 +222,7 @@ public class MatchService {
     }
     @Transactional
     public int expireInactive() {
-        var stale = db.queryForList("SELECT id FROM online_matches WHERE (status = 'PENDING' AND created_at < CURRENT_TIMESTAMP - INTERVAL '30 seconds') OR (status = 'CLAIMED' AND heartbeat_at < CURRENT_TIMESTAMP - INTERVAL '60 seconds') FOR UPDATE SKIP LOCKED", UUID.class);
+        var stale = db.queryForList("SELECT id FROM online_matches WHERE (status = 'PENDING' AND (NOT acceptance_required OR acceptance_closed_at IS NOT NULL) AND COALESCE(acceptance_closed_at, created_at) < CURRENT_TIMESTAMP - INTERVAL '30 seconds') OR (status = 'CLAIMED' AND heartbeat_at < CURRENT_TIMESTAMP - INTERVAL '60 seconds') FOR UPDATE SKIP LOCKED", UUID.class);
         for (UUID id : stale) release(id);
         db.update("DELETE FROM match_tickets WHERE expires_at < CURRENT_TIMESTAMP"); return stale.size();
     }
