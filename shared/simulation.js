@@ -1,8 +1,8 @@
 import { RULES, WORLD, getMap, aimDirection, rayBox, raySphere, rayCapsule, wallDistance, impactSurface, hasLineOfSight, bounds, playerPose, normalizeRoundOptions, NETWORK_PROTOCOL, BULLET_MARK_RULES } from './world.js';
 import { EMPTY_INPUT, sanitizeInput, movePlayer, clamp, angleDelta } from './movement.js';
-import { WEAPONS, SKINS, getWeapon, getSkin, freshMagazines, damageAtDistance, shotAngles, isWeaponId, normalizeOwnedWeapons, ownsWeapon, weaponModel } from './catalog.js';
+import { WEAPONS, SKINS, getWeapon, getSkin, freshMagazines, damageAtDistance, shotAngles, shotInterval, isWeaponId, normalizeOwnedWeapons, ownsWeapon, weaponModel } from './catalog.js';
 import { getOutfit, getCharacter, CHARACTERS } from './outfits.js';
-import { roundReward, normalizeWeaponKills, weaponMastery } from './progression.js';
+import { roundReward, normalizeWeaponKills, weaponMastery, normalizeSuppressedWeapons, suppressorUnlocked } from './progression.js';
 import { EQUIPMENT_RULES, nearestDroppedWeapon, settleDroppedWeapon } from './equipment.js';
 import { sameTeam, normalizeGameType, teamSpawnZones, balancedTeam, TEAM_NAMES } from './teams.js';
 import { findPath, canTraverse, followBotPath, steerBot, nearBotCover } from './bot-navigation.js';
@@ -24,6 +24,7 @@ export const BOT_BEHAVIOR = Object.freeze({
   burstMinShots: 2, burstMaxShots: 3, burstPauseMinMs: 650, burstPauseMaxMs: 1000,
   viewHalfAngle: 1.1, firingAngle: 0.08, firingRange: 42,
 });
+export const ASSIST_RULES = Object.freeze({ windowMs: 10_000, minDamage: 20 });
 export const BOT_DIFFICULTIES = Object.freeze([
   Object.freeze({ id: 'beginner', label: '초급', behavior: BOT_BEHAVIOR }),
   Object.freeze({ id: 'intermediate', label: '중급', behavior: Object.freeze({ ...BOT_BEHAVIOR, turnRadiansPerSecond: 2, pitchRadiansPerSecond: 1.5, reactionMinMs: 350, reactionMaxMs: 550, aimSampleMs: 120, aimYawError: 0.022, aimPitchError: 0.016, shotSpread: 0.032, shotIntervalMs: 300, burstMinShots: 3, burstMaxShots: 4, burstPauseMinMs: 450, burstPauseMaxMs: 650, viewHalfAngle: 1.4, firingRange: 55 }) }),
@@ -32,7 +33,7 @@ export const BOT_DIFFICULTIES = Object.freeze([
 export const getBotDifficulty = (id) => BOT_DIFFICULTIES.find((level) => level.id === id) || BOT_DIFFICULTIES[0];
 
 function freshBotBrain() {
-  return { targetId: null, visibleSince: null, reactAt: 0, aimPoint: null, nextAimSampleAt: 0, yawError: 0, pitchError: 0, nextAimErrorAt: 0, burstLeft: 0, nextBurstAt: 0, sniperSettleAt: 0 };
+  return { targetId: null, visibleSince: null, reactAt: 0, aimPoint: null, nextAimSampleAt: 0, yawError: 0, pitchError: 0, nextAimErrorAt: 0, burstLeft: 0, nextBurstAt: 0, triggerPending: false, sniperSettleAt: 0 };
 }
 
 const bodyVolumeCache = new WeakMap();
@@ -133,9 +134,9 @@ export class Room {
     const waveEnemy = isBot && loadout.defenseEnemy === true && this.gameType === 'defense';
     if (this.gameType === 'defense' && !waveEnemy) {
       const defenders = [...this.players.values()].filter((p) => p.teamId === 'blue');
-      if (defenders.length >= 4) { const replace = !isBot && defenders.find((p) => p.isBot); if (replace) this.players.delete(replace.id); else throw new Error('협동 방어전의 수비팀은 최대 4명입니다.'); }
+      if (defenders.length >= OBJECTIVE_RULES.defenders) { const replace = !isBot && defenders.find((p) => p.isBot); if (replace) this.players.delete(replace.id); else throw new Error('협동 방어전의 수비팀은 최대 4명입니다.'); }
     }
-    if (this.players.size >= RULES.maxPlayers) {
+    if (this.gameType !== 'defense' && this.players.size >= RULES.maxPlayers) {
       const team = isTeamGame(this.gameType) ? this.gameType === 'defense' ? 'blue' : balancedTeam(this.players.values()) : null;
       const bot = [...this.players.values()].find((p) => p.isBot && (!team || p.teamId === team)) || [...this.players.values()].find((p) => p.isBot);
       if (bot && !isBot) this.players.delete(bot.id);
@@ -146,7 +147,7 @@ export class Room {
     const chosenWeapon = ownsWeapon({ ownedWeapons }, requested) ? requested : 'rifle';
     const player = {
       id, name: cleanName(name, ['casual', 'ranked', 'custom'].includes(this.mode) ? 24 : 16), isBot, isWaveEnemy: waveEnemy, teamId: this.gameType === 'defense' ? waveEnemy ? 'red' : 'blue' : isTeamGame(this.gameType) ? balancedTeam(this.players.values(), !isBot) : null, x: 0, y: 0, z: 0, yaw: 0, pitch: 0, vy: 0,
-      hp: 100, ammo: RULES.magazine, kills: 0, deaths: 0, grounded: true, jumpHeld: false,
+      hp: 100, ammo: RULES.magazine, kills: 0, deaths: 0, assists: 0, rankBadge: null, grounded: true, jumpHeld: false,
       reloadUntil: 0, respawnAt: 0, protectedUntil: 0, lastShot: 0, lastInput: this.clock(),
       input: { ...EMPTY_INPUT }, botPath: [], nextPathAt: 0,
       weaponId: chosenWeapon,
@@ -157,7 +158,9 @@ export class Room {
       characterId: getCharacter(isBot ? CHARACTERS[this.players.size % CHARACTERS.length].id : loadout.characterId).id,
       magazines: freshMagazines(), switchUntil: 0, nextFireAt: 0, fireLatched: false,
     };
+    player.suppressedWeapons = normalizeSuppressedWeapons(loadout.suppressedWeapons, player.masteryKills); player.suppressor = false;
     this.players.set(id, player);
+    if (typeof loadout.suppressor === 'boolean') this.setSuppressor(player, chosenWeapon, loadout.suppressor);
     if (!isBot && !this.hostId) this.hostId = id;
     this.spawn(player);
     if (!waveEnemy) this.events.push({ type: 'joined', name: player.name, id, isBot });
@@ -176,6 +179,7 @@ export class Room {
     player.spawnCount = (player.spawnCount || 0) + 1;
     const requested = getWeapon(player.nextWeaponId || player.weaponId).id;
     player.weaponId = ownsWeapon(player, requested) ? requested : 'rifle'; player.nextWeaponId = player.weaponId;
+    player.suppressor = !!player.suppressedWeapons?.includes(player.weaponId) && suppressorUnlocked(player.masteryKills, player.weaponId);
     const others = [...this.players.values()].filter((p) => p.id !== player.id && p.hp > 0 && !sameTeam(p, player));
     // Wave entries use the same random, visibility/distance-aware selection as
     // player spawns instead of a predictable fixed lane cycle.
@@ -200,6 +204,7 @@ export class Room {
     this.spawnUses.set(choice.key, choice.uses + 1);
     Object.assign(player, { x: spawn.x, y: spawn.y || 0, z: spawn.z, yaw: spawn.yaw, spawnId: spawn.spawnId || null, spawnLevel: spawn.roof ? 'ROOF' : `${spawn.level || 1}F`, pitch: 0, vx: 0, vy: 0, vz: 0, hp: 100, hitSlowUntil: 0, ammo: getWeapon(player.weaponId).magazine, magazines: freshMagazines(), reloadUntil: 0, switchUntil: 0, nextFireAt: 0, fireLatched: false, respawnAt: 0, protectedUntil: this.clock() + RULES.protectionSeconds * 1000, grounded: true, jumpHeld: false, crouching: false, crouchAmount: 0, walking: false, sprinting: false, moveSpeed: 0, shotHeat: 0, loadoutSelecting: false, diedAt: 0, lastDeath: null, botPath: [], nextPathAt: 0, stairRouteKey: null });
     player.botBrain = player.isBot ? freshBotBrain() : null;
+    player.damageContributors = new Map();
     player.input = { ...EMPTY_INPUT, yaw: player.yaw, weaponId: player.weaponId };
     player.pendingShot = null; player.viewTime = null; player.burstLeft = 0; player.triggerSeq = null; player.triggerShotIndex = 0;
     player.killChain = 0; player.lastKillAt = null;
@@ -236,6 +241,7 @@ export class Room {
     if (input.equipmentSeq !== undefined && input.equipmentSeq !== player.equipmentSeq) return;
     if (player.hp <= 0 || this.phase !== 'active') { player.input = { ...EMPTY_INPUT, yaw: player.yaw, pitch: player.pitch, weaponId: player.weaponId }; player.pendingShot = null; player.burstLeft = 0; player.fireLatched = false; return; }
     const next = sanitizeInput(input, player.input), now = this.clock();
+    if (getWeapon(player.weaponId).hyperburstCount && player.input.fire && !next.fire && player.shotSerial > 0) player.nextFireAt = Math.max(player.nextFireAt, player.lastShot + getWeapon(player.weaponId).fireSeconds * 1000);
     if (getWeapon(player.weaponId).melee) next.ads = false;
     player.viewTime = typeof input.viewTime === 'number' && Number.isFinite(input.viewTime) ? clamp(input.viewTime, now - 200, now) : null;
     if (next.fire && !player.input.fire && !player.pendingShot) player.pendingShot = { newTrigger: true, fireSeq: Number.isSafeInteger(input.fireSeq) && input.fireSeq >= 0 ? input.fireSeq : null, yaw: next.yaw, pitch: next.pitch, ads: next.ads, at: now, movement: { grounded: player.grounded, walking: player.walking, sprinting: false, moveSpeed: Math.max(player.moveSpeed || 0, Math.hypot(next.forward, next.strafe)) }, viewTime: typeof input.viewTime === 'number' && Number.isFinite(input.viewTime) ? clamp(input.viewTime, now - 200, now) : null };
@@ -253,11 +259,18 @@ export class Room {
     const player = this.players.get(id);
     if (!player || player.isBot || player.hp > 0 || this.phase !== 'active') return false;
     if (data.weaponId !== undefined && (!isWeaponId(data.weaponId) || !ownsWeapon(player, data.weaponId))) return false;
+    if (data.suppressor !== undefined && !this.setSuppressor(player, data.weaponId || player.nextWeaponId, data.suppressor)) return false;
     if (data.weaponId) player.nextWeaponId = data.weaponId;
     player.loadoutSelecting = data.open === true;
     const death = player.diedAt || Math.max(0, player.respawnAt - RULES.respawnSeconds * 1000);
     player.respawnAt = player.loadoutSelecting ? death + RULES.loadoutSelectSeconds * 1000 : Math.max(death + RULES.respawnSeconds * 1000, now + 350);
     return true;
+  }
+
+  setSuppressor(player, weaponId, equipped) {
+    if (!player || this.players.get(player.id) !== player || !isWeaponId(weaponId) || typeof equipped !== 'boolean' || equipped && !suppressorUnlocked(player.masteryKills, weaponId)) return false;
+    const ids = new Set(player.suppressedWeapons || []); if (equipped) ids.add(weaponId); else ids.delete(weaponId);
+    player.suppressedWeapons = normalizeSuppressedWeapons([...ids], player.masteryKills); return true;
   }
 
   startReload(player, now = this.clock()) {
@@ -270,7 +283,7 @@ export class Room {
     if (!isWeaponId(player.weaponId)) return null;
     const direction = aimDirection(player.yaw, 0), origin = { x: player.x, y: player.y + .4, z: player.z };
     const offset = Math.max(0, Math.min(.65, wallDistance(origin, direction, .85, this.world) - .2));
-    const drop = { id: `${this.roundId}-drop-${++this.dropSerial}`, weaponId: player.weaponId, skinId: player.weaponSkinId || player.skinId, ammo: player.ammo, x: player.x + direction.x * offset, y: player.y + .65, z: player.z + direction.z * offset, yaw: player.yaw, vy: 0, grounded: false, pickupAt: now + 200, expiresAt: now + EQUIPMENT_RULES.lifetimeMs, nextFireAt: player.nextFireAt };
+    const drop = { id: `${this.roundId}-drop-${++this.dropSerial}`, weaponId: player.weaponId, skinId: player.weaponSkinId || player.skinId, suppressor: player.suppressor === true, ammo: player.ammo, x: player.x + direction.x * offset, y: player.y + .65, z: player.z + direction.z * offset, yaw: player.yaw, vy: 0, grounded: false, pickupAt: now + 200, expiresAt: now + EQUIPMENT_RULES.lifetimeMs, nextFireAt: player.nextFireAt };
     while (this.droppedWeapons.size >= EQUIPMENT_RULES.maxDrops) this.droppedWeapons.delete(this.droppedWeapons.keys().next().value);
     this.droppedWeapons.set(drop.id, drop); return drop;
   }
@@ -285,12 +298,13 @@ export class Room {
     this.droppedWeapons.delete(pickup.id);
     this.dropWeapon(player, now);
     player.weaponId = pickup.weaponId; player.weaponSkinId = pickup.skinId;
+    player.suppressor = pickup.suppressor === true;
     player.ammo = pickup.ammo; player.magazines[player.weaponId] = player.ammo;
     player.equipmentSeq++; player.equipmentCooldownUntil = now + EQUIPMENT_RULES.actionMs;
     player.switchUntil = now + EQUIPMENT_RULES.equipMs; player.nextFireAt = Math.max(player.nextFireAt, pickup?.nextFireAt || 0, player.switchUntil);
     player.reloadUntil = 0; player.burstLeft = 0; player.pendingShot = null; player.shotHeat = 0;
     player.input = { ...EMPTY_INPUT, yaw: player.yaw, pitch: player.pitch, weaponId: player.weaponId }; player.fireLatched = false;
-    this.events.push({ type: 'equipment', id, weaponId: player.weaponId, equipmentSeq: player.equipmentSeq }); return true;
+    this.events.push({ type: 'equipment', id, weaponId: player.weaponId, suppressor: player.suppressor, equipmentSeq: player.equipmentSeq }); return true;
   }
 
   restart(id) {
@@ -300,7 +314,7 @@ export class Room {
     this.events = [{ type: 'restart' }]; this.droppedWeapons.clear(); this.impacts.clear(); this.teamScores = { blue: 0, red: 0 };
     this.objectives?.reset(this.startedAt);
     this.spawnUses.clear(); for (const player of this.players.values()) player.hp = 0;
-    for (const player of this.players.values()) { player.kills = 0; player.deaths = 0; player.weaponKills = {}; this.spawn(player); }
+    for (const player of this.players.values()) { player.kills = 0; player.deaths = 0; player.assists = 0; player.weaponKills = {}; this.spawn(player); }
   }
 
   botInput(bot, now, dt) {
@@ -391,6 +405,7 @@ export class Room {
     const ready = perceived && facing && now >= brain.reactAt && distance < behavior.firingRange;
     if (ready && brain.burstLeft === 0 && now >= brain.nextBurstAt) {
       brain.burstLeft = behavior.burstMinShots + Math.floor(this.random() * (behavior.burstMaxShots - behavior.burstMinShots + 1));
+      brain.triggerPending = true;
     }
     const bearing = angleDelta(navigationYaw, yaw);
     const botWeapon = getWeapon(bot.weaponId), preferred = botWeapon.type === 'SNIPER' ? 30 : botWeapon.type === 'SHOTGUN' ? 7 : botWeapon.type === 'SMG' || botWeapon.type === 'SIDEARM' ? 10 : 16;
@@ -433,7 +448,7 @@ export class Room {
       if (player.reloadUntil && now >= player.reloadUntil) { player.ammo = weapon.magazine; player.reloadUntil = 0; }
       if (input.reload || player.ammo === 0) this.startReload(player, now);
       if (player.pendingShot && now - player.pendingShot.at > 150) player.pendingShot = null;
-      const shot = player.pendingShot;
+      const shot = player.pendingShot || (player.isBot && input.fire && player.botBrain?.triggerPending ? { newTrigger: true, fireSeq: null } : null);
       const triggerReady = (input.fire || shot) && (weapon.automatic || !player.fireLatched || shot);
       if (weapon.burstCount && !player.burstLeft && triggerReady && !player.reloadUntil && player.ammo > 0 && now >= player.nextFireAt) player.burstLeft = weapon.burstCount;
       const ready = weapon.burstCount ? player.burstLeft > 0 : triggerReady;
@@ -455,8 +470,10 @@ export class Room {
     player.triggerShotIndex++; player.shotSerial++;
     player.ammo--; player.lastShot = now; player.protectedUntil = 0;
     player.magazines[player.weaponId] = player.ammo;
-    const withinBurst = weapon.burstCount && player.burstLeft > 1, behavior = player.botDifficulty ? getBotDifficulty(player.botDifficulty).behavior : this.botBehavior;
-    player.nextFireAt = now + Math.max(weapon.fireSeconds * 1000, player.isBot && !withinBurst ? behavior.shotIntervalMs : 0);
+    const held = player.isBot || player.input.fire, interval = shotInterval(weapon, player.triggerShotIndex, held);
+    const withinBurst = weapon.burstCount && player.burstLeft > 1 || weapon.hyperburstCount && player.triggerShotIndex < weapon.hyperburstCount && held, behavior = player.botDifficulty ? getBotDifficulty(player.botDifficulty).behavior : this.botBehavior;
+    player.nextFireAt = now + Math.max(interval * 1000, player.isBot && !withinBurst ? behavior.shotIntervalMs : 0);
+    if (player.isBot && player.botBrain) player.botBrain.triggerPending = false;
     if (weapon.burstCount) { player.burstLeft = Math.max(0, (player.burstLeft || 0) - 1); if (player.ammo === 0) player.burstLeft = 0; if (!player.burstLeft) player.nextFireAt = Math.max(player.nextFireAt, now + weapon.burstPause * 1000); }
     if (player.isBot && player.botBrain?.burstLeft > 0) {
       player.botBrain.burstLeft--;
@@ -484,7 +501,7 @@ export class Room {
       hit.headshot ||= headshot; hits.set(victim.id, hit);
     }
     player.shotHeat = Math.min(1, (player.shotHeat || 0) + (weapon.type === 'ASSAULT' ? 0.25 : 0.17));
-    this.events.push({ type: 'shot', shotId: `${this.roundId}-${player.id}-${player.shotSerial}`, spawnCount: player.spawnCount, equipmentSeq: player.equipmentSeq, fireSeq: player.triggerSeq, shotIndex: player.triggerShotIndex, id: player.id, weaponId: weapon.id, origin, rays, end: rays[0].end, hit: rays.find((r) => r.hit)?.hit || null, headshot: rays.some((r) => r.hit && r.headshot) });
+    this.events.push({ type: 'shot', shotId: `${this.roundId}-${player.id}-${player.shotSerial}`, spawnCount: player.spawnCount, equipmentSeq: player.equipmentSeq, fireSeq: player.triggerSeq, shotIndex: player.triggerShotIndex, id: player.id, weaponId: weapon.id, suppressor: player.suppressor === true, origin, rays, end: rays[0].end, hit: rays.find((r) => r.hit)?.hit || null, headshot: rays.some((r) => r.hit && r.headshot) });
     for (const { victim, damage: rawDamage, headshot } of hits.values()) this.applyDamage(player, victim, rawDamage, headshot, origin, weapon, now);
     if (player.ammo === 0) this.startReload(player, now);
     return true;
@@ -511,22 +528,32 @@ export class Room {
   applyDamage(player, victim, rawDamage, headshot, origin, weapon, now) {
       if (this.phase !== 'active' || sameTeam(player, victim) || victim.hp <= 0) return;
       const damage = Math.round(rawDamage);
+      if (damage > 0 && player.id !== victim.id) {
+        const hits = (victim.damageContributors.get(player.id) || []).filter(hit => now - hit.at <= ASSIST_RULES.windowMs);
+        hits.push({ damage: Math.min(victim.hp, damage), at: now }); victim.damageContributors.set(player.id, hits);
+      }
       victim.hp = Math.max(0, victim.hp - damage);
       if (damage > 0) victim.hitSlowUntil = victim.hp > 0 ? now + RULES.hitSlowSeconds * 1000 : 0;
       this.events.push({ type: 'damage', id: victim.id, attacker: player.id, damage, headshot, origin, hitSlowUntil: victim.hitSlowUntil });
       if (victim.hp <= 0) {
+        for (const [id, hits] of victim.damageContributors) {
+          const helper = this.players.get(id);
+          const recentDamage = hits.reduce((sum, hit) => sum + (now - hit.at <= ASSIST_RULES.windowMs ? hit.damage : 0), 0);
+          if (id !== player.id && helper && !helper.abandoned && recentDamage >= ASSIST_RULES.minDamage && (!isTeamGame(this.gameType) || sameTeam(helper, player))) helper.assists++;
+        }
+        victim.damageContributors.clear();
         this.dropWeapon(victim, now); victim.reloadUntil = 0;
         victim.deaths++; victim.diedAt = now; victim.loadoutSelecting = false; victim.pendingShot = null; victim.burstLeft = 0; victim.respawnAt = now + RULES.respawnSeconds * 1000;
         if (victim.isWaveEnemy) victim.respawnAt = Infinity;
         victim.hitSlowUntil = 0;
         victim.killChain = 0; victim.lastKillAt = null;
         player.weaponKills[weapon.id] = (player.weaponKills[weapon.id] || 0) + 1;
-        player.masteryKills[weapon.id] = Math.min(1_000_000_000, (player.masteryKills[weapon.id] || 0) + 1);
+        if (['lan', 'practice', 'casual', 'ranked'].includes(this.mode) && !isObjectiveGame(this.gameType)) player.masteryKills[weapon.id] = Math.min(1_000_000_000, (player.masteryKills[weapon.id] || 0) + 1);
         const mastery = weaponMastery(player.masteryKills[weapon.id]);
         player.killChain = player.lastKillAt !== null && now - player.lastKillAt <= 5000 ? player.killChain + 1 : 1; player.lastKillAt = now;
-        victim.lastDeath = { attackerId: player.id, attackerName: player.name, weaponId: weapon.id, weaponLevel: mastery.level, headshot, damage, at: now };
+        victim.lastDeath = { attackerId: player.id, attackerName: player.name, attackerRankBadge: player.rankBadge, weaponId: weapon.id, weaponLevel: mastery.level, headshot, damage, at: now };
         victim.input = { ...EMPTY_INPUT, yaw: victim.yaw, pitch: victim.pitch, weaponId: victim.weaponId }; player.kills++;
-        this.events.push({ type: 'kill', killId: `${this.roundId}-${player.id}-kill-${player.kills}`, at: now, killer: player.name, victim: victim.name, killerId: player.id, victimId: victim.id, weaponId: weapon.id, weaponLevel: mastery.level, weaponKills: mastery.kills, killChain: player.killChain, headshot });
+        this.events.push({ type: 'kill', killId: `${this.roundId}-${player.id}-kill-${player.kills}`, at: now, killer: player.name, victim: victim.name, killerId: player.id, victimId: victim.id, killerRankBadge: player.rankBadge, victimRankBadge: victim.rankBadge, weaponId: weapon.id, weaponLevel: mastery.level, weaponKills: mastery.kills, killChain: player.killChain, headshot });
         if (this.gameType === 'teams') this.teamScores[player.teamId]++;
         if (!isObjectiveGame(this.gameType) && (this.gameType === 'teams' ? this.teamScores[player.teamId] : player.kills) >= this.fragLimit) this.finish();
       }
@@ -557,10 +584,10 @@ export class Room {
       type: 'state', serverTime: now, sequence: this.snapshotSequence = (this.snapshotSequence || 0) + 1,
       room: { protocolVersion: NETWORK_PROTOCOL, code: this.code, roundId: this.roundId, result: this.result, mapId: this.world.id, gameType: this.gameType, teamScores: { ...this.teamScores }, scoreLimit: this.scoreLimit, waves: this.waves, objective: this.objectives?.snapshot(now) || null, name: this.roomName, botDifficulty: this.botDifficulty, mode: this.mode, hostId: this.hostId, phase: this.phase, timeLeft: Math.max(0, Math.ceil((this.endsAt - now) / 1000)), fragLimit: this.fragLimit, roundSeconds: this.roundSeconds },
       players: [...this.players.values()].map((p) => ({
-        id: p.id, name: p.name, isBot: p.isBot, isWaveEnemy: p.isWaveEnemy, teamId: p.teamId, x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yaw: p.yaw, pitch: p.pitch,
-        vx: p.vx, vy: p.vy, vz: p.vz, grounded: p.grounded, crouching: p.crouching, crouchAmount: p.crouchAmount, walking: p.walking, sprinting: false, moveSpeed: p.moveSpeed, stepDistance: +p.stepDistance.toFixed(3), shotHeat: p.shotHeat, hp: p.hp, ammo: p.ammo, kills: p.kills, deaths: p.deaths, spawnId: p.spawnId, spawnLevel: p.spawnLevel, lastDeath: p.lastDeath,
+        id: p.id, name: p.name, isBot: p.isBot, isWaveEnemy: p.isWaveEnemy, rankBadge: p.rankBadge, teamId: p.teamId, x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yaw: p.yaw, pitch: p.pitch,
+        vx: p.vx, vy: p.vy, vz: p.vz, grounded: p.grounded, crouching: p.crouching, crouchAmount: p.crouchAmount, walking: p.walking, sprinting: false, moveSpeed: p.moveSpeed, stepDistance: +p.stepDistance.toFixed(3), shotHeat: p.shotHeat, hp: p.hp, ammo: p.ammo, kills: p.kills, deaths: p.deaths, assists: p.assists, spawnId: p.spawnId, spawnLevel: p.spawnLevel, lastDeath: p.lastDeath,
         reloadUntil: p.reloadUntil, respawnAt: p.respawnAt, protectedUntil: p.protectedUntil, hitSlowUntil: p.hitSlowUntil,
-        weaponId: p.weaponId, weaponSkinId: p.weaponSkinId, equipmentSeq: p.equipmentSeq, nextWeaponId: p.nextWeaponId, loadoutSelecting: p.loadoutSelecting, skinId: p.skinId, outfitId: p.outfitId, characterId: p.characterId, magazines: { ...p.magazines }, switchUntil: p.switchUntil, nextFireAt: p.nextFireAt,
+        weaponId: p.weaponId, weaponSkinId: p.weaponSkinId, suppressor: p.suppressor === true, suppressedWeapons: [...(p.suppressedWeapons || [])], equipmentSeq: p.equipmentSeq, nextWeaponId: p.nextWeaponId, loadoutSelecting: p.loadoutSelecting, skinId: p.skinId, outfitId: p.outfitId, characterId: p.characterId, magazines: { ...p.magazines }, switchUntil: p.switchUntil, nextFireAt: p.nextFireAt,
         spawnCount: p.spawnCount, ownedWeapons: [...p.ownedWeapons], weaponKills: { ...p.weaponKills }, masteryKills: { ...p.masteryKills }, weaponLevel: weaponMastery(p.masteryKills[p.weaponId]).level,
       })),
       droppedWeapons: [...this.droppedWeapons.values()].map(({ vy, nextFireAt, ...drop }) => ({ ...drop, x: +drop.x.toFixed(3), y: +drop.y.toFixed(3), z: +drop.z.toFixed(3) })),

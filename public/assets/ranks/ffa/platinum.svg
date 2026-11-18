@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+<title>Solo Platinum · comet compass</title>
+<defs><linearGradient id="metal" gradientUnits="userSpaceOnUse" x1="18" y1="12" x2="111" y2="115"><stop stop-color="#d9fff2"/><stop offset=".4" stop-color="#89e1c7"/><stop offset="1" stop-color="#327b81"/></linearGradient></defs>
+<circle cx="64" cy="64" r="45" fill="#17373b" stroke="url(#metal)" stroke-width="4"/>
+<path d="m64 7 10 14-10 8-10-8Zm0 114 10-14-10-8-10 8ZM7 64l14-10 8 10-8 10Zm114 0-14-10-8 10 8 10Z" fill="url(#metal)"/>
+<path d="m64 29 13 22 22 13-22 13-13 22-13-22-22-13 22-13Z" fill="url(#metal)"/>
+<path d="m64 44 20 20-20 20-20-20Z" fill="#24555b" stroke="#d1fff2" stroke-width="2"/>
+<path d="m64 51 13 13-13 13-13-13Z" fill="#caffed"/>
+<path d="m28 26 8 11m56 54 8 11m2-74-11 8M37 92l-11 8" stroke="#9ae8d6" stroke-width="3"/>
+</svg>

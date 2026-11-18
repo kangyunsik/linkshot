@@ -1,15 +1,16 @@
-import { RULES, aimDirection, wallDistance, playerPose } from './world.js';
+import { wallDistance } from './world.js';
 
-export const OBJECTIVE_RULES = Object.freeze({ rotationMs: 45_000, scoreLimit: 150, waves: 5, coreHealth: 1000, prepareMs: 10_000, intermissionMs: 7000, maxEnemies: 4, defenders: 4 });
+export const OBJECTIVE_RULES = Object.freeze({ rotationMs: 45_000, scoreLimit: 150, waves: 5, coreHealth: 1000, prepareMs: 10_000, intermissionMs: 7000, defenders: 4 });
 const bounded = (n, min, max, fallback) => Number.isInteger(n) ? Math.max(min, Math.min(max, n)) : fallback;
-export const objectiveOptions = (options = {}) => ({ scoreLimit: bounded(options.scoreLimit, 30, 200, 150), waves: bounded(options.waves, 1, 10, 5) });
+export const objectiveOptions = (options = {}) => ({ scoreLimit: bounded(options.scoreLimit, 30, 200, 150), waves: Number.isSafeInteger(options.waves) && options.waves > 0 ? options.waves : OBJECTIVE_RULES.waves });
+export const waveEnemyCount = (wave) => 4 * wave;
 
 export class ObjectiveRound {
   constructor(room) { this.room = room; this.reset(room.clock()); }
   reset(now) {
     const room = this.room; this.serial = 0; this.remainder = { blue: 0, red: 0 };
     for (const [id, player] of room.players) if (player.isWaveEnemy) room.players.delete(id);
-    this.state = room.gameType === 'hardpoint' ? { kind: 'hardpoint', active: 0, nextAt: now + OBJECTIVE_RULES.rotationMs, owner: null, contested: false } : { kind: 'defense', phase: 'prepare', wave: 1, cleared: 0, startsAt: now + OBJECTIVE_RULES.prepareMs, pending: 0, nextSpawnAt: now, coreHealth: OBJECTIVE_RULES.coreHealth, reason: null };
+    this.state = room.gameType === 'hardpoint' ? { kind: 'hardpoint', active: 0, nextAt: now + OBJECTIVE_RULES.rotationMs, owner: null, contested: false } : { kind: 'defense', phase: 'prepare', wave: 1, cleared: 0, startsAt: now + OBJECTIVE_RULES.prepareMs, pending: 0, coreHealth: OBJECTIVE_RULES.coreHealth, reason: null };
   }
   enemies() { return [...this.room.players.values()].filter((player) => player.isWaveEnemy); }
   tick(dt, now) {
@@ -27,18 +28,21 @@ export class ObjectiveRound {
     }
     for (const enemy of this.enemies()) if (enemy.hp <= 0 && now - enemy.diedAt >= 600) room.players.delete(enemy.id);
     if (state.coreHealth <= 0) { state.reason = 'core-destroyed'; room.finish(); return; }
-    if (state.phase === 'prepare' && now >= state.startsAt) { state.phase = 'wave'; state.pending = 4 + (state.wave - 1) * 2; state.nextSpawnAt = now; room.events.push({ type: 'wave-start', wave: state.wave }); }
+    if (state.phase === 'prepare' && now >= state.startsAt) { state.phase = 'wave'; state.pending = waveEnemyCount(state.wave); room.events.push({ type: 'wave-start', wave: state.wave, enemies: state.pending }); }
     if (state.phase !== 'wave') return;
-    if (state.pending > 0 && now >= state.nextSpawnAt && this.enemies().length < OBJECTIVE_RULES.maxEnemies && room.players.size < RULES.maxPlayers) {
+    // All entries deploy together. Defender capacity is independent of enemy
+    // population; neither the total wave nor living attackers has a fixed cap.
+    while (state.pending > 0) {
       const weaponIds = ['rifle', 'smg', 'shotgun', 'dmr', 'lmg', 'sniper'];
       const enemy = room.addPlayer(`wave-${room.roundId}-${++this.serial}`, `공세 ${state.wave}-${this.serial}`, true, { defenseEnemy: true, weaponId: weaponIds[(this.serial - 1) % weaponIds.length], skinId: 'standard', characterId: this.serial % 2 ? 'male' : 'female' });
       enemy.botDifficulty = state.wave >= 5 ? 'advanced' : state.wave >= 3 ? 'intermediate' : 'beginner';
-      state.pending--; state.nextSpawnAt = now + 250;
+      state.pending--;
     }
     if (!state.pending && !this.enemies().length) {
       state.cleared++; room.teamScores.blue = state.cleared;
+      room.events.push({ type: 'wave-cleared', wave: state.cleared });
       if (state.cleared >= room.waves) { state.phase = 'complete'; state.reason = 'waves-cleared'; room.finish(); }
-      else { state.wave++; state.phase = 'prepare'; state.startsAt = now + OBJECTIVE_RULES.intermissionMs; room.events.push({ type: 'wave-cleared', wave: state.cleared }); }
+      else { state.wave++; state.phase = 'prepare'; state.startsAt = now + OBJECTIVE_RULES.intermissionMs; }
     }
   }
   damageCore(attacker, amount) {

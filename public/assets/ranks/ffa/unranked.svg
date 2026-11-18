@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+<title>Solo Unranked · orbital reticle</title>
+<circle cx="64" cy="64" r="45" fill="#18262e" stroke="#7894a2" stroke-width="4"/>
+<circle cx="64" cy="64" r="34" stroke="#526d7b" stroke-width="2" stroke-dasharray="8 8"/>
+<path d="M64 10v18m0 72v18M10 64h18m72 0h18" stroke="#aac1cc" stroke-width="3"/>
+<path d="m64 43 21 21-21 21-21-21Z" fill="#45606e" stroke="#b4c9d0" stroke-width="3"/>
+<circle cx="64" cy="64" r="5" fill="#d5e4e8"/>
+</svg>

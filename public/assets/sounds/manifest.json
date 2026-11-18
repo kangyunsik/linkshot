@@ -193,6 +193,33 @@
       "variant": 1,
       "seconds": 0.34,
       "sha256": "b8879aff220cf8e3fc73ab7188f6632266b4385fa90b7664333337e9d66a72c2"
+    },
+    {
+      "file": "an94-1.wav",
+      "recording": "sks.wav",
+      "sourceAttack": 0.405,
+      "singleShot": true,
+      "variant": 1,
+      "seconds": 0.56,
+      "sha256": "42d4bc06b01964fe481be2e7ca041e956f925913449f53217274c7fd440414c3"
+    },
+    {
+      "file": "s686-1.wav",
+      "recording": "shotty.wav",
+      "sourceAttack": 0.245,
+      "singleShot": true,
+      "variant": 1,
+      "seconds": 0.65,
+      "sha256": "5cfc990df329d8afb0cfc7f86d5d6dc4e9c0b6f7f90051f64f625b33cc316867"
+    },
+    {
+      "file": "vector-1.wav",
+      "recording": "cz.wav",
+      "sourceAttack": 0.275,
+      "singleShot": true,
+      "variant": 1,
+      "seconds": 0.36,
+      "sha256": "2cb9c5b987d4996ccab1cb9d21eec0467708c26aa265096f4c68caffe1e2a3e8"
     }
   ]
 }

@@ -6,7 +6,7 @@ const cylinder = (id, x, z, diameter, h, kind = 'pipe', y = 0) => box(id, x, z, 
 function arena(config, obstacles, spawns) {
   const { width: w, depth: d } = config;
   const perimeter = [box('north', 0, -d / 2 - .5, w + 2, 1, 6, 'wall'), box('south', 0, d / 2 + .5, w + 2, 1, 6, 'wall'), box('west', -w / 2 - .5, 0, 1, d + 2, 6, 'wall'), box('east', w / 2 + .5, 0, 1, d + 2, 6, 'wall')];
-  return Object.freeze({ ...config, terrain: true, image: `${config.id}-hero.png`, previewImage: `maps/${config.id}.svg`, buildings: [], walkways: [], platforms: [], extraCover: [], coverWalls: [], obstacles: [...perimeter, ...obstacles], spawns });
+  return Object.freeze({ ...config, terrain: true, image: `maps/${config.id}.svg`, previewImage: `maps/${config.id}.svg`, buildings: [], walkways: [], platforms: [], extraCover: [], coverWalls: [], obstacles: [...perimeter, ...obstacles], spawns });
 }
 function sideSpawns(x, zs = [-12, -6, 6, 12]) {
   return [-1, 1].flatMap((side) => zs.map((z, i) => ({ x: side * x, y: 0, z, yaw: side < 0 ? -Math.PI / 2 : Math.PI / 2, teamId: side < 0 ? 'blue' : 'red', spawnId: `team-${side}-${i}`, exitPath: [{ x: side * (x - 3), y: 0, z }] })));

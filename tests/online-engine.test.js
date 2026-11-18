@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { WebSocket } from 'ws';
 import { createOnlineEngine } from '../server/online-engine.js';
+import { WEAPONS } from '../shared/catalog.js';
 
 test('the online Docker image copies every local module reachable from its entry point', async () => {
   const root = new URL('../', import.meta.url), dockerfile = await readFile(new URL('server/Dockerfile.online', root), 'utf8');
@@ -26,13 +27,14 @@ function message(socket, type) {
     socket.on('message', receive);
   });
 }
-async function fixture(t, { mode = 'RANKED', bots = 0, humans = 2, rankedAiEnabled = false, botRating = 1000, clock, countdownMs = 0 } = {}) {
+async function fixture(t, { mode = 'RANKED', bots = 0, humans = 2, rankedAiEnabled = false, botRating = 1000, clock, countdownMs = 0, gameType } = {}) {
   const id = randomUUID(), players = Array.from({ length: humans }, (_, i) => ({ id: randomUUID(), callsign: `HUMAN ${i}`, ownedWeapons: ['rifle', 'pistol', 'shotgun', 'sniper'], weaponKills: {}, casualRating: 1000 }));
   const tickets = new Map(), results = [], plan = { id, mode, bots, players, rankedAiEnabled, botRating, mapId: 'foundry', fragLimit: 1, roundSeconds: 60 }, client = {
     pending: async () => [id], claim: async () => plan, heartbeat: async () => {}, cancel: async () => {},
     async consume(matchId, ticket) { const player = tickets.get(ticket); tickets.delete(ticket); if (matchId !== id || !player) throw new Error('Invalid ticket'); return player; },
     async complete(matchId, roster) { results.push({ id: matchId, roster }); return { settled: true }; },
   };
+  if (gameType) Object.assign(plan, { gameType, teams: gameType === 'teams' ? Object.fromEntries(players.map((p, i) => [p.id, i % 2 ? 'red' : 'blue'])) : {} });
   const app = createOnlineEngine({ client, port: 0, host: '127.0.0.1', loop: false, countdownMs, ...(clock ? { clock } : {}) }), info = await app.listen(); t.after(() => app.close());
   const join = async (profile, extra = {}) => {
     const socket = new WebSocket(`ws://127.0.0.1:${info.port}/play`); t.after(() => socket.terminate()); await message(socket, 'hello');
@@ -59,7 +61,8 @@ test('a LAN-configured combat server also accepts matching-port loopback origins
 
 test('the online gateway consumes Spring tickets, ignores spoofed identity/ownership and requires every assigned human before starting', async (t) => {
   const f = await fixture(t, { mode: 'CASUAL' }); const a = await f.join(f.players[0], { ownedWeapons: ['m82'], weaponId: 'm82', id: f.players[1].id });
-  const match = f.app.matches.get(f.id); assert.equal(match.room.phase, 'waiting'); assert.equal(match.room.players.get(f.players[0].id).weaponId, 'rifle');
+  const match = f.app.matches.get(f.id); assert.equal(match.room.phase, 'waiting'); assert.equal(match.room.players.get(f.players[0].id).weaponId, 'm82');
+  assert.equal(match.room.players.get(f.players[0].id).ownedWeapons.length, WEAPONS.length); assert.equal(f.players[0].ownedWeapons.includes('m82'), false);
   assert.equal([...match.room.players.values()].some((player) => player.isBot), false);
   await f.join(f.players[1]); assert.equal(match.room.phase, 'active'); assert.equal(match.room.hostId, null); assert.equal(match.room.roundId, f.id);
   const error = message(a, 'error'); a.send(JSON.stringify({ type: 'create', mode: 'ranked', bots: 7 })); assert.match((await error).message, /중앙 서버/);
@@ -67,7 +70,37 @@ test('the online gateway consumes Spring tickets, ignores spoofed identity/owner
 
 test('ranked weapon access is temporary and does not mutate the canonical online ownership profile', async (t) => {
   const f = await fixture(t); await f.join(f.players[0], { weaponId: 'm82' }); await f.join(f.players[1]);
-  const player = f.app.matches.get(f.id).room.players.get(f.players[0].id); assert.equal(player.weaponId, 'm82'); assert.equal(player.ownedWeapons.length, 20); assert.equal(f.players[0].ownedWeapons.includes('m82'), false);
+  const player = f.app.matches.get(f.id).room.players.get(f.players[0].id); assert.equal(player.weaponId, 'm82'); assert.equal(player.ownedWeapons.length, WEAPONS.length); assert.equal(f.players[0].ownedWeapons.includes('m82'), false);
+});
+test('ranked assignments deploy exactly three per side, preserve chosen skins and reward the winning team rather than an individual MVP', async (t) => {
+  const f = await fixture(t, { humans: 6, gameType: 'teams' });
+  for (const profile of f.players) await f.join(profile, { weaponId: 'awp', skinId: 'arctic' });
+  const match = f.app.matches.get(f.id), room = match.room, players = [...room.players.values()]; room.fragLimit = 20;
+  assert.equal(room.gameType, 'teams'); assert.equal(players.filter((p) => p.teamId === 'blue').length, 3); assert.equal(players.filter((p) => p.teamId === 'red').length, 3);
+  const [a, b, c] = f.players.map((p) => room.players.get(p.id)); assert.equal(a.weaponSkinId, 'arctic'); assert.equal(a.weaponId, 'awp');
+  for (const p of players) p.protectedUntil = 0;
+  room.applyDamage(a, c, 10000, false, {}, { id: 'awp' }, room.clock()); assert.equal(c.hp, 100); assert.equal(a.kills, 0);
+  b.kills = 9; c.kills = 5; players[4].kills = 5; room.teamScores = { blue: 10, red: 9 }; room.finish(); f.app.tick(1 / 60); await Promise.resolve();
+  assert.equal(room.result.winnerTeam, 'blue'); assert.equal(room.result.rewards[a.id].won, true); assert.equal(room.result.rewards[a.id].winBonus, 100); assert.equal(room.result.rewards[b.id].won, false);
+  assert.ok(f.results[0].roster.every((p) => ['blue', 'red'].includes(p.teamId)));
+});
+test('new competitive assignments cannot silently fall back to a four-player team match', async (t) => {
+  const f = await fixture(t, { humans: 4, gameType: 'teams' }); await assert.rejects(() => f.app.load(f.id), /roster size/);
+});
+
+test('WAN ranked suppressors use canonical per-weapon mastery, ignore forged unlocks and retain temporary ownership boundaries', async (t) => {
+  const f = await fixture(t); Object.assign(f.players[0], { weaponKills: { vector: 1549 }, suppressedWeapons: ['vector'] }); Object.assign(f.players[1], { weaponKills: { vector: 1550 }, suppressedWeapons: ['vector'] });
+  const a = await f.join(f.players[0], { weaponId: 'vector', suppressor: true, weaponKills: { vector: 999999 }, suppressedWeapons: ['vector'] });
+  await f.join(f.players[1], { weaponId: 'vector', suppressor: true });
+  const room = f.app.matches.get(f.id).room, locked = room.players.get(f.players[0].id), earned = room.players.get(f.players[1].id);
+  assert.equal(locked.suppressor, false); assert.deepEqual(locked.suppressedWeapons, []); assert.equal(earned.suppressor, true);
+  assert.equal(earned.ownedWeapons.length, WEAPONS.length); assert.equal(f.players[1].ownedWeapons.includes('vector'), false); assert.equal(f.players[1].weaponKills.vector, 1550);
+  const barrier = async (data) => { const done = message(a, 'pong'); a.send(JSON.stringify(data)); a.send(JSON.stringify({ type: 'ping' })); await done; };
+  await barrier({ type: 'input', suppressor: true, weaponKills: { vector: 1550 } }); assert.equal(locked.suppressor, false);
+  await barrier({ type: 'loadout', weaponId: 'vector', suppressor: true }); assert.equal(locked.suppressor, false);
+  locked.hp = 0; locked.diedAt = Date.now(); await barrier({ type: 'loadout', weaponId: 'vector', suppressor: true, weaponKills: { vector: 1550 } }); assert.deepEqual(locked.suppressedWeapons, []);
+  room.spawn(locked); room.shoot(earned, Date.now(), false); assert.equal(room.events.findLast((event) => event.type === 'shot').suppressor, true);
+  assert.equal(room.dropWeapon(earned).suppressor, true); assert.equal(room.snapshot().players.find((player) => player.id === earned.id).suppressor, true);
 });
 
 test('ready players are frozen for the complete five-second countdown and the match timer starts only afterward', async (t) => {

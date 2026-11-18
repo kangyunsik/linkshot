@@ -1,8 +1,10 @@
 import { DEFAULT_OUTFIT, getOutfit, isOutfitId, DEFAULT_CHARACTER, getCharacter, isCharacterId } from './outfits.js';
-import { EQUIPMENT, FREE_WEAPON_IDS, normalizeOwnedWeapons, ownsWeapon, isWeaponId, getWeapon } from './catalog.js';
+import { EQUIPMENT, WEAPONS, FREE_WEAPON_IDS, normalizeOwnedWeapons, ownsWeapon, isWeaponId, getWeapon } from './catalog.js';
 
 export const POINT_RULES = Object.freeze({ completion: 50, perKill: 20, victory: 100 });
 export const PROFILE_VERSION = 1;
+export const SUPPRESSOR_LEVEL = 5;
+export const SUPPRESSOR_KILLS = 50 * (2 ** SUPPRESSOR_LEVEL - 1);
 const MAX_VALUE = 1_000_000_000;
 const count = (value) => Number.isSafeInteger(value) ? Math.max(0, Math.min(MAX_VALUE, value)) : 0;
 const validId = (value) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{7,99}$/.test(value) && !['constructor', 'prototype', '__proto__'].includes(value);
@@ -18,9 +20,12 @@ export function weaponMastery(value = 0) {
   return { kills, level, inLevel: kills - start, required, nextAt: start + required, progress: (kills - start) / required };
 }
 
+export const suppressorUnlocked = (weaponKills, weaponId) => isWeaponId(weaponId) && weaponMastery(weaponKills?.[weaponId]).level >= SUPPRESSOR_LEVEL;
+export const normalizeSuppressedWeapons = (value, weaponKills) => WEAPONS.filter(({ id }) => Array.isArray(value) && value.includes(id) && suppressorUnlocked(weaponKills, id)).map(({ id }) => id);
+
 export function createProfile(id, now = Date.now(), name = 'OPERATOR') {
   if (!validId(id)) throw new Error('프로필 ID가 올바르지 않습니다.');
-  return { version: PROFILE_VERSION, id, callsign: callsign(name), characterId: DEFAULT_CHARACTER, kills: 0, deaths: 0, points: 0, totalEarned: 0, roundsPlayed: 0, wins: 0, ownedOutfits: [DEFAULT_OUTFIT], equippedOutfitId: DEFAULT_OUTFIT, ownedWeapons: [...FREE_WEAPON_IDS], weaponKills: {}, roundLedger: {}, createdAt: now, updatedAt: now };
+  return { version: PROFILE_VERSION, id, callsign: callsign(name), characterId: DEFAULT_CHARACTER, kills: 0, deaths: 0, points: 0, totalEarned: 0, roundsPlayed: 0, wins: 0, ownedOutfits: [DEFAULT_OUTFIT], equippedOutfitId: DEFAULT_OUTFIT, ownedWeapons: [...FREE_WEAPON_IDS], weaponKills: {}, suppressedWeapons: [], roundLedger: {}, createdAt: now, updatedAt: now };
 }
 
 export function normalizeProfile(raw, fallbackId, now = Date.now()) {
@@ -32,6 +37,7 @@ export function normalizeProfile(raw, fallbackId, now = Date.now()) {
   result.equippedOutfitId = result.ownedOutfits.includes(value.equippedOutfitId) ? value.equippedOutfitId : DEFAULT_OUTFIT;
   result.ownedWeapons = normalizeOwnedWeapons(value.ownedWeapons);
   result.weaponKills = normalizeWeaponKills(value.weaponKills);
+  result.suppressedWeapons = normalizeSuppressedWeapons(value.suppressedWeapons, result.weaponKills);
   result.createdAt = Number.isFinite(value.createdAt) && value.createdAt > 0 ? value.createdAt : now;
   result.updatedAt = Number.isFinite(value.updatedAt) && value.updatedAt > 0 ? value.updatedAt : now;
   if (value.roundLedger && typeof value.roundLedger === 'object') {
@@ -110,6 +116,14 @@ export function applyProfileOperation(profile, operation, now = Date.now()) {
   if (operation.type === 'purchase') { const result = purchaseOutfit(profile, operation.outfitId, now); return { ...result, changed: result.profile !== profile, award: null }; }
   if (operation.type === 'purchaseWeapon') { const result = purchaseWeapon(profile, operation.weaponId, now); return { ...result, changed: result.profile !== profile, award: null }; }
   if (operation.type === 'equip') { const next = equipOutfit(profile, operation.outfitId, now); return { profile: next, changed: next !== profile, award: null }; }
+  if (operation.type === 'suppressor') {
+    if (!isWeaponId(operation.weaponId) || typeof operation.equipped !== 'boolean') throw new Error('소음기를 장착할 총기를 확인해 주세요.');
+    if (operation.equipped && !suppressorUnlocked(profile.weaponKills, operation.weaponId)) throw new Error(`해당 총기 Lv.${SUPPRESSOR_LEVEL}에서 소음기가 해금됩니다.`);
+    const ids = new Set(profile.suppressedWeapons || []); if (operation.equipped) ids.add(operation.weaponId); else ids.delete(operation.weaponId);
+    const normalized = normalizeSuppressedWeapons([...ids], profile.weaponKills);
+    if (JSON.stringify(normalized) === JSON.stringify(profile.suppressedWeapons || [])) return { profile, changed: false, award: null };
+    const next = normalizeProfile(profile, profile.id, now); next.suppressedWeapons = normalized; next.updatedAt = now; return { profile: next, changed: true, award: null };
+  }
   if (operation.type === 'character') {
     if (!isCharacterId(operation.characterId)) throw new Error('존재하지 않는 캐릭터입니다.');
     if (profile.characterId === operation.characterId) return { profile, changed: false, award: null };

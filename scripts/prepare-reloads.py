@@ -86,7 +86,7 @@ async def process_engine():
     (SOURCE / 'engine-processing.json').write_text(json.dumps({'engine': 'ComfyUI AudioEqualizer3Band', 'inputGainDB': -6, 'lowGainDB': -5, 'midGainDB': 2, 'highGainDB': -2}) + '\n')
 
 
-def prepare():
+def prepare(selected=None):
     originals = {name: read_audio(SOURCE / f'{name}-engine.flac' if (SOURCE / f'{name}-engine.flac').exists() else SOURCE / filename) for name, filename in FILES.items()}
     cuts = {'release': ('pistol', 0.095, 0.26), 'insert': ('pistol', 0.59, 0.78), 'pull': ('pistol', 1.09, 1.18), 'lock': ('pistol', 1.195, 1.30), 'back': ('rack', 0.62, 0.805), 'forward': ('rack', 0.82, 1.045), 'handle': ('first', 0.35, 0.59), 'seat': ('shell', 0.88, 1.015), 'seat2': ('shell', 1.11, 1.285), 'feed': ('chamber', 0.50, 0.855), 'close': ('chamber', 1.09, 1.34)}
     parts = {}
@@ -115,6 +115,9 @@ def prepare():
         'm249': (.82, [('feed', .02, .8), ('release', .6, .6), ('insert', 1.85, 1), ('seat', 2.30, .45), ('seat2', 2.48, .4), ('seat', 2.68, .4), ('forward', 3.14, 1), ('back', 3.69, .85), ('lock', 4.02, 1)]),
         'm14': (.93, [('release', .02, .6), ('insert', 1.18, 1), ('back', 1.86, .8), ('lock', 2.28, .95)]),
         'glock18c': (1.22, [('release', .02, .6), ('insert', .82, 1), ('pull', 1.26, .8), ('lock', 1.47, .95)]),
+        'an94': (1.07, [('release', .02, .6), ('insert', 1.12, 1), ('feed', 1.45, .5), ('back', 1.82, .8), ('lock', 2.18, .95)]),
+        's686': (.98, [('back', .02, .7), ('handle', .30, .5), ('seat', .75, .8), ('seat2', 1.13, .8), ('close', 2.20, 1), ('lock', 2.46, .65)]),
+        'vector': (1.25, [('release', .02, .65), ('insert', .94, 1), ('pull', 1.45, .85), ('lock', 1.78, .95)]),
     }
     for weapon, duration, pitch in [('shotgun', 2.4, 1.04), ('spas12', 3.0, .92)]:
         stages = [('back', .02, .65), ('handle', .17, .35)]
@@ -122,8 +125,10 @@ def prepare():
         stages += [('forward', duration - .29, 1)]
         profiles[weapon] = (pitch, stages)
     catalog = json.loads(subprocess.check_output(['node', '--input-type=module', '-e', "import { WEAPONS } from './shared/catalog.js'; console.log(JSON.stringify(WEAPONS));"], cwd=ROOT))
-    files = []; OUTPUT.mkdir(parents=True, exist_ok=True)
+    files = json.loads((OUTPUT / 'reload-manifest.json').read_text())['files'] if selected else []
+    files = [item for item in files if item['weaponId'] not in (selected or set())]; OUTPUT.mkdir(parents=True, exist_ok=True)
     for weapon in catalog:
+        if selected and weapon['id'] not in selected: continue
         name, duration = weapon['id'], weapon['reloadSeconds']; pitch, stages = profiles[name]
         output = np.zeros(round(duration * RATE))
         for part, at, gain in stages:
@@ -148,13 +153,13 @@ def prepare():
 
 
 def main():
-    parser = argparse.ArgumentParser(); parser.add_argument('--engine', action='store_true'); parser.add_argument('--sources-only', action='store_true'); args = parser.parse_args()
+    parser = argparse.ArgumentParser(); parser.add_argument('--engine', action='store_true'); parser.add_argument('--sources-only', action='store_true'); parser.add_argument('--only', default=''); args = parser.parse_args()
     download_sources()
     if args.engine: asyncio.run(process_engine())
     for name, filename in FILES.items():
         path = SOURCE / f'{name}-engine.flac'; samples = read_audio(path if path.exists() else SOURCE / filename)
         print(name, round(len(samples) / RATE, 3), 'seconds')
-    if not args.sources_only: prepare()
+    if not args.sources_only: prepare(set(filter(None, args.only.split(','))))
 
 
 if __name__ == '__main__': main()

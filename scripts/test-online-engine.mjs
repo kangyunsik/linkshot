@@ -17,6 +17,7 @@ try {
   console.log(JSON.stringify({ ready: true })); const tickets = await payload; input.close();
   for (const entry of tickets) { const socket = new WebSocket(`ws://127.0.0.1:${port}/play`); sockets.push(socket); await frame(socket, 'hello'); const joined = frame(socket, 'joined'); socket.send(JSON.stringify({ type: 'authenticate', matchId: match.id, ticket: entry.ticket })); await joined; const ready = frame(socket, 'pong'); socket.send(JSON.stringify({ type: 'ready' })); socket.send(JSON.stringify({ type: 'ping' })); await ready; }
   const players = [...match.room.players.values()].filter((player) => !player.isBot), [a, b] = players;
+  for (const player of players) Object.assign(player, { x: 40, y: 0, z: 40, protectedUntil: 0 });
   match.room.world = { ...match.room.world, width: 100, depth: 100, obstacles: [] };
   Object.assign(a, { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, protectedUntil: 0 }); Object.assign(b, { x: 0, y: 0, z: -1, hp: 1, protectedUntil: 0 });
   match.room.setInput(a.id, { fire: true, yaw: 0, pitch: 0, spawnCount: a.spawnCount, equipmentSeq: a.equipmentSeq }); app.tick(1 / 60);

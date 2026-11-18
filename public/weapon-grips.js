@@ -6,7 +6,7 @@ const support = {
   rifle: [-.065, -.045, -.255], smg: [-.061, -.05, -.225], shotgun: [-.065, -.065, -.405],
   sniper: [-.065, -.045, -.315], lmg: [-.067, -.052, -.495], dmr: [-.065, -.046, -.395],
 };
-const overrides = { m82: [-.073, -.05, -.375], p90: [-.072, -.07, -.205], mp5: [-.059, -.051, -.235], ump45: [-.067, -.051, -.235], famas: [-.062, -.05, -.255], m14: [-.064, -.052, -.395] };
+const overrides = { m82: [-.073, -.05, -.375], p90: [-.072, -.07, -.205], mp5: [-.059, -.051, -.235], ump45: [-.067, -.051, -.235], famas: [-.062, -.05, -.255], m14: [-.064, -.052, -.395], s686: [-.063, -.051, -.405], vector: [-.061, -.048, -.205] };
 
 export function weaponGrip(shape, id, right, palmLength) {
   const rotation = new THREE.Quaternion(); let wrist, profile;
@@ -23,5 +23,5 @@ export function weaponGrip(shape, id, right, palmLength) {
     wrist = center.addScaledVector(along, -palmLength * .64).toArray();
   }
   if (shape === 'knife' && right) profile = 'fist';
-  return { wrist, rotation, profile, foreend: (overrides[id] || support[shape])?.[2] - .025 || null, parent: shape === 'shotgun' && !right ? 'pump' : 'frame' };
+  return { wrist, rotation, profile, foreend: (overrides[id] || support[shape])?.[2] - .025 || null, parent: shape === 'shotgun' && !right ? id === 's686' ? 'break' : 'pump' : 'frame' };
 }

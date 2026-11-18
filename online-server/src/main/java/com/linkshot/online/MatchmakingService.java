@@ -21,20 +21,21 @@ public class MatchmakingService {
     private final GameCatalog catalog;
     private final OnlineProperties properties;
     private final boolean enabled;
-    private final int required, waitSeconds, fragLimit, roundSeconds;
+    private final int waitSeconds, fragLimit, roundSeconds;
     private final SecureRandom random = new SecureRandom();
     public MatchmakingService(JdbcTemplate db, MatchService matches, EngineRegistry engines, GameCatalog catalog, OnlineProperties properties,
-        @Value("${linkshot.matchmaking.enabled:true}") boolean enabled, @Value("${linkshot.matchmaking.players:4}") int required,
+        @Value("${linkshot.matchmaking.enabled:true}") boolean enabled,
         @Value("${linkshot.matchmaking.casual-wait-seconds:30}") int waitSeconds, @Value("${linkshot.matchmaking.frag-limit:20}") int fragLimit,
         @Value("${linkshot.matchmaking.round-seconds:300}") int roundSeconds) {
-        if (required < 2 || required > 8 || waitSeconds < 1 || waitSeconds > 120 || fragLimit < 1 || fragLimit > 200 || roundSeconds < 60 || roundSeconds > 3600) throw new IllegalArgumentException("Invalid matchmaking settings");
-        this.db = db; this.matches = matches; this.engines = engines; this.catalog = catalog; this.properties = properties; this.enabled = enabled; this.required = required; this.waitSeconds = waitSeconds; this.fragLimit = fragLimit; this.roundSeconds = roundSeconds;
+        if (waitSeconds < 1 || waitSeconds > 120 || fragLimit < 1 || fragLimit > 200 || roundSeconds < 60 || roundSeconds > 3600) throw new IllegalArgumentException("Invalid matchmaking settings");
+        this.db = db; this.matches = matches; this.engines = engines; this.catalog = catalog; this.properties = properties; this.enabled = enabled; this.waitSeconds = waitSeconds; this.fragLimit = fragLimit; this.roundSeconds = roundSeconds;
     }
     public record Entry(UUID account, MatchService.Mode mode, int rating, Instant queuedAt) {}
     public record Status(String state, MatchService.Mode mode, int elapsedSeconds, int playersFound, int requiredPlayers, Integer aiInSeconds, int ratingGap, UUID matchId, String reason) {}
     public boolean configured() { return enabled && properties.engineEnabled(); }
     public boolean available() { return configured() && engines.online(); }
-    public int players() { return required; }
+    public int players() { return 4; }
+    public int players(MatchService.Mode mode) { return mode == MatchService.Mode.RANKED ? 6 : 4; }
     public int waitSeconds() { return waitSeconds; }
     public boolean rankedAiEnabled() { return matches.rankedAiEnabled(); }
     private boolean fillsWithAi(MatchService.Mode mode) { return mode == MatchService.Mode.CASUAL || rankedAiEnabled(); }
@@ -59,11 +60,11 @@ public class MatchmakingService {
         var active = matches.active(account);
         if (active != null) {
             boolean abandoned = db.queryForObject("SELECT abandoned FROM match_players WHERE match_id = ? AND account_id = ?", Boolean.class, active.id(), account);
-            return new Status(abandoned ? "ABANDONED" : active.status().equals("CLAIMED") ? "READY" : "ASSIGNED", active.mode(), 0, active.players().size(), required, null, 0, active.id(), abandoned ? "탈주 처리되었습니다. 경기 종료와 정산을 기다려 주세요." : "");
+            return new Status(abandoned ? "ABANDONED" : active.status().equals("CLAIMED") ? "READY" : "ASSIGNED", active.mode(), 0, active.players().size(), players(active.mode()), null, 0, active.id(), abandoned ? "탈주 처리되었습니다. 경기 종료와 정산을 기다려 주세요." : "");
         }
         var all = entries(); var entry = all.stream().filter(item -> item.account().equals(account)).findFirst();
-        if (entry.isEmpty()) return new Status("IDLE", null, 0, 0, required, null, 0, null, available() ? "" : "온라인 전투 노드 연결을 기다리는 중입니다.");
-        Entry own = entry.get(); int elapsed = (int) Math.min(Integer.MAX_VALUE, waited(own)), gap = gap(own);
+        if (entry.isEmpty()) return new Status("IDLE", null, 0, 0, players(), null, 0, null, available() ? "" : "온라인 전투 노드 연결을 기다리는 중입니다.");
+        Entry own = entry.get(); int required = players(own.mode()), elapsed = (int) Math.min(Integer.MAX_VALUE, waited(own)), gap = gap(own);
         int found = (int) Math.min(required, all.stream().filter(item -> item.mode() == own.mode() && Math.abs(item.rating() - own.rating()) <= gap).count());
         return new Status("QUEUED", own.mode(), elapsed, found, required, fillsWithAi(own.mode()) ? Math.max(0, waitSeconds - elapsed) : null, gap, null, available() ? engines.freeSlots() > 0 ? "" : "전투 서버 정원을 기다리는 중입니다." : "전투 노드 재연결을 기다리는 중입니다.");
     }
@@ -85,7 +86,7 @@ public class MatchmakingService {
         var all = entries(); var used = new HashSet<UUID>();
         for (Entry anchor : all) {
             if (slots <= 0) break; if (used.contains(anchor.account())) continue;
-            int gap = gap(anchor); var group = new ArrayList<Entry>();
+            int required = players(anchor.mode()), gap = gap(anchor); var group = new ArrayList<Entry>();
             for (Entry candidate : all) if (!used.contains(candidate.account()) && candidate.mode() == anchor.mode() && Math.abs(candidate.rating() - anchor.rating()) <= gap && group.size() < required) group.add(candidate);
             boolean ready = group.size() == required || fillsWithAi(anchor.mode()) && waited(anchor) >= waitSeconds;
             if (!ready) continue;

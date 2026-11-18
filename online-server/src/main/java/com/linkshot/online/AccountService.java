@@ -1,6 +1,7 @@
 package com.linkshot.online;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -18,10 +19,13 @@ public class AccountService {
     private final JdbcTemplate db;
     private final PasswordEncoder passwords;
     private final GameCatalog catalog;
-    public AccountService(JdbcTemplate db, PasswordEncoder passwords, GameCatalog catalog) { this.db = db; this.passwords = passwords; this.catalog = catalog; }
+    private final CompetitiveRecords records;
+    public AccountService(JdbcTemplate db, PasswordEncoder passwords, GameCatalog catalog, CompetitiveRecords records) { this.db = db; this.passwords = passwords; this.catalog = catalog; this.records = records; }
     public record Credentials(UUID id, String username, String passwordHash) {}
     public record UsernameAvailability(String username, boolean available) {}
-    public record Profile(UUID id, String username, String callsign, String characterId, String outfitId, long kills, long deaths, long points, int roundsPlayed, int wins, int casualRating, String rankTier, int rankDivision, int rankPoints, int placementsPlayed, int placementWins, int rankedGames, List<String> ownedWeapons, Map<String, Long> weaponKills) {}
+    public record RecentMatch(UUID matchId, String mapId, String outcome, int kills, int deaths, int assists, int rankPointsDelta, int ratingDelta, Instant completedAt) {}
+    public record CompetitiveProfile(String rankTier, int rankDivision, int rankPoints, int placementsPlayed, int placementWins, int rankedGames, int rating, long roundsPlayed, long wins, long draws, long losses, long kills, long deaths, long assists, double winRate, double kd, double kda, List<RecentMatch> recentMatches) {}
+    public record Profile(UUID id, String username, String callsign, String characterId, String outfitId, long kills, long deaths, long points, int roundsPlayed, int wins, int casualRating, String rankTier, int rankDivision, int rankPoints, int placementsPlayed, int placementWins, int rankedGames, List<String> ownedWeapons, Map<String, Long> weaponKills, List<String> suppressedWeapons, Map<String, CompetitiveProfile> competitive) {}
 
     public Credentials credentials(String username) {
         return db.query("SELECT id, username, password_hash FROM accounts WHERE username = ?", (row, index) -> new Credentials(row.getObject("id", UUID.class), row.getString("username"), row.getString("password_hash")), normalizeUsername(username)).stream().findFirst().orElseThrow(() -> new UsernameNotFoundException("Invalid credentials"));
@@ -38,7 +42,7 @@ public class AccountService {
     @Transactional
     public Profile register(String username, String password) {
         username = normalizeUsername(username);
-        if (!username.matches("[a-z0-9_]{3,24}") || password == null || password.codePointCount(0, password.length()) < 12 || password.getBytes(StandardCharsets.UTF_8).length > 72) throw new IllegalArgumentException("아이디는 영문/숫자/_ 3–24자, 비밀번호는 12자 이상·UTF-8 72바이트 이하여야 합니다.");
+        if (!username.matches("[a-z0-9_]{3,24}") || password == null || password.codePointCount(0, password.length()) < 8 || password.getBytes(StandardCharsets.UTF_8).length > 72) throw new IllegalArgumentException("아이디는 영문/숫자/_ 3–24자, 비밀번호는 8자 이상·UTF-8 72바이트 이하여야 합니다.");
         UUID id = UUID.randomUUID();
         try { db.update("INSERT INTO accounts(id, username, password_hash, callsign) VALUES (?, ?, ?, ?)", id, username, passwords.encode(password), username); }
         catch (DuplicateKeyException ex) { throw new DuplicateUsernameException(); }
@@ -56,12 +60,25 @@ public class AccountService {
         return profile(id);
     }
 
+    @Transactional
+    public Profile setSuppressor(String username, String weaponId, boolean equipped) {
+        if (!catalog.firearm(weaponId)) throw new IllegalArgumentException("소음기를 장착할 총기를 확인해 주세요.");
+        UUID id = credentials(username).id();
+        long kills = db.query("SELECT kills FROM weapon_kills WHERE account_id = ? AND weapon_id = ?", (row, index) -> row.getLong(1), id, weaponId).stream().findFirst().orElse(0L);
+        if (equipped && kills < catalog.mastery().suppressorKills()) throw new IllegalArgumentException("해당 총기 Lv." + catalog.mastery().suppressorLevel() + "에서 소음기가 해금됩니다.");
+        if (equipped) db.update("INSERT INTO equipped_suppressors(account_id, weapon_id) VALUES (?, ?) ON CONFLICT DO NOTHING", id, weaponId);
+        else db.update("DELETE FROM equipped_suppressors WHERE account_id = ? AND weapon_id = ?", id, weaponId);
+        return profile(id);
+    }
+
     public Profile profile(String username) { return profile(credentials(username).id()); }
     public Profile profile(UUID id) {
         List<String> owned = db.queryForList("SELECT weapon_id FROM owned_weapons WHERE account_id = ? ORDER BY weapon_id", String.class, id);
         Map<String, Long> kills = new LinkedHashMap<>();
         db.query("SELECT weapon_id, kills FROM weapon_kills WHERE account_id = ? ORDER BY weapon_id", row -> { kills.put(row.getString(1), row.getLong(2)); }, id);
-        int placementWins = db.queryForObject("SELECT COUNT(*) FROM (SELECT r.win_bonus FROM match_results r JOIN online_matches m ON m.id = r.match_id WHERE r.account_id = ? AND m.mode = 'RANKED' AND r.placements_after > 0 ORDER BY m.completed_at, m.created_at, m.id LIMIT 10) placements WHERE win_bonus > 0", Integer.class, id);
-        return db.queryForObject("SELECT a.*, p.* FROM accounts a JOIN profiles p ON p.account_id = a.id WHERE a.id = ?", (row, index) -> new Profile(id, row.getString("username"), row.getString("callsign"), row.getString("character_id"), row.getString("outfit_id"), row.getLong("kills"), row.getLong("deaths"), row.getLong("points"), row.getInt("rounds_played"), row.getInt("wins"), row.getInt("casual_rating"), row.getString("rank_tier"), 5 - row.getInt("rank_index") % 5, row.getInt("rank_points"), row.getInt("rank_placements"), placementWins, row.getInt("ranked_games"), owned, kills), id);
+        List<String> suppressed = db.queryForList("SELECT e.weapon_id FROM equipped_suppressors e JOIN weapon_kills k ON k.account_id = e.account_id AND k.weapon_id = e.weapon_id WHERE e.account_id = ? AND k.kills >= ? ORDER BY e.weapon_id", String.class, id, catalog.mastery().suppressorKills()).stream().filter(catalog::firearm).toList();
+        Map<String, CompetitiveProfile> competitive = records.forAccount(id);
+        return db.queryForObject("SELECT a.*, p.* FROM accounts a JOIN profiles p ON p.account_id = a.id WHERE a.id = ?", (row, index) -> new Profile(id, row.getString("username"), row.getString("callsign"), row.getString("character_id"), row.getString("outfit_id"), row.getLong("kills"), row.getLong("deaths"), row.getLong("points"), row.getInt("rounds_played"), row.getInt("wins"), row.getInt("casual_rating"), row.getString("rank_tier"), 5 - row.getInt("rank_index") % 5, row.getInt("rank_points"), row.getInt("rank_placements"), competitive.get("teams").placementWins(), row.getInt("ranked_games"), owned, kills, suppressed, competitive), id);
     }
+
 }

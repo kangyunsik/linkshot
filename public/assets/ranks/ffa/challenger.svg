@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+<title>Solo Challenger · ascendant sun</title>
+<defs><linearGradient id="metal" gradientUnits="userSpaceOnUse" x1="17" y1="9" x2="113" y2="118"><stop stop-color="#fffbd8"/><stop offset=".38" stop-color="#ffdb88"/><stop offset="1" stop-color="#b67a36"/></linearGradient></defs>
+<circle cx="64" cy="65" r="43" fill="#352e30" stroke="url(#metal)" stroke-width="5"/>
+<path d="m64 3 9 17H55ZM9 32l26 14-8 9-19-8Zm-5 23 25 8-2 12-20-7Zm5 24 24 1 7 11-22 4Zm110-47L93 46l8 9 19-8Zm5 23-25 8 2 12 20-7Zm-5 24-24 1-7 11 22 4Z" fill="url(#metal)"/>
+<path d="m39 42 13 10 12-22 12 22 13-10-6 25H45Z" fill="url(#metal)"/>
+<path d="m64 65 20 14-20 24-20-24Z" fill="url(#metal)"/>
+<path d="m64 73 10 7-10 12-10-12Z" fill="#fff8da"/>
+<path d="m44 111 20 12 20-12" stroke="url(#metal)" stroke-width="3"/>
+</svg>

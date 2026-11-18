@@ -19,9 +19,12 @@ const WEAPON_MOVEMENT = {
   m249: { walkMultiplier: 0.7, sprintMultiplier: 0.76, adsMoveMultiplier: 0.42 },
   m14: { walkMultiplier: 0.9, sprintMultiplier: 0.92, adsMoveMultiplier: 0.57 },
   glock18c: { walkMultiplier: 1.1, sprintMultiplier: 1.08, adsMoveMultiplier: 0.85 },
+  an94: { walkMultiplier: .97, sprintMultiplier: .97, adsMoveMultiplier: .65 },
+  s686: { walkMultiplier: .94, sprintMultiplier: .94, adsMoveMultiplier: .72 },
+  vector: { walkMultiplier: 1.07, sprintMultiplier: 1.06, adsMoveMultiplier: .82 },
 };
 
-const WEAPON_PRICES = { smg: 600, lmg: 1200, dmr: 1100, ak47: 1400, m4a1: 1600, famas: 1800, mp5: 900, p90: 1500, ump45: 1000, awp: 1900, m82: 2000, spas12: 1300, deagle: 1200, m249: 1700, m14: 1400, glock18c: 800 };
+const WEAPON_PRICES = { smg: 600, lmg: 1200, dmr: 1100, ak47: 1400, m4a1: 1600, famas: 1800, mp5: 900, p90: 1500, ump45: 1000, awp: 1900, m82: 2000, spas12: 1300, deagle: 1200, m249: 1700, m14: 1400, glock18c: 800, an94: 1700, s686: 1300, vector: 1600 };
 
 export const WEAPONS = Object.freeze([
   { id: 'rifle', slot: 1, name: 'VX–7', label: '돌격소총', type: 'ASSAULT', action: 'AUTO', magazine: 30, fireSeconds: 0.105, reloadSeconds: 1.75, damage: 28, headDamage: 48, pellets: 1, spread: 0.008, adsSpread: 0.0016, range: 110, falloffStart: 40, minDamage: 0.75, zoom: 0.73, recoil: 1.7, automatic: true, caliber: '5.56 MM', description: '강한 수직 반동의 기본 소총. 멈춰서 정조준하고 짧게 끊어 쏘면 정확합니다.' },
@@ -44,6 +47,9 @@ export const WEAPONS = Object.freeze([
   { id: 'm249', model: 'lmg', slot: 18, name: 'M249 SAW', label: '100발 분대지원화기', type: 'LMG', action: 'AUTO', magazine: 100, fireSeconds: 0.075, reloadSeconds: 4.2, damage: 22, headDamage: 38, pellets: 1, spread: 0.026, adsSpread: 0.009, range: 135, falloffStart: 45, minDamage: 0.7, zoom: 0.76, recoil: 1.55, automatic: true, caliber: '5.56×45 MM', description: '100발 탄대와 지속 제압. 재장전이 매우 길고 이동이 무거우므로 엄폐와 사격 타이밍을 계획해야 합니다.' },
   { id: 'm14', model: 'dmr', slot: 19, name: 'M14', label: '20발 전투소총', type: 'DMR', action: 'SEMI', magazine: 20, fireSeconds: 0.24, reloadSeconds: 2.45, damage: 48, headDamage: 90, pellets: 1, spread: 0.015, adsSpread: 0.0025, range: 175, falloffStart: 70, minDamage: 0.75, zoom: 0.5, recoil: 1.8, automatic: false, caliber: '7.62×51 MM', description: '목제 개머리판과 20발 탄창. 중장거리에서 꾸준히 후속 단발을 이어가는 전투소총입니다.' },
   { id: 'glock18c', model: 'pistol', slot: 20, name: 'Glock 18C', label: '자동권총', type: 'SIDEARM', action: 'AUTO', magazine: 33, fireSeconds: 0.06, reloadSeconds: 1.65, damage: 17, headDamage: 30, pellets: 1, spread: 0.026, adsSpread: 0.009, range: 60, falloffStart: 14, minDamage: 0.45, zoom: 0.83, recoil: 0.85, automatic: true, caliber: '9×19 MM', description: '33발 확장 탄창의 고속 자동권총. 가볍고 근거리 연사가 빠르지만 탄 퍼짐과 탄 소모를 주의하세요.' },
+  { id: 'an94', model: 'rifle', slot: 21, name: 'AN-94', label: '초탄 2연발 소총', type: 'ASSAULT', action: 'HYPER / AUTO', magazine: 30, fireSeconds: .12, hyperburstCount: 2, hyperburstSeconds: .04, reloadSeconds: 2.35, damage: 25, headDamage: 48, pellets: 1, spread: .009, adsSpread: .0016, range: 120, falloffStart: 38, minDamage: .68, zoom: .74, recoil: 1.45, automatic: true, caliber: '5.45×39 MM', description: '누르고 쏘는 처음 두 발의 간격이 매우 짧고, 이후에는 일반 자동 연사로 이어집니다. 짧게 끊어 쏘는 중거리 소총.' },
+  { id: 's686', model: 'shotgun', slot: 22, name: 'S686', label: '2발 더블배럴', type: 'SHOTGUN', action: 'BREAK', magazine: 2, fireSeconds: .18, reloadSeconds: 2.65, damage: 16, headDamage: 24, pellets: 8, spread: .072, adsSpread: .05, range: 36, falloffStart: 6, minDamage: .12, zoom: .82, recoil: 2.25, automatic: false, caliber: '12 GAUGE', description: '위아래 두 총열의 빠른 두 발로 승부합니다. 근접 순간 화력은 강하지만 빗맞힌 뒤의 긴 재장전이 큰 빈틈입니다.' },
+  { id: 'vector', model: 'smg', slot: 23, name: 'KRISS Vector', label: '초근접 고속 SMG', type: 'SMG', action: 'AUTO', magazine: 19, fireSeconds: .045, reloadSeconds: 1.95, damage: 19, headDamage: 32, pellets: 1, spread: .022, adsSpread: .007, range: 60, falloffStart: 14, minDamage: .42, zoom: .82, recoil: .9, automatic: true, caliber: '.45 ACP', description: '19발을 순식간에 비우는 초근접 기관단총. 높은 순간 화력 대신 짧은 사거리와 잦은 재장전을 감수해야 합니다.' },
 ].map((weapon) => Object.freeze({ ...weapon, price: WEAPON_PRICES[weapon.id] || 0, ...WEAPON_MOVEMENT[weapon.id] })));
 
 export const FREE_WEAPON_IDS = Object.freeze(WEAPONS.filter((weapon) => !weapon.price).map((weapon) => weapon.id));
@@ -70,6 +76,10 @@ export const getWeapon = (id) => id === KNIFE.id ? KNIFE : WEAPONS.find((weapon)
 export const getSkin = (id) => SKINS.find((skin) => skin.id === id) || SKINS[0];
 export const weaponModel = (weapon) => weapon.model || weapon.id;
 export const freshMagazines = () => Object.fromEntries(WEAPONS.map((weapon) => [weapon.id, weapon.magazine]));
+
+// Releasing restores the ordinary delay, so rapid single-click spam cannot
+// bypass the AN-94's slower cadence after its initial held pair.
+export const shotInterval = (weapon, shotIndex = 1, held = true) => weapon.hyperburstCount && shotIndex < weapon.hyperburstCount && held ? weapon.hyperburstSeconds : weapon.fireSeconds;
 
 export function damageAtDistance(weapon, distance, headshot = false) {
   const falloff = Math.min(1, Math.max(0, (distance - weapon.falloffStart) / Math.max(1, weapon.range - weapon.falloffStart)));

@@ -169,7 +169,7 @@ export function createOperator(player, models) {
     parts.oval(boot, [0.145, 0.20, 0.17], [position.x, 0.13, position.z + 0.005], dark, 'boot-upper');
     parts.panel(boot, [0.165, 0.035, 0.29], [position.x, 0.025, position.z - 0.055], dark, 'boot-sole'); foot.attach(boot);
   }
-  const weapon = models.create(player.weaponId || 'rifle', player.weaponSkinId || player.skinId || 'standard', false, outfit.id, character.id); weapon.position.set(0.10, 1.19, -0.16); group.add(weapon);
+  const weapon = models.create(player.weaponId || 'rifle', player.weaponSkinId || player.skinId || 'standard', false, outfit.id, character.id, undefined, player.suppressor === true); weapon.position.set(0.10, 1.19, -0.16); group.add(weapon);
   const rest = Object.values(bones).map((bone) => ({ bone, position: bone.position.clone(), quaternion: bone.quaternion.clone() }));
   const feet = ['l', 'r'].map((side) => group.worldToLocal(bones[`foot_${side}`].getWorldPosition(new THREE.Vector3())));
   const footRotations = ['l', 'r'].map((side) => group.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(bones[`foot_${side}`].getWorldQuaternion(new THREE.Quaternion())));

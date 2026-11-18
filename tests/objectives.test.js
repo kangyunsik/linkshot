@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Room } from '../shared/simulation.js';
 import { LobbyRoom, roomLobbyAction } from '../server/room-lobby.js';
-import { OBJECTIVE_RULES } from '../shared/objectives.js';
+import { OBJECTIVE_RULES, objectiveOptions, waveEnemyCount } from '../shared/objectives.js';
 
 function fixture(gameType, options = {}) {
   let now = 1000; const room = new Room('OBJECT', { gameType, mapId: gameType === 'hardpoint' ? 'relay' : 'bastion', bots: 0, clock: () => now, random: () => .5, ...options });
@@ -46,11 +46,23 @@ test('defense randomly selects safe entries across the whole perimeter instead o
   Object.assign(defender, { x: entry.x, y: entry.y, z: entry.z, protectedUntil: 0 });
   const enemy = room.addPlayer('enemy', 'ENEMY', true, { defenseEnemy: true }); assert.notEqual(enemy.spawnId, entry.spawnId); assert.ok(Math.hypot(enemy.x - defender.x, enemy.z - defender.z) >= 8);
 });
-test('defense keeps people/allied bots on blue, reserves enemy slots and automatically queues bounded waves', () => {
+test('defense keeps four defenders independently of enemy population', () => {
   const f = fixture('defense'), { room } = f; for (let i = 0; i < 4; i++) assert.equal(room.addPlayer(`h${i}`, `H${i}`).teamId, 'blue');
   assert.throws(() => room.addPlayer('fifth', 'FIFTH'), /최대 4명/); f.advance(12_000);
   assert.equal([...room.players.values()].filter((p) => p.isWaveEnemy).length, 4); assert.equal(room.players.size, 8);
   assert.ok([...room.players.values()].filter((p) => p.isWaveEnemy).every((p) => p.teamId === 'red' && p.hp === 100));
+});
+test('defense has no ten-wave, total-enemy or simultaneous-spawn ceiling and later waves deploy together', () => {
+  const f = fixture('defense', { waves: 75 }), { room } = f;
+  assert.equal(room.waves, 75); assert.equal(objectiveOptions({ waves: 250 }).waves, 250);
+  for (const waves of [-1, NaN, Infinity, 1.5]) assert.equal(objectiveOptions({ waves }).waves, 5);
+  for (let i = 0; i < 4; i++) room.addPlayer(`defender-${i}`, 'DEFENDER');
+  room.objectives.state.wave = 25; room.objectives.state.startsAt = f.now();
+  room.objectives.tick(.05, f.now());
+  assert.equal(room.objectives.enemies().length, waveEnemyCount(25)); assert.equal(room.players.size, 104);
+  assert.equal(room.objectives.state.pending, 0); assert.equal(room.snapshot().room.objective.aliveEnemies, 100);
+  assert.throws(() => room.addPlayer('fifth', 'FIFTH'), /최대 4명/);
+  assert.equal(waveEnemyCount(100), 400); assert.equal(waveEnemyCount(1000), 4000);
 });
 test('defense clears waves, fails on core loss/time expiry and cannot be won from kill counts', () => {
   const f = fixture('defense', { waves: 1 }), { room } = f, host = room.addPlayer('host', 'HOST'); f.advance(12_000);

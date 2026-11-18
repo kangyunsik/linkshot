@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+<title>Solo Silver · pursuit star</title>
+<defs><linearGradient id="metal" gradientUnits="userSpaceOnUse" x1="22" y1="20" x2="108" y2="109"><stop stop-color="#f1ffff"/><stop offset=".4" stop-color="#bdcfdf"/><stop offset="1" stop-color="#617d97"/></linearGradient></defs>
+<circle cx="64" cy="64" r="46" fill="#223440" stroke="url(#metal)" stroke-width="4"/>
+<path d="m64 10 10 13H54Zm0 108 10-13H54ZM10 45l21 10v8L9 55Zm0 19 22 9v9L13 74Zm108-19L97 55v8l22-8Zm0 19-22 9v9l19-8Z" fill="url(#metal)"/>
+<circle cx="64" cy="64" r="32" stroke="#7394aa" stroke-width="2" stroke-dasharray="20 5"/>
+<path d="m64 31 9 24 24 9-24 9-9 24-9-24-24-9 24-9Z" fill="url(#metal)"/>
+<path d="m64 52 12 12-12 12-12-12Z" fill="#f1ffff"/>
+</svg>

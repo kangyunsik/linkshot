@@ -4,7 +4,7 @@ import { mkdir } from 'node:fs/promises';
 test('every firearm and knife uses rigid, straight forearms, neutral wrists and weapon-local grip targets', async ({ page }) => {
   await page.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: '' })); await page.goto('/');
   const checks = await page.evaluate(async () => {
-    const [THREE, { WeaponModels, disposeModel }, { EQUIPMENT }] = await Promise.all([import('/vendor/three.module.js'), import('/weapon-model.js'), import('/shared/catalog.js')]);
+    const [THREE, { WeaponModels, disposeModel }, { EQUIPMENT }, { VIEWMODEL_HIP_OFFSET }] = await Promise.all([import('/vendor/three.module.js'), import('/weapon-model.js'), import('/shared/catalog.js'), import('/viewmodel-renderer.js')]);
     const models = new WeaponModels(), checks = [];
     for (const characterId of ['male', 'female']) for (const weapon of EQUIPMENT) for (const side of ['left', 'right']) {
       const model = models.create(weapon.id, 'standard', true, 'field', characterId), hand = model.getObjectByName(`${side}-hand`);
@@ -15,7 +15,7 @@ test('every firearm and knife uses rigid, straight forearms, neutral wrists and 
       const line = new THREE.Line3(centers[0], centers.at(-1)), closest = new THREE.Vector3();
       const deviation = Math.max(...centers.map((center) => center.distanceTo(line.closestPointToPoint(center, true, closest))));
       const diameter = distance(new THREE.Vector3().fromBufferAttribute(p, 8 * 17).toArray(), new THREE.Vector3().fromBufferAttribute(p, 8 * 17 + 8).toArray());
-      const rootOutside = [82, 110].every((fov) => { const camera = new THREE.PerspectiveCamera(fov, 1.44, .04, 10); camera.updateMatrixWorld(true); return Array.from({ length: 16 }, (_, i) => new THREE.Vector3().fromBufferAttribute(p, i).add(new THREE.Vector3(.18, -.20, -.54))).every((point) => point.z > -.04 || ((point) => point.y < -1 || Math.abs(point.x) > 1)(point.project(camera))); });
+      const rootOutside = [65, 82, 105, 110].every((fov) => { const camera = new THREE.PerspectiveCamera(fov, 1.44, .04, 10); camera.updateMatrixWorld(true); return Array.from({ length: 16 }, (_, i) => new THREE.Vector3().fromBufferAttribute(p, i).add(new THREE.Vector3().copy(VIEWMODEL_HIP_OFFSET))).every((point) => point.z > -.04 || ((point) => point.y < -1 || Math.abs(point.x) > 1)(point.project(camera))); });
       const alignment = centers.at(-1).clone().sub(centers.at(-2)).normalize().dot(new THREE.Vector3(0, 1, 0).applyQuaternion(hand.quaternion));
       const socket = model.getObjectByName(`grip-${side === 'right' ? 'r' : 'l'}`); model.updateMatrixWorld(true);
       checks.push({ id: weapon.id, type: weapon.type, side, rigid: sleeve.userData.rigidForearm, straight: sleeve.userData.straightSupport, length: sleeve.userData.sleeveLength, deviation, diameter, rootOutside, alignment, pose: hand.userData.pose, socketError: socket.getWorldPosition(new THREE.Vector3()).distanceTo(hand.getWorldPosition(new THREE.Vector3())), foreend: hand.userData.foreend });
@@ -104,7 +104,7 @@ test('left hand mirrors every local gun, hands, reload pose and flash without ch
   const errors = []; page.on('pageerror', (error) => errors.push(error.message)); await page.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: '' })); await page.goto('/');
   try {
     const result = await page.evaluate(async () => {
-      const [THREE, { FPSGame }, { Room }, { EQUIPMENT }] = await Promise.all([import('/vendor/three.module.js'), import('/game.js'), import('/shared/simulation.js'), import('/shared/catalog.js')]);
+      const [THREE, { FPSGame }, { Room }, { EQUIPMENT }, { VIEWMODEL_HIP_OFFSET, VIEWMODEL_ADS_Z, viewmodelHipOffset }] = await Promise.all([import('/vendor/three.module.js'), import('/game.js'), import('/shared/simulation.js'), import('/shared/catalog.js'), import('/viewmodel-renderer.js')]);
       const room = new Room('MIRROR', { bots: 0 }), player = room.addPlayer('viewer', 'VIEWER'), peer = room.addPlayer('peer', 'PEER'); Object.assign(peer, { x: 4, y: 0, z: -10 });
       document.getElementById('lobby').hidden = true; document.getElementById('game-shell').hidden = false;
       const settings = { sensitivity: 1, fov: 82, quality: 'low', weaponHand: 'right' }, game = new FPSGame({ canvas: document.getElementById('game-canvas'), minimap: document.getElementById('minimap'), mapId: 'foundry', settings, audio: { step() {}, stopReload() {} }, send() {}, onMenu() {}, onFatal(message) { throw new Error(message); } });
@@ -113,15 +113,15 @@ test('left hand mirrors every local gun, hands, reload pose and flash without ch
       const worldMatrix = game.remote.get(peer.id).group.matrixWorld.clone(), cameraMatrix = game.camera.matrixWorld.clone(), checks = [];
       const relative = (object) => object.getWorldPosition(new THREE.Vector3()).applyMatrix4(game.camera.matrixWorldInverse);
       for (const weapon of EQUIPMENT) {
-        game.activateWeapon(weapon.id); game.weapon.position.set(.18, -.2, -.54); game.weapon.rotation.set(.12, 0, -.4);
+        game.activateWeapon(weapon.id); game.weapon.position.copy(viewmodelHipOffset(weapon)); game.weapon.rotation.set(.12, 0, -.4);
         settings.weaponHand = 'right'; game.applySettings(); game.scene.updateMatrixWorld(true);
         const objects = [game.weapon, game.activeModel.getObjectByName('left-hand'), game.activeModel.getObjectByName('right-hand'), game.muzzleFlash, game.muzzleLight], right = objects.map(relative);
         settings.weaponHand = 'left'; game.applySettings(); game.scene.updateMatrixWorld(true); const left = objects.map(relative);
         checks.push(...right.map((point, i) => new THREE.Vector3(-point.x, point.y, point.z).distanceTo(left[i])));
-        game.weapon.position.set(0, -game.activeModel.userData.aimHeight, -.35); game.weapon.rotation.set(0, 0, 0); game.scene.updateMatrixWorld(true);
+        game.weapon.position.set(0, -game.activeModel.userData.aimHeight, VIEWMODEL_ADS_Z); game.weapon.rotation.set(0, 0, 0); game.scene.updateMatrixWorld(true);
         const aim = game.activeModel.localToWorld(new THREE.Vector3(0, game.activeModel.userData.aimHeight, 0)).project(game.camera); checks.push(Math.abs(aim.x), Math.abs(aim.y));
       }
-      game.activateWeapon('rifle'); game.weapon.position.set(.18, -.2, -.54); game.weapon.rotation.set(0, 0, 0);
+      game.activateWeapon('rifle'); game.weapon.position.copy(VIEWMODEL_HIP_OFFSET); game.weapon.rotation.set(0, 0, 0);
       const target = new THREE.WebGLRenderTarget(320, 240); game.renderer.setRenderTarget(target);
       const pixels = () => { const data = new Uint8Array(320 * 240 * 4); game.renderer.setRenderTarget(target); game.renderFrame(); game.renderer.readRenderTargetPixels(target, 0, 0, 320, 240, data); return data; };
       game.weapon.visible = false; const worldLeft = pixels(); settings.weaponHand = 'right'; game.applySettings(); const worldRight = pixels(); game.weapon.visible = true; const right = pixels(); settings.weaponHand = 'left'; game.applySettings(); const left = pixels();

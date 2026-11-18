@@ -6,7 +6,7 @@ import { EQUIPMENT } from '/shared/catalog.js';
 import { WeaponWallGuard } from './weapon-wall.js';
 import { topHeight, horizontalOverlap } from '/shared/terrain.js';
 
-const corpseKey = (player) => `${player.characterId}/${player.outfitId}/${player.skinId}/${player.teamId || ''}/${player.weaponId}/${player.weaponSkinId || player.skinId}`;
+const corpseKey = (player) => `${player.characterId}/${player.outfitId}/${player.skinId}/${player.teamId || ''}/${player.weaponId}/${player.weaponSkinId || player.skinId}/${player.suppressor === true}`;
 const CORPSE_LIMIT = 8;
 
 export class CombatEffects {

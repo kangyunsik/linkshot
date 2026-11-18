@@ -125,5 +125,6 @@ export function createViewmodelHands(models, { group, shape, weaponId, outfit, s
   }
   root.userData.anatomy = 'quaternius-view-hands-v1'; root.userData.covered = covered; root.userData.characterId = character.id;
   root.userData.gripSystem = 'weapon-local-neutral-wrist-v2';
+  if (weaponId === 's686' && group.userData.breakAction) group.userData.breakAction.attach(supportArm);
   group.userData.supportArm = supportArm; group.userData.handRig = root; return root;
 }

@@ -1,10 +1,11 @@
 import * as THREE from '/vendor/three.module.js';
 import { RULES, getMap, hasLineOfSight, playerPose, damageBearing } from '/shared/world.js';
-import { WEAPONS, EQUIPMENT, getWeapon, getSkin, shotSpread, ownsWeapon } from '/shared/catalog.js';
+import { WEAPONS, EQUIPMENT, getWeapon, getSkin, shotSpread, shotInterval, ownsWeapon } from '/shared/catalog.js';
 import { nearestDroppedWeapon } from '/shared/equipment.js';
 import { EMPTY_INPUT, clamp, angleDelta } from '/shared/movement.js';
 import { drawTacticalMap } from './map.js';
-import { WeaponModels, disposeModel } from './weapon-model.js';
+import { WeaponModels, disposeModel, setModelSuppressor } from './weapon-model.js';
+import { gunshotRange } from './gunshot-mix.js';
 import { createOperator, poseOperator } from './operator-model.js';
 import { getOutfit, getCharacter } from '/shared/outfits.js';
 import { reconcileMovement, advancePredictedMovement } from './prediction.js';
@@ -18,7 +19,7 @@ import { ShotFeedback } from './shot-feedback.js';
 import { weaponMastery } from '/shared/progression.js';
 import { FootstepTracker, footstepMix } from './footsteps.js';
 import { drawThemedArena } from './themed-arena.js';
-import { VIEWMODEL_LAYER, compileViewmodelPrograms, renderViewmodelFrame, normalizeWeaponHand } from './viewmodel-renderer.js';
+import { VIEWMODEL_LAYER, compileViewmodelPrograms, renderViewmodelFrame, normalizeWeaponHand, VIEWMODEL_HIP_OFFSET, VIEWMODEL_ADS_Z, viewmodelHipOffset } from './viewmodel-renderer.js';
 import { updateTutorialView } from './tutorial-view.js';
 import { BulletMarks } from './bullet-marks.js';
 import { TEAM_COLORS, TEAM_NAMES, sameTeam } from '/shared/teams.js';
@@ -28,6 +29,9 @@ import { WeaponWallGuard } from './weapon-wall.js';
 import { drawTeamArena } from './team-arena.js';
 import { ObjectiveView, updateObjectiveHud } from './objective-view.js';
 import { isTeamGame, isObjectiveGame, gameTypeName } from '/shared/game-types.js';
+import { RoundEffects } from './round-effects.js';
+import { rankBadgeNode, updateRankBadge } from './rank-badges.js';
+import { rankBadgeLabel, rankEmblem, normalizeRankBadge } from '/shared/ranks.js';
 
 const $ = (id) => document.getElementById(id);
 const lerp = THREE.MathUtils.lerp;
@@ -42,6 +46,7 @@ export function renderScoreboard(element, players, selfId) {
     const row = body.insertRow(); if (player.id === selfId) row.className = 'self'; if (player.teamId) row.dataset.team = player.teamId;
     row.insertCell().textContent = index + 1;
     const name = row.insertCell(); name.textContent = player.name;
+    const rankMark = rankBadgeNode(player.rankBadge); if (rankMark) name.prepend(rankMark);
     if (player.teamId) { const badge = document.createElement('span'); badge.className = 'team-badge'; badge.dataset.team = player.teamId; badge.textContent = TEAM_NAMES[player.teamId]; name.prepend(badge); }
     if (player.isBot || player.id === selfId) {
       const badge = document.createElement('span'); badge.className = player.isBot ? 'bot-badge' : 'you-badge'; badge.textContent = player.isBot ? 'BOT' : 'YOU'; name.append(badge);
@@ -110,6 +115,7 @@ export class FPSGame {
     this.combat = new CombatEffects(this.scene, this.models, this.world);
     this.bulletMarks = new BulletMarks(this.scene, impactMeshes);
     this.objectiveView = new ObjectiveView(this.scene);
+    this.roundEffects = new RoundEffects();
     if (this.world.id === 'training') { this.trainingMarker = new THREE.Mesh(new THREE.TorusGeometry(.6, .045, 6, 32), new THREE.MeshBasicMaterial({ color: '#b4f0cf', depthWrite: false })); this.trainingMarker.rotation.x = -Math.PI / 2; this.trainingMarker.visible = false; this.scene.add(this.trainingMarker); }
     this.graphicsReady = false; this.graphicsPromise = null; this.graphicsPreparing = false; this.retiredGraphics = [];
     this.previousFrame = performance.now(); this.fpsTime = this.previousFrame;
@@ -126,7 +132,10 @@ export class FPSGame {
     const warmup = this.combat.prepareWarmup(this.players), visibility = [];
     this.bulletMarks.prepareWarmup();
     visibility.push([this.weapon, this.weapon.visible]); this.weapon.visible = true;
-    for (const model of this.weaponModels.values()) { visibility.push([model, model.visible], [model.userData.flash, model.userData.flash.visible]); model.visible = true; model.userData.flash.visible = true; }
+    for (const model of this.weaponModels.values()) {
+      visibility.push([model, model.visible], [model.userData.flash, model.userData.flash.visible]); model.visible = true; model.userData.flash.visible = true;
+      const attachment = model.userData.suppressorMesh; if (attachment) { visibility.push([attachment, attachment.visible]); attachment.visible = true; }
+    }
     for (const avatar of this.remote.values()) { const flash = avatar.weapon.userData.flash; visibility.push([flash, flash.visible]); flash.visible = true; }
     this.scene.add(warmup); this.graphicsPreparing = true;
     this.graphicsPromise = (async () => {
@@ -303,13 +312,13 @@ export class FPSGame {
       model.traverse((object) => object.layers.set(VIEWMODEL_LAYER));
       this.weapon.add(model); this.weaponModels.set(weapon.id, model);
     }
-    this.muzzleLight = new THREE.PointLight('#ffad60', 0, 5); this.weaponHand.add(this.muzzleLight); this.muzzleLight.position.set(0.2, -0.15, -0.75);
+    this.muzzleLight = new THREE.PointLight('#ffad60', 0, 5); this.weaponHand.add(this.muzzleLight); this.muzzleLight.position.set(VIEWMODEL_HIP_OFFSET.x + .02, VIEWMODEL_HIP_OFFSET.y + .05, VIEWMODEL_HIP_OFFSET.z - .21);
     this.muzzleLight.layers.enable(VIEWMODEL_LAYER); this.scene.traverse((object) => { if (object.isLight) object.layers.enable(VIEWMODEL_LAYER); });
-    this.weapon.position.set(0.18, -0.20, -0.54); this.activateWeapon(this.requestedWeaponId);
+    this.weapon.position.copy(VIEWMODEL_HIP_OFFSET); this.activateWeapon(this.requestedWeaponId);
   }
 
-  activateWeapon(id, skinId = this.skinId) {
-    if (this.activeWeaponId === id && this.activeModel?.userData.skinId === skinId) return;
+  activateWeapon(id, skinId = this.skinId, suppressor = false) {
+    if (this.activeWeaponId === id && this.activeModel?.userData.skinId === skinId) { setModelSuppressor(this.activeModel, suppressor); return; }
     this.audio.stopReload?.();
     this.activeWeaponId = getWeapon(id).id;
     const previous = this.weaponModels.get(this.activeWeaponId);
@@ -322,15 +331,16 @@ export class FPSGame {
     }
     for (const [weaponId, model] of this.weaponModels) model.visible = weaponId === this.activeWeaponId;
     this.activeModel = this.weaponModels.get(this.activeWeaponId); this.muzzleFlash = this.activeModel.userData.flash;
+    setModelSuppressor(this.activeModel, suppressor);
     this.recoil = 0; this.switchAnimation = 1; this.muzzleUntil = 0; this.hadReload = false; this.localBurstLeft = 0; this.swingUntil = 0;
     this.aimRecoil.reset(this.aimRecoil.aimPitch);
   }
 
-  playLocalShot(weapon, now, predicted = true) {
+  playLocalShot(weapon, now, predicted = true, suppressor = this.local?.suppressor === true) {
     if (this.disposed || this.local?.hp <= 0 || !this.local || this.room?.phase !== 'active') return false;
     const deathAt = this.deathAt, roundId = this.room.roundId;
     if (weapon.melee) { this.audio.melee?.(); this.swingUntil = now + 360; }
-    else this.audio.shot(1, 0, weapon.id, 0, () => !this.disposed && this.local?.hp > 0 && this.room?.phase === 'active' && this.room.roundId === roundId && this.deathAt === deathAt);
+    else this.audio.shot(1, 0, weapon.id, 0, () => !this.disposed && this.local?.hp > 0 && this.room?.phase === 'active' && this.room.roundId === roundId && this.deathAt === deathAt, suppressor);
     this.recoil = weapon.recoil; this.muzzleUntil = weapon.melee ? 0 : now + 40; this.lastFire = now;
     this.localFirePending = false;
     if (predicted) this.shotFeedback.predict(this.fireSeq, ++this.localShotIndex);
@@ -369,7 +379,32 @@ export class FPSGame {
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture, transparent: true, opacity: 0.8, depthWrite: false })); label.position.y = 2.15; label.scale.set(2.6, 0.325, 1); group.add(label);
     group.position.set(player.x, player.y, player.z); group.rotation.y = player.yaw; this.scene.add(group);
     const shield = new THREE.Mesh(new THREE.TorusGeometry(0.43, 0.02, 8, 32), new THREE.MeshBasicMaterial({ color: '#82d9ff', transparent: true, opacity: 0.75, depthWrite: false })); shield.rotation.x = -Math.PI / 2; shield.position.y = 0.035; shield.name = 'spawn-shield'; group.add(shield);
-    return { ...operator, label, shield, target: player, lastX: player.x, lastZ: player.z, flashUntil: 0, steps: new FootstepTracker(), poseSchedule: new AvatarPoseSchedule(), weaponWall: new WeaponWallGuard(operator.weapon) };
+    const avatar = { ...operator, label, shield, target: player, lastX: player.x, lastZ: player.z, flashUntil: 0, steps: new FootstepTracker(), poseSchedule: new AvatarPoseSchedule(), weaponWall: new WeaponWallGuard(operator.weapon) };
+    this.updateAvatarLabel(avatar, player); return avatar;
+  }
+
+  updateAvatarLabel(avatar, player) {
+    const badge = normalizeRankBadge(player.rankBadge), signature = JSON.stringify([player.name, player.teamId, player.isBot, badge]);
+    if (avatar.labelSignature === signature) return; avatar.labelSignature = signature;
+    const texture = avatar.label.material.map, canvas = texture.image, ctx = canvas.getContext('2d');
+    const paint = (image) => {
+      if (this.disposed || avatar.labelSignature !== signature) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.font = '500 24px Arial, sans-serif'; ctx.textAlign = 'left'; ctx.fillStyle = TEAM_COLORS[player.teamId] || '#bfcfd3';
+      let text = `${player.teamId ? TEAM_NAMES[player.teamId] + ' · ' : ''}${player.name}${player.isBot ? ' / BOT' : ''}`;
+      const limit = badge ? 420 : 490;
+      if (ctx.measureText(text).width > limit) { const parts = [...text]; while (parts.length && ctx.measureText(parts.join('') + '…').width > limit) parts.pop(); text = parts.join('') + '…'; }
+      const width = ctx.measureText(text).width + (badge ? 48 : 0), start = (canvas.width - width) / 2;
+      if (image) ctx.drawImage(image, start, 7, 40, 40);
+      ctx.fillText(text, start + (badge ? 48 : 0), badge ? 30 : 40);
+      if (badge) { ctx.font = '11px Arial, sans-serif'; ctx.fillStyle = '#a5bdc7'; ctx.fillText(rankBadgeLabel(badge), start + 48, 49); }
+      texture.needsUpdate = true;
+    };
+    paint(null);
+    if (!badge) return;
+    const source = rankEmblem(badge.tier, badge.ladder); this.rankImages ||= new Map();
+    if (!this.rankImages.has(source)) { const image = new Image(); image.src = source; this.rankImages.set(source, image); }
+    const image = this.rankImages.get(source);
+    if (image.complete && image.naturalWidth) paint(image); else image.addEventListener('load', () => paint(image), { once: true });
   }
 
   bindInput() {
@@ -388,7 +423,10 @@ export class FPSGame {
       if (event.button === 0) { this.fireSeq++; this.localShotIndex = 0; this.fireHeld = true; this.localFirePending = true; this.firePressedUntil = performance.now() + 150; this.send(this.input()); }
       if (event.button === 2 && !getWeapon(this.activeWeaponId).melee) this.ads = true;
     }, options);
-    document.addEventListener('mouseup', (event) => { if (event.button === 0) { this.fireHeld = false; this.fireLatched = false; if (this.locked) this.send(this.input()); } if (event.button === 2) this.ads = false; }, options);
+    document.addEventListener('mouseup', (event) => {
+      if (event.button === 0) { this.fireHeld = false; this.fireLatched = false; const weapon = getWeapon(this.activeWeaponId); if (weapon.hyperburstCount && this.localShotIndex > 0) this.localNextFire = Math.max(this.localNextFire, this.lastFire + weapon.fireSeconds * 1000); if (this.locked) this.send(this.input()); }
+      if (event.button === 2) this.ads = false;
+    }, options);
     // Mouse-up may land on an overlay after ADS loses pointer lock at round
     // end. Cover the whole game surface, not just the canvas; abort on leave.
     $('game-shell').addEventListener('contextmenu', (event) => event.preventDefault(), { ...options, capture: true });
@@ -477,6 +515,9 @@ export class FPSGame {
     // Reflect the complete local rig, including reload/melee animation and
     // flashes. Camera aiming and world/remote weapon models stay unchanged.
     this.weaponHand.scale.x = normalizeWeaponHand(this.settings.weaponHand) === 'left' ? -1 : 1;
+    const opacity = (value) => typeof value === 'number' && Number.isFinite(value) ? clamp(value, 0, 100) / 100 : 1;
+    $('game-shell').style.setProperty('--killfeed-opacity', opacity(this.settings.killfeedOpacity));
+    $('game-shell').style.setProperty('--kill-announcement-opacity', opacity(this.settings.killAnnouncementOpacity));
     const quality = qualityPreset(this.settings.quality), shadow = this.sun.shadow;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality.pixelRatio));
     if (!quality.shadowSize || shadow.mapSize.x !== quality.shadowSize) {
@@ -506,7 +547,7 @@ export class FPSGame {
     const local = data.players.find((p) => p.id === id);
     if (!local) return;
     const respawned = !this.local || this.local.spawnCount !== local.spawnCount || changedRound;
-    const equipmentChanged = this.local && (this.local.equipmentSeq !== local.equipmentSeq || this.local.weaponId !== local.weaponId);
+    const equipmentChanged = this.local && (this.local.equipmentSeq !== local.equipmentSeq || this.local.weaponId !== local.weaponId || this.local.suppressor !== local.suppressor);
     if (this.local?.hp > 0 && local.hp <= 0) {
       this.deathAt = performance.now(); this.clearInput(); this.recoil = 0; this.muzzleUntil = 0;
       this.aimRecoil.reset(this.aimRecoil.aimPitch); this.muzzleFlash.visible = false; this.muzzleLight.intensity = 0;
@@ -525,6 +566,8 @@ export class FPSGame {
       reconcileMovement(this.predicted, local, this.world);
     }
     this.local = local;
+    const roundId = data.room.roundId;
+    this.roundEffects.update(data.room, data.players, id, () => { if (!this.disposed && this.room.roundId === roundId && this.room.phase === 'ended') $('round-overlay').hidden = false; });
     const team = isTeamGame(this.room.gameType) ? local.teamId : null;
     if (this.uniformTeam !== team) { this.uniformTeam = team; for (const model of this.weaponModels.values()) applyViewmodelUniform(model, team); }
     if (equipmentChanged && !respawned) {
@@ -533,7 +576,7 @@ export class FPSGame {
     }
     this.predicted.weaponId = local.weaponId;
     this.predicted.shotHeat = local.shotHeat || 0;
-    this.activateWeapon(local.weaponId, local.weaponSkinId || local.skinId);
+    this.activateWeapon(local.weaponId, local.weaponSkinId || local.skinId, local.suppressor === true);
     const present = new Set();
     for (const player of data.players) {
       if (player.id === id) continue;
@@ -544,13 +587,15 @@ export class FPSGame {
       }
       if (!this.remote.has(player.id)) this.remote.set(player.id, this.makeAvatar(player));
       const avatar = this.remote.get(player.id); avatar.target = player;
+      this.updateAvatarLabel(avatar, player);
       avatar.targetTime = data.serverTime; avatar.renderTime ??= data.serverTime;
       if (avatar.weapon.userData.weaponId !== player.weaponId || avatar.weapon.userData.skinId !== (player.weaponSkinId || player.skinId)) {
         const previous = avatar.weapon; avatar.group.remove(previous);
         if (this.graphicsPreparing) this.retiredGraphics.push(() => disposeModel(previous)); else disposeModel(previous);
-        avatar.weapon = this.models.create(player.weaponId, player.weaponSkinId || player.skinId, false, player.outfitId, player.characterId); avatar.group.add(avatar.weapon);
+        avatar.weapon = this.models.create(player.weaponId, player.weaponSkinId || player.skinId, false, player.outfitId, player.characterId, undefined, player.suppressor === true); avatar.group.add(avatar.weapon);
         avatar.weaponWall.setWeapon(avatar.weapon);
       }
+      setModelSuppressor(avatar.weapon, player.suppressor === true);
     }
     for (const [remoteId, avatar] of this.remote) if (!present.has(remoteId)) { this.scene.remove(avatar.group); this.disposeObject(avatar.group, false); this.remote.delete(remoteId); }
     this.syncDroppedWeapons(data.droppedWeapons || []); this.updateHud();
@@ -562,7 +607,7 @@ export class FPSGame {
     if (data.room.phase === 'ended') {
       this.closeLoadout(false);
       this.clearInput(); if (this.locked) document.exitPointerLock();
-      $('pause-overlay').hidden = true; $('round-overlay').hidden = false; $('respawn-overlay').hidden = true;
+      $('pause-overlay').hidden = true; $('round-overlay').hidden = this.roundEffects.resultActive; $('respawn-overlay').hidden = true;
       const winner = data.players.find((player) => player.id === data.room.result?.winnerId) || [...data.players].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)[0];
       $('round-winner').textContent = data.room.gameType === 'defense' ? `${data.room.result?.winnerName} · ${data.room.result?.cleared}/${data.room.waves}공세 · 코어 ${data.room.result?.coreHealth}` : isTeamGame(data.room.gameType) ? `${TEAM_NAMES[data.room.result?.winnerTeam] || '무승부'}${data.room.result?.winnerTeam ? ' 승리' : ''} · BLUE ${data.room.teamScores.blue} : ${data.room.teamScores.red} RED` : winner ? `${data.room.result?.winnerName || winner.name} · ${data.room.result?.winnerKills ?? winner.kills} KILLS · 이번 라운드의 최고 기록` : '';
       $('restart-button').hidden = data.room.hostId !== id; $('wait-host').hidden = data.room.hostId === id;
@@ -592,12 +637,13 @@ export class FPSGame {
     updateObjectiveHud(this.room);
     this.hud['hud-timer'].style.color = this.room.timeLeft < 30 ? '#ff876a' : '';
     this.hud['hud-kd'].textContent = `${local.kills} K  /  ${local.deaths} D`;
+    updateRankBadge($('hud-self-rank'), local.rankBadge, false);
     const reloading = local.hp > 0 && this.room.phase === 'active' && local.reloadUntil > this.serverNow;
     if (reloading || local.hp <= 0) this.localBurstLeft = 0;
     this.hud['reload-indicator'].hidden = !reloading || local.hp <= 0;
     this.hud['reload-hint'].textContent = reloading ? 'RELOADING...' : local.switchUntil > this.serverNow ? 'EQUIPPING...' : lowAmmo ? '[ R ] 재장전' : `${weapon.caliber} · ${weapon.type}`;
     $('hud-weapon-name').textContent = weapon.name; $('hud-weapon-action').textContent = weapon.action;
-    $('hud-skin-name').textContent = getSkin(local.weaponSkinId || local.skinId).name;
+    $('hud-skin-name').textContent = `${getSkin(local.weaponSkinId || local.skinId).name}${local.suppressor ? ' · SUPPRESSED' : ''}`;
     $('hud-stance').hidden = !local.crouching && !local.walking || local.hp <= 0; $('hud-stance').textContent = local.walking ? 'SILENT WALK · 발소리 없음' : 'CROUCHED · LOW PROFILE';
     $('hud-map-name').textContent = this.world.name; $('scoreboard-map-name').textContent = this.world.name;
     this.hud['reload-indicator'].querySelector('i').style.animationDuration = `${weapon.reloadSeconds}s`;
@@ -609,6 +655,7 @@ export class FPSGame {
     this.hud['respawn-overlay'].hidden = local.hp > 0 || this.room.phase === 'ended';
     $('respawn-next-weapon').textContent = `${getWeapon(local.nextWeaponId || local.weaponId).name} · 다음 부활 장비`;
     const death = local.lastDeath;
+    updateRankBadge($('death-rank-badge'), death?.attackerRankBadge);
     $('death-details').hidden = local.hp > 0 || !death;
     if (death) {
       $('death-attacker').textContent = death.attackerName; $('death-weapon').textContent = getWeapon(death.weaponId).name;
@@ -630,7 +677,7 @@ export class FPSGame {
     for (const [id, item] of this.groundItems) if (!present.has(id)) { this.scene.remove(item.group); this.disposeObject(item.group, false); this.groundItems.delete(id); }
     for (const drop of drops) {
       if (!this.groundItems.has(drop.id)) {
-        const group = new THREE.Group(), model = this.models.create(drop.weaponId, drop.skinId); group.name = 'dropped-weapon'; group.userData.dropId = drop.id;
+        const group = new THREE.Group(), model = this.models.create(drop.weaponId, drop.skinId, false, 'field', 'male', drop.skinId, drop.suppressor === true); group.name = 'dropped-weapon'; group.userData.dropId = drop.id;
         model.rotation.z = Math.PI / 2; model.updateMatrixWorld(true); model.position.y = .025 - new THREE.Box3().setFromObject(model).min.y; group.add(model);
         const marker = new THREE.Mesh(new THREE.TorusGeometry(.28, .008, 4, 24), new THREE.MeshBasicMaterial({ color: '#a4dcd6', transparent: true, opacity: .6, depthWrite: false }));
         marker.rotation.x = -Math.PI / 2; marker.position.y = .015; group.add(marker);
@@ -660,7 +707,7 @@ export class FPSGame {
         if (sameTrigger) this.localShotIndex = Math.max(this.localShotIndex, event.shotIndex);
         const sameLife = (event.spawnCount == null || event.spawnCount === this.local.spawnCount) && (event.equipmentSeq == null || event.equipmentSeq === this.local.equipmentSeq);
         if (!feedback.predicted && sameLife && this.local.hp > 0 && event.weaponId === this.activeWeaponId) {
-          const weapon = getWeapon(event.weaponId); this.playLocalShot(weapon, now, false);
+          const weapon = getWeapon(event.weaponId); this.playLocalShot(weapon, now, false, event.suppressor === true);
           // The server can fire before the next render frame. Count that
           // bullet before predicting the rest, or burst bullet #2 becomes #1
           // locally and its acknowledgement produces an extra report.
@@ -675,10 +722,10 @@ export class FPSGame {
         }
       } else if (this.predicted) {
         const dx = event.origin.x - this.predicted.x, dz = event.origin.z - this.predicted.z, distance = Math.hypot(dx, dz);
-        if (distance < 45) {
+        if (distance < gunshotRange(event.suppressor)) {
           const pan = clamp((dx * Math.cos(this.yaw) - dz * Math.sin(this.yaw)) / Math.max(distance, 0.1), -1, 1);
           if (event.melee) { if (distance < 12) this.audio.melee?.(.5 / (1 + distance / 3), pan); }
-          else this.audio.shot(Math.max(0.03, 0.55 / (1 + distance / 9)), pan, event.weaponId, distance);
+          else this.audio.shot(Math.max(0.03, 0.55 / (1 + distance / 9)), pan, event.weaponId, distance, null, event.suppressor === true);
         }
       }
       const avatar = this.remote.get(event.id); if (avatar) { avatar.flashUntil = event.melee ? 0 : performance.now() + 45; if (event.melee) avatar.swingUntil = performance.now() + 360; }
@@ -700,7 +747,8 @@ export class FPSGame {
       if (victim) this.combat.death(rendered ? { ...victim, x: rendered.group.position.x, y: rendered.group.position.y, z: rendered.group.position.z, yaw: rendered.group.rotation.y } : victim);
       const entry = document.createElement('div'); entry.className = `feed-item${event.killerId === this.selfId ? ' mine' : ''}`;
       for (const [className, text] of [['killer', event.killer], ['feed-icon', `${getWeapon(event.weaponId).name} ${event.headshot ? '⌖' : '›'}`], ['victim', event.victim]]) {
-        const span = document.createElement('span'); span.className = className; span.textContent = text; entry.append(span);
+        const span = document.createElement('span'); span.className = className; span.textContent = text;
+        const badge = className === 'killer' ? event.killerRankBadge : className === 'victim' ? event.victimRankBadge : null, mark = rankBadgeNode(badge); if (mark) span.prepend(mark); entry.append(span);
       }
       $('killfeed').prepend(entry);
       while ($('killfeed').children.length > 5) $('killfeed').lastChild.remove();
@@ -729,6 +777,7 @@ export class FPSGame {
     $('kill-chain-label').textContent = labels[chain - 1] || `${chain}× MULTI KILL`;
     $('kill-chain-count').textContent = `×${chain}`;
     $('kill-chain-detail').textContent = `${event.headshot ? '⌖ HEADSHOT' : 'CONFIRMED'} · ${event.victim}`;
+    updateRankBadge($('kill-rank-badge'), event.victimRankBadge || this.players.find(player => player.id === event.victimId)?.rankBadge);
     banner.getAnimations().forEach((animation) => animation.cancel());
     if (!matchMedia('(prefers-reduced-motion: reduce)').matches) banner.animate([{ opacity: 0, transform: 'translateY(-12px) scale(1.25)', filter: 'brightness(3)' }, { opacity: 1, transform: 'translateY(0) scale(1)', filter: 'brightness(1)' }], { duration: 420, easing: 'cubic-bezier(.16,1,.3,1)' });
     this.announcementUntil = now + 2600;
@@ -827,9 +876,10 @@ export class FPSGame {
       const reloadRemaining = this.local.reloadUntil - this.serverNow;
       const reloadTilt = reloadRemaining > 0 ? Math.sin(clamp(reloadRemaining / (weapon.reloadSeconds * 1000), 0, 1) * Math.PI) : 0;
       this.switchAnimation = lerp(this.switchAnimation, 0, dt * 10);
-      this.weapon.position.x = lerp(this.weapon.position.x, (ads ? 0 : 0.18) + bob * 0.005, dt * 14);
-      this.weapon.position.y = lerp(this.weapon.position.y, (ads ? -this.activeModel.userData.aimHeight : -0.20) - reloadTilt * 0.18 - this.switchAnimation * 0.25 + bob * 0.007, dt * 14);
-      this.weapon.position.z = lerp(this.weapon.position.z, (ads ? -0.35 : -0.54) + this.recoil * 0.035, dt * 17);
+      const hip = viewmodelHipOffset(weapon);
+      this.weapon.position.x = lerp(this.weapon.position.x, (ads ? 0 : hip.x) + bob * 0.005, dt * 14);
+      this.weapon.position.y = lerp(this.weapon.position.y, (ads ? -this.activeModel.userData.aimHeight : hip.y) - reloadTilt * 0.18 - this.switchAnimation * 0.25 + bob * 0.007, dt * 14);
+      this.weapon.position.z = lerp(this.weapon.position.z, (ads ? VIEWMODEL_ADS_Z : hip.z) + this.recoil * 0.035, dt * 17);
       this.weapon.rotation.z = -reloadTilt * 0.65 + bob * 0.008;
       this.weapon.rotation.x = -reloadTilt * 0.25;
       if (weapon.melee) { const swing = Math.sin(clamp((this.swingUntil - now) / 360, 0, 1) * Math.PI); this.weapon.rotation.z -= swing * .9; this.weapon.rotation.x += swing * .5; this.weapon.position.x -= swing * .16; }
@@ -839,21 +889,22 @@ export class FPSGame {
       if (this.activeModel.userData.reticle) this.activeModel.userData.reticle.visible = !ads;
       $('ads-reticle').hidden = !ads || scoped || this.local.hp <= 0;
       $('ads-reticle').style.backgroundColor = getSkin(this.local.skinId).accent;
-      this.weapon.visible = (this.graphicsPreparing || this.local.hp > 0 && this.room.phase === 'active') && !scoped;
+      this.weapon.visible = (this.graphicsPreparing || this.local.hp > 0 && ['active', 'waiting', 'countdown'].includes(this.room.phase)) && !scoped;
       if (now > this.firePressedUntil) this.localFirePending = false;
       const trigger = input.fire || this.localFirePending;
       if (weapon.burstCount && !this.localBurstLeft && trigger && !this.fireLatched && now >= this.localNextFire) this.localBurstLeft = weapon.burstCount;
       const fireReady = weapon.burstCount ? this.localBurstLeft > 0 : trigger && (weapon.automatic || !this.fireLatched);
       if (this.local.hp > 0 && this.room.phase === 'active' && this.locked && fireReady && !switching && !this.hadReload && (weapon.melee || this.local.ammo > 0) && now >= this.localNextFire && this.serverNow >= this.local.nextFireAt - 20) {
-        this.playLocalShot(weapon, now); this.localNextFire = now + weapon.fireSeconds * 1000;
+        this.playLocalShot(weapon, now); this.localNextFire = now + shotInterval(weapon, this.localShotIndex, this.fireHeld) * 1000;
         if (weapon.burstCount) { this.localBurstLeft--; if (!this.localBurstLeft) this.localNextFire = now + weapon.burstPause * 1000; }
       }
       this.fireLatched = input.fire;
       if (this.activeModel.userData.pump) this.activeModel.userData.pump.position.z = -0.43 + Math.sin(clamp((now - this.lastFire) / 600, 0, 1) * Math.PI) * 0.1;
       if (this.activeModel.userData.pump && this.activeModel.userData.supportArm) this.activeModel.userData.supportArm.position.z = this.activeModel.userData.pump.position.z + .43;
       if (this.activeModel.userData.slide) this.activeModel.userData.slide.position.z = this.recoil * 0.025;
+      if (this.activeModel.userData.breakAction) this.activeModel.userData.breakAction.rotation.x = -reloadTilt * .55;
       this.recoil = lerp(this.recoil, 0, dt * 15);
-      this.muzzleFlash.visible = now < this.muzzleUntil; this.muzzleLight.intensity = now < this.muzzleUntil ? 2 : 0;
+      this.muzzleFlash.visible = now < this.muzzleUntil; this.muzzleLight.intensity = now < this.muzzleUntil ? this.local.suppressor ? .35 : 2 : 0;
       this.hud['crosshair'].style.opacity = this.local.hp <= 0 || ads ? '0' : '1';
       const spread = shotSpread(weapon, ads, this.predicted);
       // Scaling the translated container moved its center by up to 42px.
@@ -955,6 +1006,8 @@ export class FPSGame {
 
   dispose() {
     if (this.disposed) return this.disposalPromise;
+    this.roundEffects.dispose(); clearTimeout(this.roundReturnTimer);
+    for (const id of ['hud-self-rank', 'death-rank-badge', 'kill-rank-badge']) updateRankBadge($(id), null);
     this.disposed = true; this.abort.abort(); cancelAnimationFrame(this.frameId);
     this.hitmarkerAnimation?.cancel();
     this.audio.stopReload?.();
@@ -968,6 +1021,7 @@ export class FPSGame {
     this.clearKillFeedback();
     updateTutorialView(null);
     this.remote.clear(); this.groundItems.clear(); this.effects.length = 0; $('equipment-hint').hidden = true;
+    this.rankImages?.clear();
     this.closeLoadout(false);
     for (const id of ['pause-overlay', 'round-overlay', 'scoreboard-overlay', 'respawn-overlay']) $(id).hidden = true;
     $('killfeed').replaceChildren();

@@ -122,6 +122,7 @@ type localProfile struct {
 	OwnedWeapons []string `json:"ownedWeapons"`
 	WeaponKills map[string]int64 `json:"weaponKills"`
 	RoundLedger map[string]roundProgress `json:"roundLedger"`
+	SuppressedWeapons []string `json:"suppressedWeapons"`
 	CreatedAt int64 `json:"createdAt"`
 	UpdatedAt int64 `json:"updatedAt"`
 }
@@ -131,6 +132,7 @@ type economyConfig struct {
 	Outfits []struct { ID string `json:"id"`; Price int64 `json:"price"` } `json:"outfits"`
 	Weapons []struct { ID string `json:"id"`; Price int64 `json:"price"` } `json:"weapons"`
 	FreeWeapons []string `json:"freeWeapons"`
+	Mastery struct { SuppressorLevel int `json:"suppressorLevel"`; SuppressorKills int64 `json:"suppressorKills"` } `json:"mastery"`
 }
 type profileOperation struct {
 	Type string `json:"type"`
@@ -144,6 +146,7 @@ type profileOperation struct {
 	OutfitID string `json:"outfitId"`
 	WeaponID string `json:"weaponId"`
 	WeaponKills map[string]int64 `json:"weaponKills"`
+	Equipped *bool `json:"equipped"`
 }
 type profileStore struct {
 	mu sync.Mutex
@@ -165,6 +168,10 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 func profileCount(value int64) int64 { if value < 0 { return 0 }; if value > 1000000000 { return 1000000000 }; return value }
 func hasOutfit(p localProfile, id string) bool { for _, owned := range p.OwnedOutfits { if owned == id { return true } }; return false }
 func hasWeapon(p localProfile, id string) bool { for _, owned := range p.OwnedWeapons { if owned == id { return true } }; return false }
+func (s *profileStore) suppressorThreshold() int64 { if s.economy.Mastery.SuppressorKills > 0 { return s.economy.Mastery.SuppressorKills }; return 1550 }
+func (s *profileStore) suppressors(raw []string, kills map[string]int64) []string {
+	result := []string{}; for _, item := range s.economy.Weapons { if kills[item.ID] < s.suppressorThreshold() { continue }; for _, id := range raw { if id == item.ID { result = append(result, id); break } } }; return result
+}
 func (s *profileStore) weaponCounts(raw map[string]int64) map[string]int64 {
 	result := map[string]int64{}; for _, id := range s.combatIDs() { if value := profileCount(raw[id]); value > 0 { result[id] = value } }; return result
 }
@@ -176,6 +183,7 @@ func (s *profileStore) migrateWeapons() {
 	owned := s.profile.OwnedWeapons; s.profile.OwnedWeapons = []string{}
 	for _, item := range s.economy.Weapons { found := item.Price == 0; for _, id := range owned { if id == item.ID { found = true } }; if found { s.profile.OwnedWeapons = append(s.profile.OwnedWeapons, item.ID) } }
 	s.profile.WeaponKills = s.weaponCounts(s.profile.WeaponKills)
+	s.profile.SuppressedWeapons = s.suppressors(s.profile.SuppressedWeapons, s.profile.WeaponKills)
 	for id, entry := range s.profile.RoundLedger { entry.WeaponKills = s.weaponCounts(entry.WeaponKills); s.profile.RoundLedger[id] = entry }
 }
 func cleanCallsign(value string) string {
@@ -233,6 +241,7 @@ func (s *profileStore) serve(w http.ResponseWriter, r *http.Request) {
 	if decoder.Decode(&operation) != nil || decoder.Decode(new(any)) != io.EOF { writeJSON(w, 400, map[string]any{"message": "잘못된 프로필 요청입니다."}); return }
 	next := s.profile; next.OwnedOutfits = append([]string{}, s.profile.OwnedOutfits...); next.RoundLedger = map[string]roundProgress{}
 	next.OwnedWeapons = append([]string{}, s.profile.OwnedWeapons...); next.WeaponKills = s.weaponCounts(s.profile.WeaponKills)
+	next.SuppressedWeapons = append([]string{}, s.profile.SuppressedWeapons...)
 	for id, entry := range s.profile.RoundLedger { next.RoundLedger[id] = entry }
 	now := time.Now().UnixMilli(); changed := false; var award map[string]any; var cost int64
 	responseError := func(message string) { writeJSON(w, 409, map[string]any{"message": message, "profile": s.profile}) }
@@ -272,6 +281,11 @@ func (s *profileStore) serve(w http.ResponseWriter, r *http.Request) {
 			if next.Points < price { responseError("포인트가 부족합니다."); return }
 			next.Points -= price; cost = price; next.OwnedWeapons = append(next.OwnedWeapons, operation.WeaponID); changed = true
 		}
+	case "suppressor":
+		if _, exists := s.weaponPrices[operation.WeaponID]; !exists || operation.Equipped == nil { responseError("소음기를 장착할 총기를 확인해 주세요."); return }
+		if *operation.Equipped && next.WeaponKills[operation.WeaponID] < s.suppressorThreshold() { responseError("해당 총기 Lv.5에서 소음기가 해금됩니다."); return }
+		ids := []string{}; for _, id := range next.SuppressedWeapons { if id != operation.WeaponID { ids = append(ids, id) } }; if *operation.Equipped { ids = append(ids, operation.WeaponID) }
+		before, _ := json.Marshal(next.SuppressedWeapons); next.SuppressedWeapons = s.suppressors(ids, next.WeaponKills); after, _ := json.Marshal(next.SuppressedWeapons); changed = string(before) != string(after)
 	default: responseError("지원하지 않는 프로필 작업입니다."); return
 	}
 	if len(next.RoundLedger) > 256 {

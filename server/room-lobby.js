@@ -58,7 +58,9 @@ export class LobbyRoom extends Room {
   loadout(id, data) {
     const player = this.member(id); if (player.roomStatus !== 'waiting') throw new Error('대기실에서만 출격 장비를 변경할 수 있습니다.');
     if (!isWeaponId(data.weaponId) || !ownsWeapon(player, data.weaponId)) throw new Error('보유한 무기를 선택해 주세요.');
+    if (data.suppressor !== undefined && !this.setSuppressor(player, data.weaponId, data.suppressor)) throw new Error('해당 총기 Lv.5에서 소음기가 해금됩니다.');
     player.nextWeaponId = player.weaponId = data.weaponId; if (data.skinId) player.skinId = getSkin(data.skinId).id;
+    player.suppressor = !!player.suppressedWeapons?.includes(player.weaponId);
   }
   finish() { if (this.phase === 'ended') return; super.finish(); for (const player of this.players.values()) this.park(player); }
   summary() { return { ...super.summary(), staging: true, playing: [...this.players.values()].filter((p) => !p.isBot && p.roomStatus === 'playing').length }; }

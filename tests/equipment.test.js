@@ -86,7 +86,7 @@ test('knife attacks damage only in melee range, respect cover/protection/cooldow
 });
 
 test('knife kill ledgers persist idempotently without adding a shop weapon or allowing a purchased/selected knife loadout', () => {
-  assert.equal(WEAPONS.length, 20); assert.equal(EQUIPMENT.length, 21); assert.equal(isWeaponId('knife'), false); assert.equal(getWeapon('knife').melee, true);
+  assert.equal(WEAPONS.length, 23); assert.equal(EQUIPMENT.length, WEAPONS.length + 1); assert.equal(isWeaponId('knife'), false); assert.equal(getWeapon('knife').melee, true);
   const p = createProfile('equipment-test-01'); assert.throws(() => purchaseWeapon(p, 'knife'));
   const report = { roundId: 'equipment-round-01', kills: 2, deaths: 1, weaponKills: { knife: 1, rifle: 1 }, completed: true };
   const next = recordRound(p, report).profile; assert.equal(next.kills, 2); assert.deepEqual(next.weaponKills, { knife: 1, rifle: 1 });

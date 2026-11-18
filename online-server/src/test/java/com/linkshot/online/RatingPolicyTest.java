@@ -27,9 +27,9 @@ class RatingPolicyTest {
         var result = RatingPolicy.settle(true, List.of(new RatingPolicy.Player("a", 1000, 0, 0, 0, 0, false), new RatingPolicy.Player("b", 1000, 0, 0, 0, 0, false)));
         assertTrue(result.values().stream().allMatch(change -> change.ratingDelta() == 0 && change.outcome() == 0));
     }
-    @Test void tenPlacementsAssignATierWithoutGrantingPromotionPointsEarly() {
+    @Test void fivePlacementsAssignATierWithoutGrantingPromotionPointsEarly() {
         var state = new RatingPolicy.RankProgress(0, 0, 0, 0);
-        for (int i = 1; i <= 10; i++) { state = RatingPolicy.advance(state, 1000, 1).progress(); assertEquals(i < 10 ? "UNRANKED" : "SILVER", RatingPolicy.tier(state)); }
+        for (int i = 1; i <= 5; i++) { state = RatingPolicy.advance(state, 1000, 1).progress(); assertEquals(i < 5 ? "UNRANKED" : "SILVER", RatingPolicy.tier(state)); }
         assertEquals(5, RatingPolicy.division(state)); assertEquals(0, state.points());
     }
     @Test void hundredPointsPromotesAndALossBelowZeroDemotesWithoutMixingShopCurrency() {
@@ -39,7 +39,7 @@ class RatingPolicyTest {
         assertEquals(0, RatingPolicy.advance(new RatingPolicy.RankProgress(0, 0, 10, 30), 0, -1).progress().points());
     }
     @Test void placementAndDiamondCapsRemainBoundedForExtremeRatings() {
-        assertEquals(14, RatingPolicy.advance(new RatingPolicy.RankProgress(0, 0, 9, 9), 10_000, 1).progress().index());
+        assertEquals(14, RatingPolicy.advance(new RatingPolicy.RankProgress(0, 0, 4, 4), 10_000, 1).progress().index());
         var cap = RatingPolicy.advance(new RatingPolicy.RankProgress(24, 100, 10, 50), 4000, 1); assertEquals(24, cap.progress().index()); assertEquals(100, cap.progress().points());
     }
 }

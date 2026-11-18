@@ -1,8 +1,9 @@
 import { WEAPONS, getWeapon } from '/shared/catalog.js';
 import { NETWORK_PROTOCOL } from '/shared/world.js';
 import { footstepSignal, killSignal } from './sound-design.js';
+import { gunshotMix } from './gunshot-mix.js';
 
-const SOUND_REVISION = 2;
+const SOUND_REVISION = 3;
 
 export class GameAudio {
   constructor(settings) {
@@ -93,23 +94,27 @@ export class GameAudio {
 
   setEnvironment(indoors) { if (this.roomGain) this.roomGain.gain.setTargetAtTime(indoors ? 0.17 : 0.055, this.context.currentTime, 0.12); }
 
-  shot(volume = 1, pan = 0, weaponId = 'rifle', distance = 0, allowed = null) {
+  shot(volume = 1, pan = 0, weaponId = 'rifle', distance = 0, allowed = null, suppressor = false) {
     if (allowed && !allowed()) return;
     if (!this.context || this.context.state !== 'running') return;
     const available = (this.samples.get(weaponId) || []).filter(Boolean);
     if (available.length) {
       const source = this.context.createBufferSource(), gain = this.context.createGain(), filter = this.context.createBiquadFilter(), panner = this.context.createStereoPanner();
+      const mix = gunshotMix(getWeapon(weaponId).type, suppressor, volume, distance), bass = mix.bassDB ? this.context.createBiquadFilter() : null;
       source.buffer = available[0]; source.playbackRate.value = 1;
-      gain.gain.value = Math.max(0, Math.min(1, volume)); filter.type = 'lowpass'; filter.frequency.value = Math.max(1800, 14500 * Math.exp(-distance / 32));
-      panner.pan.value = Math.max(-1, Math.min(1, pan)); source.connect(filter).connect(gain).connect(panner); panner.connect(this.master); panner.connect(this.room);
+      // Sniper recordings already contain a long, diffuse decay. Boost the
+      // original report/body rather than layering a second shot or an echo.
+      gain.gain.value = mix.gain; filter.type = 'lowpass'; filter.frequency.value = mix.cutoff;
+      source.connect(filter); if (bass) { bass.type = 'lowshelf'; bass.frequency.value = 180; bass.gain.value = mix.bassDB; filter.connect(bass).connect(gain); } else filter.connect(gain);
+      panner.pan.value = Math.max(-1, Math.min(1, pan)); gain.connect(panner); panner.connect(this.master); panner.connect(this.room);
       if (this.voices.size >= 40) { const oldest = this.voices.values().next().value; oldest.stop(); this.voices.delete(oldest); }
-      this.voices.add(source); source.onended = () => { this.voices.delete(source); source.disconnect(); filter.disconnect(); gain.disconnect(); panner.disconnect(); };
-      source.start(); return;
+      this.voices.add(source); source.onended = () => { this.voices.delete(source); source.disconnect(); filter.disconnect(); bass?.disconnect(); gain.disconnect(); panner.disconnect(); };
+      source.start(); return { source, gain, filter, bass, panner, suppressor: suppressor === true };
     }
     // Never substitute a mechanical/beep-like fallback for a gunshot. A very
     // early first shot may wait briefly for the same canonical recording.
     const queuedAt = performance.now();
-    this.ready?.then(() => { if ((!allowed || allowed()) && performance.now() - queuedAt < 350 && this.samples.get(weaponId)?.some(Boolean)) this.shot(volume, pan, weaponId, distance, allowed); });
+    this.ready?.then(() => { if ((!allowed || allowed()) && performance.now() - queuedAt < 350 && this.samples.get(weaponId)?.some(Boolean)) this.shot(volume, pan, weaponId, distance, allowed, suppressor); });
   }
   step(sprint = false, crouched = false, { volume = 1, pan = 0, distance = 0, occluded = false, foot = 0, remote = false } = {}) {
     if (!this.context || this.context.state !== 'running' || this.muted || this.settings.volume <= 0 || volume <= 0.0001) return null;

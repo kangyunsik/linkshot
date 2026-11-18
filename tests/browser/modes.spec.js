@@ -2,16 +2,17 @@ import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 
 test.beforeEach(async ({ context }) => {
+  await context.route(`http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}/runtime-config.js`, (route) => route.fulfill({ contentType: 'text/javascript', body: "export const APP_MODE = 'solo'; export const PROFILE_STORAGE = 'browser';" }));
   await context.addInitScript(() => { localStorage.setItem('sector07-settings', JSON.stringify({ sensitivity: 1, fov: 82, volume: 0, quality: 'low' })); });
 });
 
 test('all six modes explain their execution paths; unconfigured online modes never start pretend matchmaking', async ({ page }) => {
   const sockets = [], apis = [], errors = []; page.on('websocket', (socket) => sockets.push(socket.url())); page.on('request', (request) => { if (new URL(request.url()).pathname.startsWith('/api/')) apis.push(request.url()); }); page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}`); await expect(page.getByRole('tab')).toHaveCount(6);
-  for (const name of ['일반', '랭크']) {
+  for (const name of ['일반: 개인전 랭크', '랭크: 팀전 랭크']) {
     await page.getByRole('tab', { name, exact: true }).click(); await expect(page.locator('#mode-unavailable')).toContainText('Java/Spring Boot'); await expect(page.locator('#create-button')).toBeDisabled();
   }
-  await expect(page.locator('#mode-description')).toContainText('실력 기반 4인 개인전');
+  await expect(page.locator('#mode-description')).toContainText('3:3 팀전');
   await page.getByRole('tab', { name: '사용자 대전', exact: true }).click(); await expect(page.locator('#create-button')).toBeDisabled(); await expect(page.locator('#mode-unavailable')).toContainText('Java/Spring Boot');
   await page.getByRole('tab', { name: 'LAN 대전', exact: true }).click(); await page.locator('#network-button').click(); await expect(page.locator('#lan-connect-guide')).toBeVisible(); await expect(page.locator('#mode-unavailable')).toContainText('LAN 서버'); await expect(page.locator('#join-section')).toBeHidden(); await page.getByLabel('서버 연결 안내 닫기').click(); await expect(page.locator('#network-dialog')).toBeHidden();
   await page.getByRole('tab', { name: '혼자 연습', exact: true }).click(); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible(); await expect(page.locator('#create-button')).toBeEnabled();
@@ -20,7 +21,7 @@ test('all six modes explain their execution paths; unconfigured online modes nev
 
 test('tutorial goals advance from real keyboard/mouse movement; restart and skipping preserve local progression', async ({ page }) => {
   const sockets = [], errors = []; page.on('websocket', (socket) => sockets.push(socket.url())); page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto(`http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}`); const profile = await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1')));
+  await page.goto(`http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}`); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible(); const profile = await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1')));
   await page.getByRole('tab', { name: '튜토리얼', exact: true }).click(); await page.getByRole('button', { name: '튜토리얼 시작', exact: true }).click(); await expect(page.locator('#pause-overlay')).toBeVisible();
   await expect(page.locator('#hud-map-name')).toHaveText('TRAINING RANGE'); await expect(page.locator('#tutorial-title')).toHaveText('시점과 이동');
   await page.getByRole('button', { name: '교전 시작', exact: true }).click(); await page.mouse.move(1000, 300); await page.keyboard.down('KeyW'); await page.keyboard.down('ShiftLeft');

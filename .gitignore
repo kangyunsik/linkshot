@@ -47,3 +47,6 @@ profile.json
 profile.json.tmp
 profiles.json
 linkshot-profile*.json
+
+# Local planning notes.
+/next-plan.md

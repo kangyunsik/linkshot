@@ -15,6 +15,14 @@ fi
 if [ -z "${FRONTEND_URL:-}" ] && [ -f online-server/.env ]; then
   FRONTEND_URL=$(node --env-file=online-server/.env -p 'process.env.FRONTEND_URL || ""')
 fi
-export ONLINE_SERVER_URL FRONTEND_URL
+if [ -z "${LAN_ENGINE_URL:-}" ]; then
+  if [ -f online-server/.env ]; then
+    LAN_ENGINE_URL=$(node --env-file=online-server/.env -p 'process.env.LAN_ENGINE_URL || "ws://127.0.0.1:" + (process.env.ENGINE_PORT || "8090") + "/lan/play"')
+  else
+    LAN_ENGINE_URL=ws://127.0.0.1:8090/lan/play
+  fi
+fi
+LAN_ENABLED=${LAN_ENABLED:-true}
+export ONLINE_SERVER_URL FRONTEND_URL LAN_ENGINE_URL LAN_ENABLED
 npm run build
 exec npm run preview

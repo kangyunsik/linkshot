@@ -17,10 +17,10 @@ export class OperatorPreview {
     this.observer = new ResizeObserver(this.resize); this.observer.observe(canvas); this.resize();
     const animate = (time) => { if (this.stopped) return; this.frame = requestAnimationFrame(animate); if (this.operator) this.operator.group.rotation.y = -0.2 + Math.sin(time / 4000) * 0.6; this.renderer.render(this.scene, this.camera); }; this.frame = requestAnimationFrame(animate);
   }
-  set(outfitId, skinId = 'standard', weaponId = 'rifle', characterId = 'male') {
-    const key = `${outfitId}/${skinId}/${weaponId}/${characterId}`; if (key === this.selection) return; this.selection = key;
+  set(outfitId, skinId = 'standard', weaponId = 'rifle', characterId = 'male', suppressor = false) {
+    const key = `${outfitId}/${skinId}/${weaponId}/${characterId}/${suppressor}`; if (key === this.selection) return; this.selection = key;
     if (this.operator) { this.scene.remove(this.operator.group); disposeModel(this.operator.group); }
-    this.operator = createOperator({ outfitId, skinId, weaponId, characterId }, this.models); this.scene.add(this.operator.group);
+    this.operator = createOperator({ outfitId, skinId, weaponId, characterId, suppressor }, this.models); this.scene.add(this.operator.group);
   }
   dispose() { this.stopped = true; cancelAnimationFrame(this.frame); this.observer.disconnect(); if (this.operator) disposeModel(this.operator.group); this.floor.geometry.dispose(); this.floor.material.dispose(); this.models.dispose(); this.renderer.dispose(); }
 }

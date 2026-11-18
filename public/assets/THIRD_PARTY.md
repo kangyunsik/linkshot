@@ -29,7 +29,7 @@
 
 ## Firearm meshes and surface finish
 
-The firearm meshes in `public/firearm-design.js` / `public/firearm-geometry.js` and their procedural metal/polymer/wood micro-finishes are authored in this project, not downloaded weapon-model assets. They reuse the existing finish colors/patterns credited in `asset-manifest.json`. No new third-party weapon model pack or paid service is required.
+The firearm meshes in `public/firearm-design.js` / `public/firearm-geometry.js`, the hollow suppressors in `public/weapon-attachments.js`, and their procedural metal/polymer/wood micro-finishes are authored in this project, not downloaded weapon-model assets. They reuse the existing finish colors/patterns credited in `asset-manifest.json`. No new third-party weapon model pack or paid service is required.
 
 The circular bullet-scar atlas in `public/bullet-marks.js` is also project-authored: deterministic canvas pitting, chipped rims, powder and fine cracks. It contains no external decal pack or generated image-engine workflow.
 
@@ -42,7 +42,7 @@ The circular bullet-scar atlas in `public/bullet-marks.js` is also project-autho
 - Original recordings: CZ-52 pistol, SKS rifle, Mosin Nagant rifle, shotgun.
 - Changes: one audited isolated muzzle blast per weapon, spectral noise reduction, filtering, fixed mono resampling, exponential suppression of late echoes/mechanical tails, peak normalization and fades. No random sample or pitch variations are used during gameplay.
 - SR–1, AWP and M82 additionally use bass-weighted processing and a deterministic dense diffuse 1.65–2.20 second decay. The tail is processed from the single isolated blast, not another recorded shot or bolt click. Fixed resampling is baked into each file; playback always uses rate 1.
-- The 20 gameplay sound profiles are artistic edits of the four listed source recordings; they are not claimed to be original recordings of each named real-world weapon.
+- The 23 gameplay sound profiles are artistic edits of the four listed source recordings; they are not claimed to be original recordings of each named real-world weapon.
 - Prepared file list and hashes: `sounds/manifest.json`.
 - Reproduction tools: `scripts/prepare-character.py`, `scripts/prepare-audio.py` in the source repository. Downloaded archives and working files are not distributed.
 
@@ -58,7 +58,7 @@ The circular bullet-scar atlas in `public/bullet-marks.js` is also project-autho
 - Downloads: https://opengameart.org/sites/default/files/reload.wav and https://opengameart.org/sites/default/files/shotgunsounds.zip
 - License for both source packs: CC0 1.0 Universal — https://creativecommons.org/publicdomain/zero/1.0/
 - Prepared files: `sounds/reload-*.wav`; credits, editing stages, durations and hashes are in `sounds/reload-manifest.json`.
-- Changes: actual magazine/slide/shell/pump foley processed with local ComfyUI input headroom and 3-band EQ, mono resampling, twenty separate weapon-specific edits/timelines, fixed spectral/pitch shaping, fades and peak normalization. These are artistic reload profiles, not claimed recordings of each named real-world weapon. No synthesized beep substitutes or random runtime pitch changes are used.
+- Changes: actual magazine/slide/shell/pump foley processed with local ComfyUI input headroom and 3-band EQ, mono resampling, twenty-three separate weapon-specific edits/timelines, fixed spectral/pitch shaping, fades and peak normalization. These are artistic reload profiles, not claimed recordings of each named real-world weapon. No synthesized beep substitutes or random runtime pitch changes are used.
 - Reproduce with `scripts/prepare-reloads.py --engine` in the local engine Python environment. Originals, workflows and intermediate FLACs remain in ignored `artifacts/reload-source/`; runtime and static builds require no engine or external audio service.
 
 Three.js and its glTF/skeleton utilities are by the Three.js authors, under the MIT license. The full notice is included as `LICENSE-three.txt`: https://github.com/mrdoob/three.js/blob/dev/LICENSE.

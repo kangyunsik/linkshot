@@ -9,7 +9,7 @@ for (const edition of ['LAN', 'SOLO']) test(`${edition} dashboard fits every mod
   await expect(page.locator('.page-heading h1, .page-heading p')).toHaveCount(0);
   for (const [width,height] of sizes) {
     await page.setViewportSize({ width,height });
-    for (const mode of ['튜토리얼','혼자 연습','LAN 대전','일반','랭크','사용자 대전']) {
+    for (const mode of ['튜토리얼','혼자 연습','LAN 대전','일반: 개인전 랭크','랭크: 팀전 랭크','사용자 대전']) {
       await page.getByRole('tab', { name: mode, exact: true }).click();
       const layout = await page.evaluate(() => {
         const selectors = ['#profile-button','#nav-play','#nav-armory','#mode-information-button','#create-button','#rank-card','#armory-button','#network-button','#profile-casual-rating','#profile-rank-tier', '.mode-switch'];
@@ -20,10 +20,10 @@ for (const edition of ['LAN', 'SOLO']) test(`${edition} dashboard fits every mod
         return { pageHeight: document.documentElement.scrollHeight, pageWidth: document.documentElement.scrollWidth, outside, clipped, overflowing };
       });
       expect(layout, `${edition} ${width}×${height} ${mode}`).toEqual({ pageHeight: height, pageWidth: width, outside: [], clipped: [], overflowing: [] });
-      const spacing = await page.evaluate(() => { const description = document.getElementById('mode-description').getBoundingClientRect(), actions = document.querySelector('.deployment-actions').getBoundingClientRect(), rail = document.querySelector('.operation-rail').getBoundingClientRect(), card = document.querySelector('.deploy-card').getBoundingClientRect(), tools = document.querySelector('.briefing-grid').getBoundingClientRect(); return { deadGap: actions.top - description.bottom, railFits: card.top >= rail.top - 1 && tools.bottom <= rail.bottom + 1 }; });
+      const spacing = await page.evaluate(() => { const tabs = document.querySelector('.mode-switch').getBoundingClientRect(), actions = document.querySelector('.deployment-actions').getBoundingClientRect(), rail = document.querySelector('.operation-rail').getBoundingClientRect(), card = document.querySelector('.deploy-card').getBoundingClientRect(), tools = document.querySelector('.briefing-grid').getBoundingClientRect(); return { deadGap: actions.top - tabs.bottom, railFits: card.top >= rail.top - 1 && tools.bottom <= rail.bottom + 1 }; });
       expect(spacing.deadGap).toBeLessThan(34); expect(spacing.railFits, `${edition} ${width}×${height}`).toBe(true);
-      const tiles = await page.locator('.briefing-grid > button').evaluateAll((nodes) => nodes.map((node) => ({ width: node.getBoundingClientRect().width,height: node.getBoundingClientRect().height })));
-      expect(tiles).toHaveLength(3); expect(Math.max(...tiles.map((tile) => tile.width)) - Math.min(...tiles.map((tile) => tile.width))).toBeLessThanOrEqual(1); expect(Math.max(...tiles.map((tile) => tile.height)) - Math.min(...tiles.map((tile) => tile.height))).toBeLessThanOrEqual(1);
+      const tiles = await page.locator('.briefing-grid > button').evaluateAll((nodes) => Object.fromEntries(nodes.map((node) => [node.id, { width: node.getBoundingClientRect().width,height: node.getBoundingClientRect().height }])));
+      expect(Object.keys(tiles)).toHaveLength(3); expect(tiles['armory-button'].width).toBeGreaterThan(tiles['rank-card'].width); expect(Math.abs(tiles['rank-card'].height - tiles['network-button'].height)).toBeLessThanOrEqual(1);
     }
   }
   await mkdir('artifacts', { recursive: true }); await page.setViewportSize({ width: 1366,height: 768 }); await page.screenshot({ path: `artifacts/dashboard-one-screen-${edition.toLowerCase()}.png` }); expect(errors).toEqual([]);

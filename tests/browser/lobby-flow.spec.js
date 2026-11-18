@@ -5,7 +5,7 @@ import { createGameServer } from '../../server/index.js';
 test('the dashboard stays compact across modes and account/setup/armory dialogs animate, trap focus and respect reduced motion', async ({ page }) => {
   const errors = []; page.on('pageerror', (error) => errors.push(error.message)); await page.goto('/'); await expect(page.getByText('LAN SERVER ONLINE')).toBeVisible();
   const heights = [];
-  for (const mode of ['LAN 대전', '일반', '랭크', '사용자 대전']) {
+  for (const mode of ['LAN 대전', '일반: 개인전 랭크', '랭크: 팀전 랭크', '사용자 대전']) {
     await page.getByRole('tab', { name: mode, exact: true }).click(); heights.push(await page.locator('.deploy-card').evaluate((node) => node.getBoundingClientRect().height));
     await expect(page.locator('#online-auth-form')).toBeHidden(); await expect(page.locator('#room-title')).toBeHidden(); await expect(page.locator('#room-list')).toBeHidden();
   }

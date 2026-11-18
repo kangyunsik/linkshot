@@ -1,0 +1,37 @@
+{
+  "engine": "ComfyUI (local, ~/engine)",
+  "checkpoint": "animagine-xl-4.0-opt.safetensors",
+  "modelLicense": "CreativeML Open RAIL++-M",
+  "modelSource": "https://huggingface.co/cagliostrolab/animagine-xl-4.0",
+  "note": "Original team-map concept art retained for documentation, not shipped in the game. Runtime thumbnails use the actual terrain SVG previews.",
+  "assets": [
+    {
+      "file": "faultline-hero.png",
+      "prompt": "masterpiece, best quality, very aesthetic, scenery, no humans, a massive abandoned open-pit stone quarry arena, terraced ochre rock faces, broad smooth access ramps descending into a central excavation basin, a large fixed rock drilling machine, rugged limestone cover, a low excavated side tunnel, northern elevated rocky ridge, dusty pale golden daylight, readable wide tactical routes, no stairs or conventional buildings, wide angle establishing shot, highly detailed game environment concept art, anime background art, original environment, empty arena",
+      "seed": 7092600,
+      "width": 1152,
+      "height": 768
+    },
+    {
+      "file": "sump-hero.png",
+      "prompt": "masterpiece, best quality, very aesthetic, scenery, no humans, a monumental dry underground circular concrete reservoir, wide raised annular maintenance walkway around a lower central drainage basin, large cylindrical concrete piers, four broad sloping access ramps, green oxidized pipes and central pump baffles, dim teal ambient light and warm maintenance lights, readable traversable dry floor, no windows or staircases, wide angle establishing shot, highly detailed game environment concept art, anime background art, original environment, empty arena",
+      "seed": 7092601,
+      "width": 1152,
+      "height": 768
+    },
+    {
+      "file": "relay-hero.png",
+      "prompt": "masterpiece, best quality, very aesthetic, scenery, no humans, an open-air circular communications relay facility, three separated antenna plazas connected by broad gently sloping paths, low mint gray relay cabinets and ceramic equipment cover, north elevated dish antenna platform and south maintenance deck, weathered pale concrete and turquoise technical trim, clear sky, readable open tactical routes, no conventional buildings or stairs, wide angle establishing shot, highly detailed game environment concept art, anime background art, original environment, empty arena",
+      "seed": 7092602,
+      "width": 1152,
+      "height": 768
+    },
+    {
+      "file": "bastion-hero.png",
+      "prompt": "masterpiece, best quality, very aesthetic, scenery, no humans, a cooperative coastal defense installation with a bright mint green generator core at the rear, three broad rocky approach lanes converging toward layered low defensive cover, a small raised support deck reached by smooth wide ramps, warm amber lamps and cool blue sea haze, fixed concrete berms and steel service equipment, dramatic readable defensive arena, no conventional buildings or stairs, wide angle establishing shot, highly detailed game environment concept art, anime background art, original environment, empty arena",
+      "seed": 7092603,
+      "width": 1152,
+      "height": 768
+    }
+  ]
+}

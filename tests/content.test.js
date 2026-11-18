@@ -35,7 +35,7 @@ test('movement and long-range shots use the selected arena, not old foundry boun
 });
 
 test('catalog rejects unknown/prototype IDs and skins have no combat modifiers', () => {
-  assert.equal(WEAPONS.length, 20); assert.equal(SKINS.length, 6);
+  assert.equal(WEAPONS.length, 23); assert.equal(SKINS.length, 6);
   assert.equal(getMap('__proto__'), WORLD); assert.equal(getWeapon('toString').id, 'rifle'); assert.equal(getSkin({}).id, 'standard');
   assert.equal(sanitizeInput({ weaponId: 'invalid' }, { ...EMPTY_INPUT, weaponId: 'sniper' }).weaponId, 'sniper');
   for (const skin of SKINS) for (const key of ['damage', 'speed', 'hp', 'spread']) assert.equal(skin[key], undefined);

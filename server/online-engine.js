@@ -3,13 +3,15 @@ import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Room } from '../shared/simulation.js';
 import { NETWORK_PROTOCOL, RULES, MATCHMAKING_MAPS as MAPS } from '../shared/world.js';
-import { isWeaponId, ownsWeapon, WEAPONS } from '../shared/catalog.js';
+import { isWeaponId, getSkin, WEAPONS } from '../shared/catalog.js';
 import { EMPTY_INPUT, advanceTime } from '../shared/movement.js';
 import { roundReward } from '../shared/progression.js';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { CustomGateway } from './custom-gateway.js';
+import { LanGateway } from './lan-gateway.js';
 import { onlineBrowserOrigins } from '../shared/online-network.js';
+import { highestRank } from '../shared/ranks.js';
 
 const validId = (id) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 const neutral = (player) => ({ ...EMPTY_INPUT, yaw: player.yaw, pitch: player.pitch, weaponId: player.weaponId });
@@ -35,6 +37,7 @@ export class SpringEngineClient {
   cancel(id) { return this.request(`/internal/matches/${id}/cancel`, { engineId: this.engineId }); }
   abandon(id, accountId) { return this.request(`/internal/matches/${id}/abandon`, { engineId: this.engineId, accountId }); }
   consumeCustom(ticket) { return this.request('/internal/custom/consume-ticket', { engineId: this.engineId, ticket }); }
+  consumeRankBadge(ticket) { return this.request('/internal/lan/rank-badge', { engineId: this.engineId, ticket }); }
 }
 
 class OnlineRoom extends Room {
@@ -48,32 +51,56 @@ class OnlineRoom extends Room {
     super.finish();
     // Deterministic ties match Spring settlement, independent of reconnect or
     // JSON roster order. Solo/LAN winner rules remain completely untouched.
-    const winner = [...this.players.values()].filter((player) => !player.abandoned).sort((a, b) => b.kills - a.kills || a.deaths - b.deaths || a.id.localeCompare(b.id, 'en'))[0];
-    this.result = { ...this.result, winnerId: winner?.id || null, winnerName: winner?.name || 'OPERATOR', winnerKills: winner?.kills || 0, rewards: Object.fromEntries([...this.players.values()].filter((player) => !player.isBot).map((player) => [player.id, { kills: player.kills, deaths: player.deaths, weaponKills: { ...player.weaponKills }, ...roundReward(player.kills, player.id === winner?.id), ...(player.abandoned ? { completion: 0, killBonus: 0, winBonus: 0, points: 0 } : {}) }])) };
-    const event = this.events.findLast((event) => event.type === 'ended'); if (event) Object.assign(event, { winner: winner?.name || 'OPERATOR', winnerId: winner?.id || null });
+    const teams = this.gameType === 'teams', active = [...this.players.values()].filter((player) => !player.abandoned);
+    const blue = active.some((p) => p.teamId === 'blue'), red = active.some((p) => p.teamId === 'red');
+    const winnerTeam = teams ? !blue || !red ? blue ? 'blue' : red ? 'red' : null : this.result.winnerTeam : null;
+    const winner = active.filter((p) => !teams || p.teamId === winnerTeam).sort((a, b) => b.kills - a.kills || a.deaths - b.deaths || a.id.localeCompare(b.id, 'en'))[0];
+    const winnerName = teams ? winnerTeam ? `${winnerTeam === 'blue' ? '블루팀' : '레드팀'} 승리` : '무승부' : winner?.name || 'OPERATOR';
+    this.result = { ...this.result, ...(teams ? { winnerTeam } : {}), winnerId: winner?.id || null, winnerName, winnerKills: teams ? this.teamScores[winnerTeam] || 0 : winner?.kills || 0, rewards: Object.fromEntries([...this.players.values()].filter((player) => !player.isBot).map((player) => [player.id, { kills: player.kills, deaths: player.deaths, weaponKills: { ...player.weaponKills }, ...roundReward(player.kills, !player.abandoned && (teams ? !!winnerTeam && player.teamId === winnerTeam : player.id === winner?.id)), ...(player.abandoned ? { completion: 0, killBonus: 0, winBonus: 0, points: 0 } : {}) }])) };
+    const event = this.events.findLast((event) => event.type === 'ended'); if (event) Object.assign(event, { winner: winnerName, winnerId: winner?.id || null, ...(teams ? { winnerTeam } : {}) });
   }
 }
 
 export function createOnlineEngine({ client = new SpringEngineClient(), host = process.env.ENGINE_BIND || '127.0.0.1', port = process.env.ENGINE_PORT === undefined ? 8090 : Number(process.env.ENGINE_PORT), publicUrl = process.env.ENGINE_PUBLIC_URL, origins = (process.env.FRONTEND_ORIGINS || 'http://127.0.0.1:4173,http://localhost:4173,http://127.0.0.1:3000,http://localhost:3000').split(','), loop = true, clock = () => Date.now(), countdownMs = 5000 } = {}) {
   if (!Number.isFinite(countdownMs) || countdownMs < 0 || countdownMs > 10_000) throw new Error('Invalid countdown duration.');
   const matches = new Map(), loading = new Map(), connections = new Set(), timers = []; let closed = false, syncing = false;
-  const custom = new CustomGateway({ send, clock, capacity: () => Math.max(0, 24 - matches.size - loading.size) });
+  const custom = new CustomGateway({ send, clock, capacity: () => Math.max(0, 24 - matches.size - loading.size - lan.directory.rooms.size) });
   origins = onlineBrowserOrigins(origins);
-  const server = http.createServer((request, response) => { response.setHeader('Cache-Control', 'no-store'); response.setHeader('X-Content-Type-Options', 'nosniff'); response.writeHead(request.method === 'GET' && request.url === '/health' ? 200 : 404, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(request.url === '/health' ? { status: 'UP', protocolVersion: NETWORK_PROTOCOL } : { message: 'Not found' })); });
-  const wss = new WebSocketServer({ server, path: '/play', maxPayload: 4096, perMessageDeflate: false });
+  const lan = new LanGateway({ send, clock, origins, engineId: client.engineId, verifyBadge: client.consumeRankBadge ? ticket => client.consumeRankBadge(ticket) : null, capacity: () => Math.max(0, 24 - matches.size - loading.size - custom.directory.rooms.size) });
+  const server = http.createServer((request, response) => {
+    response.setHeader('Cache-Control', 'no-store'); response.setHeader('X-Content-Type-Options', 'nosniff');
+    const info = request.method === 'GET' && request.url === '/lan/info', health = request.method === 'GET' && request.url === '/health';
+    response.writeHead(info || health ? 200 : 404, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(info ? lan.info() : health ? { status: 'UP', protocolVersion: NETWORK_PROTOCOL, lan: true } : { message: 'Not found' }));
+  });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 4096, perMessageDeflate: false }), lanWss = new WebSocketServer({ noServer: true, maxPayload: 4096, perMessageDeflate: false });
+  server.on('upgrade', (request, socket, head) => {
+    const gateway = request.url === '/play' ? wss : request.url === '/lan/play' ? lanWss : null;
+    if (!gateway) { socket.destroy(); return; }
+    gateway.handleUpgrade(request, socket, head, (connection) => gateway.emit('connection', connection, request));
+  });
+  lanWss.on('connection', (socket, request) => lan.attach(socket, request));
 
   async function load(id) {
     if (!validId(id)) throw new Error('Invalid match assignment.');
     if (matches.has(id)) return matches.get(id);
     if (loading.has(id)) return loading.get(id);
-    if (matches.size + loading.size + custom.directory.rooms.size >= 24) throw new Error('Engine capacity reached.');
+    if (matches.size + loading.size + custom.directory.rooms.size + lan.directory.rooms.size >= 24) throw new Error('Engine capacity reached.');
     const pending = (async () => {
       const plan = await client.claim(id);
       if (closed) throw new Error('Engine stopped.');
       if (plan.id !== id || !['CASUAL', 'RANKED'].includes(plan.mode) || !Array.isArray(plan.players) || !plan.players.length || plan.players.length + plan.bots > RULES.maxPlayers || !Number.isInteger(plan.bots) || plan.bots < 0 || plan.mode === 'RANKED' && (plan.players.length + plan.bots < 2 || plan.bots !== 0 && plan.rankedAiEnabled !== true) || !MAPS.some((map) => map.id === plan.mapId) || plan.players.some((player) => !validId(player.id)) || new Set(plan.players.map((player) => player.id)).size !== plan.players.length) throw new Error('Invalid authoritative match assignment.');
       const average = Number.isInteger(plan.botRating) && plan.botRating >= 0 && plan.botRating <= 10_000 ? plan.botRating : plan.players.reduce((sum, player) => sum + player.casualRating, 0) / plan.players.length;
-      const room = new OnlineRoom(id.slice(0, 5).toUpperCase(), { mode: plan.mode.toLowerCase(), mapId: plan.mapId, bots: plan.bots, fragLimit: plan.fragLimit, roundSeconds: plan.roundSeconds, botDifficulty: average >= 1500 ? 'advanced' : average >= 1100 ? 'intermediate' : 'beginner', clock });
-      for (const profile of plan.players) room.addPlayer(profile.id, profile.callsign, false, { ownedWeapons: plan.mode === 'RANKED' ? WEAPONS.map((weapon) => weapon.id) : profile.ownedWeapons, weaponKills: profile.weaponKills, outfitId: profile.outfitId, characterId: profile.characterId });
+      const gameType = plan.gameType || 'ffa';
+      if (plan.gameType && plan.players.length + plan.bots !== (gameType === 'teams' ? 6 : 4)) throw new Error('Invalid competitive roster size.');
+      if (!['ffa', 'teams'].includes(gameType) || gameType === 'teams' && (plan.mode !== 'RANKED' || plan.players.some((p) => !['blue', 'red'].includes(plan.teams?.[p.id])))) throw new Error('Invalid authoritative teams.');
+      const room = new OnlineRoom(id.slice(0, 5).toUpperCase(), { mode: plan.mode.toLowerCase(), gameType, mapId: plan.mapId, bots: 0, fragLimit: plan.fragLimit, roundSeconds: plan.roundSeconds, botDifficulty: average >= 1500 ? 'advanced' : average >= 1100 ? 'intermediate' : 'beginner', clock });
+      for (const profile of plan.players) {
+        const player = room.addPlayer(profile.id, profile.callsign, false, { ownedWeapons: WEAPONS.map((weapon) => weapon.id), weaponKills: profile.weaponKills, suppressedWeapons: profile.suppressedWeapons, outfitId: profile.outfitId, characterId: profile.characterId });
+        player.rankBadge = highestRank(profile);
+        if (gameType === 'teams') player.teamId = plan.teams[profile.id];
+      }
+      for (let i = 0; i < plan.bots; i++) room.addPlayer(`bot-${randomUUID()}`, `AI ${i + 1}`, true);
+      if (gameType === 'teams' && Math.abs([...room.players.values()].filter((p) => p.teamId === 'blue').length - [...room.players.values()].filter((p) => p.teamId === 'red').length) > 1) throw new Error('Unbalanced authoritative teams.');
       room.phase = 'waiting'; room.roundId = id; room.hostId = null;
       const match = { id, plan, room, sockets: new Map(), ready: new Set(), countdownEndsAt: null, disconnected: new Map(), abandoned: new Set(), deadline: clock() + 30_000, settlement: 'pending', lastHeartbeat: clock(), nextSettle: 0, settling: false, lastHealthy: clock() };
       matches.set(id, match); return match;
@@ -106,7 +133,7 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
     if (match.settling || match.settlement === 'saved' || clock() < match.nextSettle) return;
     match.settling = true;
     try {
-      await client.complete(match.id, [...match.room.players.values()].map((player) => ({ id: player.id, bot: player.isBot, kills: player.kills, deaths: player.deaths, weaponKills: { ...player.weaponKills }, humanKills: player.humanKills, humanDeaths: player.humanDeaths, abandoned: !!player.abandoned })));
+      await client.complete(match.id, [...match.room.players.values()].map((player) => ({ id: player.id, bot: player.isBot, kills: player.kills, deaths: player.deaths, assists: player.assists, weaponKills: { ...player.weaponKills }, humanKills: player.humanKills, humanDeaths: player.humanDeaths, abandoned: !!player.abandoned, teamId: player.teamId })));
       match.settlement = 'saved'; match.retireAt = clock() + 30_000;
     } catch { match.nextSettle = clock() + 2000; }
     finally { match.settling = false; }
@@ -118,22 +145,24 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
       if (match.room.phase === 'countdown' && now >= match.countdownEndsAt) activate(match);
       if (match.room.phase === 'active') for (const [id, until] of match.disconnected) if (now >= until) { const player = match.room.players.get(id); player.hp = 0; player.respawnAt = Infinity; player.abandoned = true; match.disconnected.delete(id); match.abandoned.add(id); if (client.abandon) void client.abandon(match.id, id).catch(() => {}); }
       const remaining = match.plan.players.length - match.abandoned.size;
-      if (match.room.phase === 'active' && (remaining === 0 || match.plan.mode === 'RANKED' && match.plan.bots === 0 && remaining <= 1)) match.room.finish();
+      const active = [...match.room.players.values()].filter((p) => !p.abandoned), forfeited = match.room.gameType === 'teams' ? !active.some((p) => p.teamId === 'blue') || !active.some((p) => p.teamId === 'red') : match.plan.bots === 0 && remaining <= 1;
+      if (match.room.phase === 'active' && (remaining === 0 || forfeited)) match.room.finish();
       match.room.tick(dt);
       if (match.room.phase === 'ended') void settle(match);
       if (match.retireAt && now >= match.retireAt) { for (const socket of match.sockets.values()) socket.close(1000, 'Round complete'); matches.delete(match.id); }
     }
     custom.tick(dt);
+    lan.tick(dt);
   }
-  function broadcast() { for (const match of matches.values()) { const state = snapshot(match); for (const socket of match.sockets.values()) { send(socket, socket.preJoinEvents ? { ...state, events: state.events.filter((event) => !socket.preJoinEvents.has(event)) } : state); socket.preJoinEvents = null; } } custom.broadcast(); }
+  function broadcast() { for (const match of matches.values()) { const state = snapshot(match); for (const socket of match.sockets.values()) { send(socket, socket.preJoinEvents ? { ...state, events: state.events.filter((event) => !socket.preJoinEvents.has(event)) } : state); socket.preJoinEvents = null; } } custom.broadcast(); lan.broadcast(); }
   async function sync() {
     if (syncing || closed) return; syncing = true;
     try {
-      if (client.register && server.listening) { const address = publicUrl || `ws://127.0.0.1:${server.address().port}/play`; await client.register(address, matches.size + custom.directory.rooms.size); }
+      if (client.register && server.listening) { const address = publicUrl || `ws://127.0.0.1:${server.address().port}/play`; await client.register(address, matches.size + custom.directory.rooms.size + lan.directory.rooms.size); }
       for (const match of matches.values()) if (match.room.phase !== 'ended' && clock() - match.lastHeartbeat >= 10_000) {
         try { await client.heartbeat(match.id); match.lastHealthy = clock(); } catch (error) { if (error.status === 400 || error.status === 401) void cancel(match); } match.lastHeartbeat = clock();
       }
-      for (const id of await client.pending()) { if (matches.size + loading.size + custom.directory.rooms.size >= 24) break; if (!matches.has(id)) { try { await load(id); } catch { /* Another engine may have claimed it. */ } } }
+      for (const id of await client.pending()) { if (matches.size + loading.size + custom.directory.rooms.size + lan.directory.rooms.size >= 24) break; if (!matches.has(id)) { try { await load(id); } catch { /* Another engine may have claimed it. */ } } }
     } catch { /* No secret, token, URL query or response body is logged. */ }
     finally { syncing = false; }
   }
@@ -169,7 +198,12 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
           if (socket.readyState !== WebSocket.OPEN || match.sockets.has(profile.id) || match.abandoned.has(profile.id) || !match.room.players.has(profile.id) || match.room.phase === 'ended') throw new Error('Match access denied.');
           connection.account = profile.id; connection.kind = 'online'; connection.match = match; socket.preJoinEvents = new Set(match.room.events); match.sockets.set(profile.id, socket); match.disconnected.delete(profile.id); clearTimeout(timeout);
           const player = match.room.players.get(profile.id);
-          if (match.room.phase === 'waiting' && isWeaponId(data.weaponId) && (match.plan.mode === 'RANKED' || ownsWeapon(profile, data.weaponId))) { player.nextWeaponId = data.weaponId; match.room.spawn(player); }
+          if (match.room.phase === 'waiting' && isWeaponId(data.weaponId)) {
+            player.nextWeaponId = data.weaponId;
+            player.skinId = getSkin(data.skinId).id;
+            if (typeof data.suppressor === 'boolean') match.room.setSuppressor(player, data.weaponId, data.suppressor);
+            match.room.spawn(player);
+          }
           start(match); send(socket, { ...snapshot(match, false), type: 'joined', id: profile.id, events: [], impacts: match.room.impactHistory() });
         } catch { socket.close(1008, 'Invalid or expired match ticket'); }
         finally { connection.pending = false; }
@@ -201,16 +235,16 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
   let previous = performance.now();
   if (loop) {
     timers.push(setInterval(() => { const now = performance.now(); advanceTime((now - previous) / 1000, tick); previous = now; }, 1000 / RULES.tickRate), setInterval(broadcast, 1000 / RULES.snapshotRate), setInterval(() => { void sync(); }, 1000));
-    timers.push(setInterval(() => { for (const connection of connections) { if (!connection.alive) connection.socket.terminate(); else { connection.alive = false; connection.socket.ping(); } } }, 15_000));
+    timers.push(setInterval(() => { for (const connection of connections) { if (!connection.alive) connection.socket.terminate(); else { connection.alive = false; connection.socket.ping(); } } lan.heartbeat(); }, 15_000));
   }
   return {
-    server, matches, custom, load, tick, broadcast, sync,
+    server, matches, custom, lan, load, tick, broadcast, sync,
     async listen() { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); }); return { port: server.address().port }; },
-    async close() { closed = true; timers.forEach(clearInterval); for (const connection of connections) connection.socket.terminate(); await Promise.allSettled([...loading.values()]); await new Promise((resolve) => wss.close(resolve)); await new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }); },
+    async close() { closed = true; timers.forEach(clearInterval); lan.close(); for (const connection of connections) connection.socket.terminate(); await Promise.allSettled([...loading.values()]); await Promise.all([new Promise((resolve) => wss.close(resolve)), new Promise((resolve) => lanWss.close(resolve))]); await new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }); },
   };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const app = createOnlineEngine(); const info = await app.listen(); console.log(`LINKSHOT shared combat engine listening on port ${info.port}`);
+  const app = createOnlineEngine(); const info = await app.listen(); console.log(`LINKSHOT shared combat engine listening on port ${info.port}\nLAN READY · Spring 없이 ./fe.sh에서 LAN 대전을 이용할 수 있습니다.`);
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => { await app.close(); process.exit(0); });
 }

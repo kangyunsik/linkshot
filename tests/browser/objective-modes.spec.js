@@ -24,7 +24,7 @@ for (const [mapId, gameType, name] of [['faultline', 'teams', 'FAULTLINE'], ['su
   test(`${mapId} plays in the static browser worker only under its supported rule`, async ({ page }) => {
     const errors = [], sockets = []; page.on('pageerror', (error) => errors.push(error.message)); page.on('websocket', (socket) => sockets.push(socket.url()));
     await page.goto(`http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}`); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
-    await page.locator('#deployment-settings-button').click(); await page.locator('#room-game-type').selectOption(gameType); await page.locator('#room-map-choice').selectOption(mapId); await page.locator('#room-create-confirm').click();
+    await page.locator('#deployment-settings-button').click(); await page.locator('#room-game-type').selectOption(gameType); await page.locator(`.room-map-card[data-map="${mapId}"]`).click(); await page.locator('#room-create-confirm').click();
     await page.locator('#create-button').click(); await expect(page.locator('#pause-overlay')).toBeVisible(); await expect(page.locator('#hud-map-name')).toHaveText(name);
     expect(await page.evaluate(() => window.__objectiveState.room.gameType)).toBe(gameType);
     if (gameType === 'hardpoint') { await expect(page.locator('#objective-hud')).toBeVisible(); await expect(page.locator('#objective-title')).toContainText('중앙 중계판'); await expect(page.locator('#hud-frag-limit')).toContainText('POINTS'); }

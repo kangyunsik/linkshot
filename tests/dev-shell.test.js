@@ -23,12 +23,12 @@ async function fixture({ nodeMajor } = {}) {
   await writeFile(path.join(bin, 'npm'), `#!/usr/bin/env node
 import fs from 'node:fs'; import cp from 'node:child_process';
 const args = process.argv.slice(2);
-fs.appendFileSync(process.env.SHELL_TEST_LOG, JSON.stringify({ args, cwd: process.cwd(), javaHome: process.env.JAVA_HOME, onlineUrl: process.env.ONLINE_SERVER_URL, frontendUrl: process.env.FRONTEND_URL }) + '\\n');
+fs.appendFileSync(process.env.SHELL_TEST_LOG, JSON.stringify({ args, cwd: process.cwd(), javaHome: process.env.JAVA_HOME, onlineUrl: process.env.ONLINE_SERVER_URL, frontendUrl: process.env.FRONTEND_URL, lanEngineUrl: process.env.LAN_ENGINE_URL, lanEnabled: process.env.LAN_ENABLED, engineSecret: process.env.ENGINE_SECRET }) + '\\n');
 if (args[1] === 'online:config') { const child = cp.spawnSync(process.execPath, ['scripts/create-online-env.mjs', ...args.slice(2).filter(value => value !== '--')], { stdio: 'inherit' }); process.exit(child.status ?? 1); }
 if (args[1] === 'build' && process.env.SHELL_TEST_FAIL_BUILD) process.exit(23);
 `); await chmod(path.join(bin, 'npm'), 0o755);
   const log = path.join(dir, 'calls.jsonl');
-  const env = { ...process.env, PATH: bin + path.delimiter + process.env.PATH, JAVA_HOME: javaHome, SHELL_TEST_LOG: log }; for (const key of ['ONLINE_API_URL', 'ONLINE_SERVER_URL', 'FRONTEND_URL', 'ONLINE_PORT', 'ENGINE_PORT', 'PREVIEW_PORT', 'LAN_HOST', 'SHELL_TEST_FAIL_BUILD']) delete env[key];
+  const env = { ...process.env, PATH: bin + path.delimiter + process.env.PATH, JAVA_HOME: javaHome, SHELL_TEST_LOG: log }; for (const key of ['ONLINE_API_URL', 'ONLINE_SERVER_URL', 'FRONTEND_URL', 'ONLINE_PORT', 'ENGINE_PORT', 'PREVIEW_PORT', 'LAN_HOST', 'LAN_ENGINE_URL', 'LAN_ENABLED', 'ENGINE_SECRET', 'SHELL_TEST_FAIL_BUILD']) delete env[key];
   return { dir, javaHome, env, run: (script, extra = {}, args = []) => spawnSync('sh', [path.join(dir, script), ...args], { cwd: base, env: { ...env, ...extra }, encoding: 'utf8', timeout: 15_000 }), calls: async () => (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse) };
 }
 
@@ -48,6 +48,7 @@ test('FE launcher builds before preview, reads only the public API URL and honor
   const f = await fixture(), config = 'ONLINE_API_URL=http://127.0.0.1:8181\nENGINE_SECRET=example_private_engine_marker\n'; await writeFile(path.join(f.dir, 'online-server/.env'), config);
   const result = f.run('fe.sh'); assert.equal(result.status, 0, result.stderr); assert.equal(result.stdout.includes('example_private_engine_marker'), false);
   let calls = await f.calls(); assert.deepEqual(calls.map((call) => call.args), [['run', 'build'], ['run', 'preview']]); assert.ok(calls.every((call) => call.onlineUrl === 'http://127.0.0.1:8181'));
+  assert.ok(calls.every((call) => call.lanEnabled === 'true' && call.lanEngineUrl === 'ws://127.0.0.1:8090/lan/play' && call.engineSecret === undefined));
   assert.equal(f.run('fe.sh', { ONLINE_SERVER_URL: 'http://127.0.0.1:8282' }).status, 0); calls = await f.calls(); assert.ok(calls.slice(2).every((call) => call.onlineUrl === 'http://127.0.0.1:8282')); assert.equal(await readFile(path.join(f.dir, 'online-server/.env'), 'utf8'), config);
 });
 

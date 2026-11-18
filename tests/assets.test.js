@@ -64,7 +64,7 @@ test('first-person hands retain licensed anatomical topology, separate left/righ
   }
 });
 
-test('all twenty reloads use distinct licensed recorded foley, safe peaks and weapon-matched durations', async () => {
+test('all firearm reloads use distinct licensed recorded foley, safe peaks and weapon-matched durations', async () => {
   const directory = new URL('../public/assets/sounds/', import.meta.url), manifest = JSON.parse(await readFile(new URL('reload-manifest.json', directory), 'utf8'));
   assert.equal(manifest.license, 'CC0-1.0'); assert.equal(manifest.engineProcessed, true); assert.equal(manifest.files.length, WEAPONS.length);
   assert.ok(manifest.sources.every((source) => source.creator === 'zer0_sol' && source.license === 'CC0-1.0')); assert.equal(new Set(manifest.files.map((file) => file.sha256)).size, WEAPONS.length);

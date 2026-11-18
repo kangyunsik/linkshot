@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
+import { WEAPONS } from '../../shared/catalog.js';
 
 test.beforeEach(async ({ context }) => {
   await context.addInitScript(() => { try { localStorage.setItem('sector07-settings', JSON.stringify({ sensitivity: 1, fov: 82, volume: 0, quality: 'low' })); } catch { /* about:blank */ } });
@@ -67,7 +68,7 @@ test('each gun repeats one identical recorded sound with fixed pitch and bounded
     for (let i = 0; i < 60; i++) audio.shot(0.2, (i % 3 - 1) * 0.5, 'rifle', 12);
     const sources = [...audio.voices], voices = sources.length, identical = sources.every((source) => source.buffer === sources[0].buffer && source.playbackRate.value === 1); audio.setEnvironment(true); await audio.context.close(); return { counts, voices, identical };
   });
-  expect(result.counts).toHaveLength(20); for (const count of result.counts) { expect(count.count).toBe(1); expect(count.duration).toBeGreaterThan(0.3); }
+  expect(result.counts).toHaveLength(WEAPONS.length); for (const count of result.counts) { expect(count.count).toBe(1); expect(count.duration).toBeGreaterThan(0.3); }
   expect(result.identical).toBe(true);
   expect(result.voices).toBeGreaterThan(0); expect(result.voices).toBeLessThanOrEqual(40);
 });
@@ -102,7 +103,7 @@ test('all weapon-specific recorded reloads match the server timer, seek correctl
     const rejected = audio.reload('rifle', 1, () => false) === null; audio.muted = true; const muted = audio.reload('rifle') === null;
     const count = audio.reloadSamples.size; await audio.context.close(); return { profiles, seek, stopped, staleCancelled, rejected, muted, count };
   });
-  expect(result.count).toBe(20); expect(result.profiles).toHaveLength(20);
+  expect(result.count).toBe(WEAPONS.length); expect(result.profiles).toHaveLength(WEAPONS.length);
   for (const profile of result.profiles) { expect(profile.duration).toBeCloseTo(profile.expected, 4); expect(profile.rate).toBe(1); expect(profile.offset).toBe(0); }
   expect(result.seek).toBeCloseTo(.65, 4); expect(result.stopped && result.staleCancelled && result.rejected && result.muted).toBe(true);
 });
@@ -266,7 +267,7 @@ test('FAMAS fires a three-round burst on one press and does not repeat while hel
     const start = Date.now(); await expect.poll(async () => { await expect(page.locator('#hud-ammo')).toHaveText('22'); return Date.now() - start; }, { intervals: [100, 150], timeout: 3000 }).toBeGreaterThan(900);
     expect(await page.evaluate(() => window.__rules.sounds.filter((id) => id === 'famas').length)).toBe(3);
     await page.mouse.up(); await page.mouse.down(); await page.mouse.up(); await expect(page.locator('#hud-ammo')).toHaveText('19');
-    expect(await page.locator('#respawn-weapon-choices button').count()).toBe(20);
+    expect(await page.locator('#respawn-weapon-choices button').count()).toBe(WEAPONS.length);
     await expect.poll(() => page.evaluate(() => window.__rules.sounds.filter((id) => id === 'famas').length)).toBe(6);
   } finally { await dispose(page); }
 });
@@ -285,6 +286,21 @@ test('an empty magazine reloads automatically after a tap, updating the HUD and 
     expect(await page.evaluate(() => window.__rules.reloadWeapon)).toBe('rifle');
     expect(await page.evaluate(() => { const { player } = window.__rules; return player.reloadUntil === 0 && player.lastShot > 0; })).toBe(true);
     expect(await page.evaluate(() => window.__rules.sounds.filter((id) => id === 'rifle').length)).toBe(1);
+  } finally { await dispose(page); }
+});
+
+test('AN-94 has a held fast first pair and a single quick tap never creates extra predicted or authoritative shots', async ({ page }) => {
+  await fixture(page);
+  try {
+    await page.evaluate(() => {
+      const f = window.__rules; Object.assign(f.player, { weaponId: 'an94', nextWeaponId: 'an94', ammo: 30, nextFireAt: 0 }); f.game.predicted = null; f.game.applySnapshot(f.room.snapshot());
+      f.shotTimes = []; const shoot = f.room.shoot.bind(f.room); f.room.shoot = (...args) => { const ok = shoot(...args); if (ok && args[0].id === f.player.id) f.shotTimes.push(args[1]); return ok; };
+    });
+    await page.mouse.down(); await expect.poll(() => page.evaluate(() => window.__rules.shotTimes.length)).toBeGreaterThanOrEqual(4); await page.mouse.up();
+    const times = await page.evaluate(() => window.__rules.shotTimes); expect(times[1] - times[0]).toBeGreaterThanOrEqual(40); expect(times[1] - times[0]).toBeLessThan(120); for (let i = 2; i < times.length; i++) expect(times[i] - times[i - 1]).toBeGreaterThanOrEqual(120);
+    await page.evaluate(() => { const f = window.__rules; f.game.cancelAttack(); f.game.localNextFire = 0; f.player.ammo = 30; f.player.nextFireAt = 0; f.shotTimes.length = 0; f.sounds.length = 0; f.game.applySnapshot(f.room.snapshot()); });
+    await page.mouse.down(); await page.mouse.up(); await expect(page.locator('#hud-ammo')).toHaveText('29'); const started = Date.now(); await expect.poll(async () => { expect(await page.evaluate(() => window.__rules.shotTimes.length)).toBe(1); return Date.now() - started; }).toBeGreaterThan(200);
+    await expect.poll(() => page.evaluate(() => window.__rules.sounds.filter((id) => id === 'an94').length)).toBe(1);
   } finally { await dispose(page); }
 });
 

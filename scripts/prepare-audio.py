@@ -3,6 +3,7 @@ Requires numpy, available in ~/engine/.venv. Originals stay in ignored artifacts
 Source: Tabasco, https://opengameart.org/content/gunshot-sounds (CC0 1.0).
 """
 import hashlib
+import argparse
 import json
 import wave
 from pathlib import Path
@@ -83,14 +84,22 @@ profiles = {
     'spas12': ('shotty.wav', 0.90, 0.84), 'deagle': ('cz.wav', 0.72, 0.73),
     'm249': ('sks.wav', 0.77, 1.0), 'm14': ('mosin.wav', 0.80, 1.15),
     'glock18c': ('cz.wav', 0.34, 1.24),
+    'an94': ('sks.wav', 0.56, 1.22), 's686': ('shotty.wav', 0.65, 1.02),
+    'vector': ('cz.wav', 0.36, 1.30),
 }
+parser = argparse.ArgumentParser()
+parser.add_argument('--only', default='', help='Comma-separated weapon IDs; preserve all other recordings')
+selected = set(filter(None, parser.parse_args().only.split(',')))
+if selected - profiles.keys(): raise ValueError('Unknown firearm sound profile')
 prepared = {}
 for name in {item[0] for item in profiles.values()}:
     samples, rate = read(name)
     prepared[name] = (clean(samples, rate), rate)
 
-files = []
+files = json.loads((OUTPUT / 'manifest.json').read_text())['files'] if selected else []
+files = [item for item in files if item['file'].removesuffix('-1.wav') not in selected]
 for weapon, (name, duration, pitch) in profiles.items():
+    if selected and weapon not in selected: continue
     samples, rate = prepared[name]
     for variant in range(1):
         attack = int(ISOLATED_BLASTS[name] * rate)

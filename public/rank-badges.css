@@ -1,0 +1,11 @@
+.player-rank-mark { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none; vertical-align: middle; color: var(--rank-ink,#becfd9); }
+.player-rank-mark > img { width: 24px; height: 24px; display: block; object-fit: contain; filter: drop-shadow(0 2px 3px #0007); }
+.player-rank-mark > span { font-size: 9px; line-height: 1.4; white-space: nowrap; }
+.score-table td:nth-child(2) > .player-rank-mark { margin-right: 5px; }.score-table .player-rank-mark > img { width: 25px; height: 25px; }
+.roster-slot .player-rank-mark { margin-right: 5px; }.roster-slot .player-rank-mark > img { width: 28px; height: 28px; }
+.kill-rank-badge { margin-top: 6px; }.kill-rank-badge .player-rank-mark > img { width: 26px; height: 26px; }.kill-rank-badge .player-rank-mark > span { font-size: 8px; letter-spacing: .3px; }
+.death-rank-badge { display: flex; justify-content: center; margin: 5px 0; }.death-rank-badge .player-rank-mark > img { width: 34px; height: 34px; }.death-rank-badge .player-rank-mark > span { font-size: 11px; }
+.feed-item .player-rank-mark { margin-right: 4px; }.feed-item .player-rank-mark > img { width: 16px; height: 16px; }
+.hud-kd-group { display: inline-flex; align-items: center; gap: 5px; }.hud-player-rank .player-rank-mark > img { width: 18px; height: 18px; }
+.hud-player-rank { opacity: var(--kill-announcement-opacity,1); }
+@media(max-width:740px) { .score-table .player-rank-mark > img { width: 18px; height: 18px; }.roster-slot .player-rank-mark > img { width: 22px; height: 22px; } }

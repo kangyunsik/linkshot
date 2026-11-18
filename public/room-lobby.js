@@ -3,6 +3,7 @@ import { TEAM_NAMES } from '/shared/teams.js';
 import { getWeapon } from '/shared/catalog.js';
 import { BOT_DIFFICULTIES } from '/shared/simulation.js';
 import { isTeamGame, isObjectiveGame, gameTypeName } from '/shared/game-types.js';
+import { rankBadgeNode } from './rank-badges.js';
 
 const $ = (id) => document.getElementById(id);
 const element = (tag, text, className) => { const node = document.createElement(tag); if (text != null) node.textContent = text; if (className) node.className = className; return node; };
@@ -31,7 +32,7 @@ export class RoomLobbyView {
     $('room-lobby-result').hidden = !room.result;
     if (room.result) $('room-lobby-result').textContent = `이전 라운드 · ${room.result.winnerName}${defense ? ` · ${room.result.cleared}/${room.waves}공세 · 코어 ${room.result.coreHealth}` : room.result.winnerTeam ? ' 승리' : ''}${room.result.rewards?.[id]?.points ? ` · +${room.result.rewards[id].points} LP` : ''}`;
     document.querySelector('.room-lobby-tools > span').textContent = defense ? '지원 AI 난이도는 각 행에서 설정합니다. 적 공세는 자동 생성되며 모든 사람은 같은 수비팀입니다.' : '방장이 각 AI 행에서 난이도를 변경할 수 있습니다.';
-    const signature = JSON.stringify([id, room.hostId, room.phase, room.gameType, players.map((p) => [p.id, p.name, p.teamId, p.teamConfirmed, p.isBot, p.roomStatus, p.ready, p.weaponId, p.botDifficulty])]);
+    const signature = JSON.stringify([id, room.hostId, room.phase, room.gameType, players.map((p) => [p.id, p.name, p.teamId, p.teamConfirmed, p.isBot, p.roomStatus, p.ready, p.weaponId, p.botDifficulty, p.rankBadge])]);
     if (signature === this.signature) return; this.signature = signature;
     const focused = document.activeElement?.dataset.control;
     const root = $('room-lobby-roster'); root.replaceChildren(); root.dataset.teams = String(teams);
@@ -48,6 +49,7 @@ export class RoomLobbyView {
       for (const player of roster) {
         const row = element('div', null, 'roster-slot'); row.dataset.member = player.id; row.dataset.status = player.roomStatus;
         const copy = element('div'), name = element('b', `${player.isBot ? 'AI · ' : ''}${player.name}${player.id === room.hostId ? ' / 방장' : ''}${player.id === id ? ' / 나' : ''}`);
+        const badge = rankBadgeNode(player.rankBadge); if (badge) name.prepend(badge);
         const status = player.roomStatus === 'playing' ? '교전 중' : teams && !player.teamConfirmed ? '팀 선택 필요 · 임시 배정' : player.ready ? '준비 완료' : '대기 중';
         copy.append(name, element('small', `${status} · ${getWeapon(player.weaponId).name}${player.isBot ? ` · ${player.botDifficulty === 'advanced' ? '고급' : player.botDifficulty === 'intermediate' ? '중급' : '초급'}` : ''}`)); row.append(copy);
         if (team && !defense && player.roomStatus === 'waiting' && (host || player.id === id)) {

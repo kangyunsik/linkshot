@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+<title>Solo Gold · solar laurels</title>
+<defs><linearGradient id="metal" gradientUnits="userSpaceOnUse" x1="18" y1="15" x2="110" y2="111"><stop stop-color="#fff7c5"/><stop offset=".42" stop-color="#f0c35e"/><stop offset="1" stop-color="#9a632a"/></linearGradient></defs>
+<circle cx="64" cy="64" r="44" fill="#352e21" stroke="url(#metal)" stroke-width="4"/>
+<circle cx="64" cy="64" r="34" stroke="#a78542" stroke-width="2"/>
+<path d="m12 31 16 16-12 2Zm-5 23 18 9-14 8Zm6 25 21 3-10 12Zm103-48-16 16 12 2Zm5 23-18 9 14 8Zm-6 25-21 3 10 12Z" fill="url(#metal)"/>
+<path d="m64 29 10 23 25 3-19 17 5 25-21-13-21 13 5-25-19-17 25-3Z" fill="url(#metal)"/>
+<path d="m64 49 12 15-12 15-12-15Z" fill="#fff7d0"/>
+<path d="m50 112 14 6 14-6" stroke="url(#metal)" stroke-width="3"/>
+</svg>

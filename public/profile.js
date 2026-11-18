@@ -118,4 +118,5 @@ export class ProfileStore extends EventTarget {
   purchase(outfitId) { return this.operate({ type: 'purchase', outfitId }); }
   purchaseWeapon(weaponId) { return this.operate({ type: 'purchaseWeapon', weaponId }); }
   equip(outfitId) { return this.operate({ type: 'equip', outfitId }); }
+  setSuppressor(weaponId, equipped) { return this.operate({ type: 'suppressor', weaponId, equipped }); }
 }

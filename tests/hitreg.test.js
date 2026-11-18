@@ -62,7 +62,7 @@ test('seven bots receive seven distinct guns and use the same body damage as pla
   const roster = new Room('GUNS7', { bots: 7 }); assert.equal(new Set([...roster.players.values()].map((p) => p.weaponId)).size, 7);
   const observed = new Set([...roster.players.values()].map((p) => p.weaponId));
   for (let life = 0; life < 3; life++) for (const bot of roster.players.values()) { roster.spawn(bot); observed.add(bot.weaponId); }
-  assert.equal(observed.size, 20, 'respawning bots also rotate through the new real-world gun profiles');
+  assert.equal(observed.size, WEAPONS.length, 'respawning bots also rotate through the new real-world gun profiles');
   for (const weapon of WEAPONS) {
     const damages = [];
     for (const isBot of [false, true]) {

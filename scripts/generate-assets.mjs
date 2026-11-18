@@ -48,7 +48,7 @@ const assets = [
     ['sump', 'a monumental dry underground circular concrete reservoir, wide raised annular maintenance walkway around a lower central drainage basin, large cylindrical concrete piers, four broad sloping access ramps, green oxidized pipes and central pump baffles, dim teal ambient light and warm maintenance lights, readable traversable dry floor, no windows or staircases'],
     ['relay', 'an open-air circular communications relay facility, three separated antenna plazas connected by broad gently sloping paths, low mint gray relay cabinets and ceramic equipment cover, north elevated dish antenna platform and south maintenance deck, weathered pale concrete and turquoise technical trim, clear sky, readable open tactical routes, no conventional buildings or stairs'],
     ['bastion', 'a cooperative coastal defense installation with a bright mint green generator core at the rear, three broad rocky approach lanes converging toward layered low defensive cover, a small raised support deck reached by smooth wide ramps, warm amber lamps and cool blue sea haze, fixed concrete berms and steel service equipment, dramatic readable defensive arena, no conventional buildings or stairs'],
-  ].map(([id, scene], i) => ({ file: `${id}-hero.png`, width: 1152, height: 768, seed: 7092600 + i, teamMapAsset: true, prompt: `masterpiece, best quality, very aesthetic, scenery, no humans, ${scene}, wide angle establishing shot, highly detailed game environment concept art, anime background art, original environment, empty arena`, negative: 'worst quality, low quality, blurry, text, logo, watermark, signature, people, soldiers, character, firearm, dense fog, pitch black, buildings with windows, staircase, shipping container maze' })),
+  ].map(([id, scene], i) => ({ file: `${id}-hero.png`, width: 1152, height: 768, seed: 7092600 + i, teamMapAsset: true, documentationAsset: true, prompt: `masterpiece, best quality, very aesthetic, scenery, no humans, ${scene}, wide angle establishing shot, highly detailed game environment concept art, anime background art, original environment, empty arena`, negative: 'worst quality, low quality, blurry, text, logo, watermark, signature, people, soldiers, character, firearm, dense fog, pitch black, buildings with windows, staircase, shipping container maze' })),
   { file: 'quarry-strata.png', width: 768, height: 768, seed: 7092610, teamMapAsset: true, prompt: 'masterpiece, best quality, no humans, seamless neutral beige gray limestone quarry rock material, thin horizontal sedimentary strata, subtle chipped cut stone microtexture, matte mineral surface, evenly lit flat orthographic material swatch, full frame, no shadows, no perspective, no objects' },
   { file: 'terrain-concrete.png', width: 768, height: 768, seed: 7092611, teamMapAsset: true, prompt: 'masterpiece, best quality, no humans, seamless neutral light gray weathered concrete material texture, fine aggregate and subtle damp mineral speckling, restrained industrial floor surface, matte finish, even diffuse lighting, flat orthographic material swatch, full frame, no cracks forming objects, no markings, no shadows, no perspective' },
   ...[
@@ -85,6 +85,7 @@ async function api(route, options = {}) {
 }
 
 await mkdir(path.join(root, 'public/assets'), { recursive: true });
+await mkdir(path.join(root, 'docs/maps/concepts'), { recursive: true });
 await mkdir(path.join(root, 'artifacts/workflows'), { recursive: true });
 await mkdir(path.join(root, 'artifacts/asset-staging'), { recursive: true });
 try {
@@ -106,7 +107,7 @@ for (const asset of assets) {
   if (process.argv.includes('--materials') && !asset.file.startsWith('operator-')) continue;
   if (selectedOutfits && !selectedOutfits.some((id) => asset.file === `outfit-${id}.png`)) continue;
   if (process.argv.includes('--outfits') && !/^outfit-(?:field|runner|hazmat|orbital|retrobot)\.png$/.test(asset.file)) continue;
-  const target = path.join(root, 'public/assets', asset.file);
+  const target = path.join(root, asset.documentationAsset ? 'docs/maps/concepts' : 'public/assets', asset.file);
   if (!process.argv.includes('--force')) {
     try { await access(target); console.log(`기존 애셋 유지: ${asset.file}`); continue; } catch { /* Generate missing assets. */ }
   }
@@ -140,13 +141,15 @@ for (const asset of assets) {
   await writeFile(staged, Buffer.from(await response.arrayBuffer()));
   if (asset.crop) await executeFile(path.join(engine, '.venv/bin/python'), ['-c', 'from PIL import Image; import json,sys; p=sys.argv[1]; Image.open(p).crop(tuple(json.loads(sys.argv[2]))).resize((768,768),Image.Resampling.LANCZOS).save(p)', staged, JSON.stringify(asset.crop)]);
   await rename(staged, target);
-  console.log(`저장 완료: public/assets/${asset.file}`);
+  console.log(`저장 완료: ${path.relative(root, target)}`);
 }
 
-await writeFile(path.join(root, 'public/assets/asset-manifest.json'), JSON.stringify({
+const provenance = {
   engine: 'ComfyUI (local, ~/engine)', checkpoint, modelLicense: 'CreativeML Open RAIL++-M',
   modelSource: 'https://huggingface.co/cagliostrolab/animagine-xl-4.0',
   note: 'Locally generated images; no paid API or external image service used. Procedural meshes, UI and sounds are authored in this project.',
-  assets: assets.map(({ file, prompt, seed, width, height, crop }) => ({ file, prompt, seed, width, height, ...(crop ? { crop } : {}) })),
-}, null, 2));
+};
+const describe = ({ file, prompt, seed, width, height, crop }) => ({ file, prompt, seed, width, height, ...(crop ? { crop } : {}) });
+await writeFile(path.join(root, 'public/assets/asset-manifest.json'), JSON.stringify({ ...provenance, assets: assets.filter(asset => !asset.documentationAsset).map(describe) }, null, 2));
+await writeFile(path.join(root, 'docs/maps/concepts/asset-manifest.json'), JSON.stringify({ ...provenance, assets: assets.filter(asset => asset.documentationAsset).map(describe) }, null, 2));
 console.log('모든 로컬 이미지 애셋이 준비되었습니다.');

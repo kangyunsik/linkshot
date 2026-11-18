@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+<title>Solo Diamond · stellar prism</title>
+<defs><linearGradient id="metal" gradientUnits="userSpaceOnUse" x1="16" y1="10" x2="112" y2="118"><stop stop-color="#ecf9ff"/><stop offset=".4" stop-color="#a8d9ff"/><stop offset="1" stop-color="#7976c8"/></linearGradient></defs>
+<circle cx="64" cy="64" r="45" fill="#202d49" stroke="url(#metal)" stroke-width="4"/>
+<circle cx="64" cy="64" r="54" stroke="#7184c0" stroke-width="2" stroke-dasharray="18 10"/>
+<path d="m64 21 30 40-30 46-30-46Z" fill="url(#metal)"/>
+<path d="m64 34 17 27-17 30-17-30Z" fill="#eefaff"/>
+<path d="M35 61h58M64 23v80m-30-42 30 12 30-12" stroke="#747daf" stroke-width="2"/>
+<path d="m7 44 22 11v10L7 61Zm0 24 23 5 5 12L11 80Zm114-24-22 11v10l22-4Zm0 24-23 5-5 12 24-5Z" fill="url(#metal)"/>
+</svg>

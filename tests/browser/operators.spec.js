@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
+import { WEAPONS } from '../../shared/catalog.js';
+import { CHARACTERS, OUTFITS } from '../../shared/outfits.js';
 
 test('every outfit and weapon finish retains human anatomy, facial features and the same body dimensions', async ({ page }) => {
   const errors = []; page.on('pageerror', (error) => errors.push(error.message));
@@ -24,7 +26,7 @@ test('every outfit and weapon finish retains human anatomy, facial features and 
     for (const character of CHARACTERS) for (const outfit of OUTFITS) for (const weapon of WEAPONS) {
       const model = models.create(weapon.id, 'standard', true, outfit.id, character.id), arms = model.getObjectByName('first-person-human-arms');
       const bounds = new THREE.Box3().setFromObject(model);
-      const hands = []; arms.traverse((child) => { if (child.userData.anatomical && child.userData.fingers === 5) hands.push(child); });
+      const hands = []; model.traverse((child) => { if (child.userData.anatomical && child.userData.fingers === 5) hands.push(child); });
       const sleeve = arms.getObjectByName('right-sleeve').geometry, p = sleeve.getAttribute('position'), n = sleeve.getAttribute('normal'); let outward = 0, count = 0;
       for (let ring = 0; ring <= 15; ring++) {
         const center = new THREE.Vector3(); for (let i = 0; i < 16; i++) center.add(new THREE.Vector3().fromBufferAttribute(p, ring * 17 + i)); center.multiplyScalar(1 / 16);
@@ -35,7 +37,7 @@ test('every outfit and weapon finish retains human anatomy, facial features and 
     }
     models.dispose(); return { checks, firstPerson };
   });
-  expect(result.checks).toHaveLength(60); expect(result.firstPerson).toHaveLength(200); expect(new Set(result.checks.map((check) => check.characterId)).size).toBe(2);
+  expect(result.checks).toHaveLength(60); expect(result.firstPerson).toHaveLength(CHARACTERS.length * OUTFITS.length * WEAPONS.length); expect(new Set(result.checks.map((check) => check.characterId)).size).toBe(2);
   for (const check of result.checks) {
     expect(check.rig).toBe('human-v3'); expect(check.skinned).toBe(true); expect(check.bones).toBeGreaterThan(50); expect(check.materials).toBe(3); expect(check.triangles).toBeGreaterThan(10000);
     expect(check.standingTop).toBeGreaterThan(1.77); expect(check.standingTop).toBeLessThanOrEqual(1.85);

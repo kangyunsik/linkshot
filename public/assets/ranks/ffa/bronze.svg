@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+<title>Solo Bronze · hunter orbit</title>
+<defs><linearGradient id="metal" gradientUnits="userSpaceOnUse" x1="24" y1="18" x2="103" y2="112"><stop stop-color="#ffe1b3"/><stop offset=".45" stop-color="#ce925b"/><stop offset="1" stop-color="#75462d"/></linearGradient></defs>
+<circle cx="64" cy="64" r="46" fill="#302a26" stroke="url(#metal)" stroke-width="5"/>
+<circle cx="64" cy="64" r="35" stroke="#805c40" stroke-width="2"/>
+<path d="m9 48 15 10v12L9 80l7-16Zm110 0-15 10v12l15 10-7-16Z" fill="url(#metal)"/>
+<path d="m64 34 27 22-7 9-20-16-20 16-7-9Zm0 26 22 18-22 18-22-18Z" fill="url(#metal)"/>
+<path d="M57 14h14M57 114h14" stroke="#ebbd88" stroke-width="3"/>
+</svg>

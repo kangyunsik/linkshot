@@ -10,13 +10,13 @@ test('rank presentation uses canonical online tiers and divisions, not local LP 
   }
 });
 test('unranked placement games/wins stay visible and logged-out profiles never invent a ranked tier', () => {
-  const placement = rankPresentation({ rankTier: 'UNRANKED', placementsPlayed: 3, placementWins: 2, wins: 999 }); assert.equal(placement.label,'배치 중'); assert.equal(placement.detail,'배치 3/10판 · 2승'); assert.equal(placement.progress,30);
+  const placement = rankPresentation({ rankTier: 'UNRANKED', placementsPlayed: 3, placementWins: 2, wins: 999 }); assert.equal(placement.label,'배치 중'); assert.equal(placement.detail,'배치 3/5판 · 2승'); assert.equal(placement.progress,60);
   const guest = rankPresentation(null); assert.equal(guest.tier,'UNRANKED'); assert.equal(guest.label,'로그인 필요'); assert.equal(guest.showProgress,false);
   assert.equal(rankPresentation({ rankTier: 'CHALLENGER' }).showProgress,false);
 });
 test('malformed or prototype-shaped tiers cannot become asset paths or fabricate a tier', () => {
   for (const rankTier of ['__proto__','constructor','../../private',{},null]) { const view = rankPresentation({ rankTier }); assert.equal(view.label,'티어 확인 중'); assert.equal(view.emblem,'/assets/ranks/unranked.svg?v=1'); assert.equal(view.showProgress,false); }
-  const view = rankPresentation({ rankTier: 'UNRANKED', placementsPlayed: 99, placementWins: Infinity }); assert.equal(view.progress,100); assert.equal(view.detail,'배치 10/10판 · 0승');
+  const view = rankPresentation({ rankTier: 'UNRANKED', placementsPlayed: 99, placementWins: Infinity }); assert.equal(view.progress,100); assert.equal(view.detail,'배치 5/5판 · 0승');
 });
 test('every original tier insignia is a distinct self-contained vector without scripts or external resources', async () => {
   const documents = [];

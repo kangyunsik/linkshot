@@ -5,7 +5,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
-import { POINT_RULES } from '../shared/progression.js';
+import { POINT_RULES, SUPPRESSOR_KILLS, SUPPRESSOR_LEVEL } from '../shared/progression.js';
 import { OUTFITS } from '../shared/outfits.js';
 import { WEAPONS, FREE_WEAPON_IDS } from '../shared/catalog.js';
 
@@ -20,7 +20,7 @@ test('portable launcher serves embedded files on loopback without Node or extern
   const profileData = await mkdtemp(path.join(stage, 'profile-data-'));
   await writeFile(path.join(stage, 'web/index.html'), '<!doctype html><title>LINKSHOT launcher test</title>Embedded solo build');
   await writeFile(path.join(stage, 'web/shared/test.js'), 'export const embedded = true;');
-  await writeFile(path.join(stage, 'web/economy.json'), JSON.stringify({ version: 1, points: POINT_RULES, outfits: OUTFITS.map(({ id, price }) => ({ id, price })), weapons: WEAPONS.map(({ id, price }) => ({ id, price })), freeWeapons: FREE_WEAPON_IDS }));
+  await writeFile(path.join(stage, 'web/economy.json'), JSON.stringify({ version: 1, points: POINT_RULES, outfits: OUTFITS.map(({ id, price }) => ({ id, price })), weapons: WEAPONS.map(({ id, price }) => ({ id, price })), freeWeapons: FREE_WEAPON_IDS, mastery: { suppressorLevel: SUPPRESSOR_LEVEL, suppressorKills: SUPPRESSOR_KILLS } }));
   await cp(path.join(root, 'scripts/windows-launcher.go'), path.join(stage, 'main.go'));
   const binary = path.join(stage, process.platform === 'win32' ? 'launcher-test.exe' : 'launcher-test');
   execFileSync(go, ['build', '-trimpath', '-o', binary, 'main.go'], { cwd: stage, env: { ...process.env, CGO_ENABLED: '0' }, timeout: 70_000 });
@@ -71,6 +71,14 @@ test('portable launcher serves embedded files on loopback without Node or extern
   update = await operate({ type: 'round', roundId: 'native-knife-0001', kills: 1, weaponKills: { knife: 1 } }); assert.equal(update.data.profile.weaponKills.knife, 1);
   update = await operate({ type: 'round', roundId: 'native-knife-0001', kills: 1, weaponKills: { knife: 1 } }); assert.equal(update.data.profile.weaponKills.knife, 1);
   assert.equal((await operate({ type: 'purchaseWeapon', weaponId: 'knife' })).status, 409);
+  assert.equal((await operate({ type: 'suppressor', weaponId: 'rifle', equipped: true })).status, 409);
+  update = await operate({ type: 'round', roundId: 'native-suppressor-0001', kills: SUPPRESSOR_KILLS - 38, weaponKills: { rifle: SUPPRESSOR_KILLS - 38 } }); assert.equal(update.data.profile.weaponKills.rifle, 1549);
+  assert.equal((await operate({ type: 'suppressor', weaponId: 'rifle', equipped: true })).status, 409);
+  update = await operate({ type: 'round', roundId: 'native-suppressor-0001', kills: SUPPRESSOR_KILLS - 37, weaponKills: { rifle: SUPPRESSOR_KILLS - 37 } }); assert.equal(update.data.profile.weaponKills.rifle, 1550);
+  update = await operate({ type: 'suppressor', weaponId: 'rifle', equipped: true }); assert.equal(update.status, 200); assert.deepEqual(update.data.profile.suppressedWeapons, ['rifle']); assert.equal(update.data.profile.points, 20);
+  assert.deepEqual(JSON.parse(await readFile(path.join(profileData, 'profile.json'), 'utf8')).suppressedWeapons, ['rifle']);
+  assert.equal((await operate({ type: 'suppressor', weaponId: 'knife', equipped: true })).status, 409);
+  update = await operate({ type: 'suppressor', weaponId: 'rifle', equipped: false }); assert.deepEqual(update.data.profile.suppressedWeapons, []);
   assert.equal((await fetch(`${url}/api/profile`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://unrelated.invalid' }, body: '{}' })).status, 403);
   assert.equal((await operate({ type: 'round', points: 999999 })).status, 400);
 });

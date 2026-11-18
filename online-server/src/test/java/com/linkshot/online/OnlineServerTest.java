@@ -54,6 +54,13 @@ class OnlineServerTest {
     @Autowired AccountService accounts;
     @Autowired MatchService matches;
     @Autowired JdbcTemplate db;
+    @Autowired GameCatalog catalog;
+    @Autowired EngineRegistry engines;
+    @Autowired org.springframework.security.web.FilterChainProxy filters;
+    @org.junit.jupiter.api.BeforeEach void isolateAuthenticationLimits() {
+        for (var chain : filters.getFilterChains()) for (var filter : chain.getFilters()) if (filter instanceof AuthRateLimitFilter) ((Map<?, ?>) org.springframework.test.util.ReflectionTestUtils.getField(filter, "windows")).clear();
+    }
+    @org.junit.jupiter.api.AfterEach void removeCosmeticBadgeTestEngine() { db.update("DELETE FROM engines WHERE id = 'test-rank-badge-engine'"); }
     private String base() { return "http://127.0.0.1:" + port; }
     private String username() { return "u_" + UUID.randomUUID().toString().replace("-", "").substring(0, 18); }
     private AccountService.Profile account() { return accounts.register(username(), "test-only-long-passphrase"); }
@@ -109,6 +116,31 @@ class OnlineServerTest {
         assertEquals(200, client.login(name).statusCode()); client.csrf();
         assertNotEquals(200, client.request("POST", "/api/account", Map.of("kills", 500, "points", 999_999), true).statusCode()); assertEquals(0, accounts.profile(name).points());
     }
+    @Test void passwordsRequireEightCharactersAndExactlyEightCharactersCanRegisterAndLogIn() throws Exception {
+        var client = new Browser(); client.csrf();
+        var rejected = client.request("POST", "/api/auth/register", Map.of("username", username(), "password", "seven77"), true);
+        assertEquals(400, rejected.statusCode()); assertTrue(rejected.body().contains("8자 이상"));
+        for (String password : List.of("eight888", "가나다라마바사아")) {
+            var user = new Browser(); user.csrf(); String name = username();
+            assertEquals(201, user.request("POST", "/api/auth/register", Map.of("username", name, "password", password), true).statusCode());
+            var form = "username=" + URLEncoder.encode(name, StandardCharsets.UTF_8) + "&password=" + URLEncoder.encode(password, StandardCharsets.UTF_8);
+            assertEquals(200, user.request("POST", "/api/auth/login", form, true).statusCode());
+        }
+    }
+    @Test void cosmeticRankProofRequiresSessionAndCsrfAndCannotBeUsedTwiceOrForgeATier() throws Exception {
+        engines.heartbeat(new EngineRegistry.Heartbeat("test-rank-badge-engine", "ws://127.0.0.1:8090/play", 24, 0));
+        var anonymous = new Browser(); anonymous.csrf();
+        assertEquals(401, anonymous.request("POST", "/api/account/rank-badge-ticket", Map.of("engineId", "test-rank-badge-engine"), true).statusCode());
+        var client = new Browser(); String name = username(); client.register(name); client.login(name); client.csrf();
+        assertEquals(403, client.request("POST", "/api/account/rank-badge-ticket", Map.of("engineId", "test-rank-badge-engine"), false).statusCode());
+        assertEquals(400, client.request("POST", "/api/account/rank-badge-ticket", Map.of("engineId", "test-rank-badge-engine", "rankTier", "CHALLENGER"), true).statusCode());
+        var issued = client.request("POST", "/api/account/rank-badge-ticket", Map.of("engineId", "test-rank-badge-engine"), true); assertEquals(200, issued.statusCode());
+        String token = json(issued).get("ticket").asString();
+        assertEquals(401, anonymous.request("POST", "/internal/lan/rank-badge", Map.of("engineId", "test-rank-badge-engine", "ticket", token), false).statusCode());
+        var verified = engine("/internal/lan/rank-badge", Map.of("engineId", "test-rank-badge-engine", "ticket", token)); assertEquals(200, verified.statusCode()); assertEquals(name, json(verified).get("username").asString());
+        assertEquals(400, engine("/internal/lan/rank-badge", Map.of("engineId", "test-rank-badge-engine", "ticket", token)).statusCode());
+        assertEquals(0, accounts.profile(name).points());
+    }
 
     @Test void csrfAndCorsRejectCrossSiteMutationsAndOnlyAllowExplicitOrigins() throws Exception {
         var client = new Browser(); client.csrf();
@@ -160,6 +192,39 @@ class OnlineServerTest {
         assertEquals(1, successes); assertEquals(1, db.queryForObject("SELECT COUNT(*) FROM accounts WHERE username = ?", Integer.class, name));
     }
 
+    @Test void suppressorsRequireCanonicalWeaponLevelFiveAndCsrfWithoutGrantingOwnershipOrSpendingPoints() throws Exception {
+        var client = new Browser(); String name = username(); var created = client.register(name); UUID id = UUID.fromString(json(created).get("id").asString());
+        String path = "/api/account/weapons/vector/suppressor";
+        var anonymous = new Browser(); anonymous.csrf(); assertEquals(401, anonymous.request("POST", path, Map.of("equipped", true), true).statusCode());
+        assertEquals(200, client.login(name).statusCode()); client.csrf();
+        assertEquals(403, client.request("POST", path, Map.of("equipped", true), false).statusCode());
+        assertEquals(400, client.request("POST", path, Map.of("equipped", true, "weaponKills", Map.of("vector", 1550)), true).statusCode());
+        assertEquals(400, client.request("POST", path, Map.of(), true).statusCode());
+        assertEquals(400, client.request("POST", "/api/account/weapons/knife/suppressor", Map.of("equipped", true), true).statusCode());
+        assertEquals(400, client.request("POST", "/api/account/weapons/missing/suppressor", Map.of("equipped", true), true).statusCode());
+        db.update("UPDATE profiles SET points = 832 WHERE account_id = ?", id);
+        db.update("INSERT INTO weapon_kills(account_id, weapon_id, kills) VALUES (?, 'vector', 1549)", id);
+        assertEquals(400, client.request("POST", path, Map.of("equipped", true), true).statusCode()); assertTrue(accounts.profile(id).suppressedWeapons().isEmpty());
+        db.update("UPDATE weapon_kills SET kills = 1550 WHERE account_id = ? AND weapon_id = 'vector'", id);
+        var equipped = client.request("POST", path, Map.of("equipped", true), true); assertEquals(200, equipped.statusCode()); assertEquals(List.of("vector"), JSON.convertValue(json(equipped).get("suppressedWeapons"), List.class));
+        assertEquals(200, client.request("POST", path, Map.of("equipped", true), true).statusCode());
+        var saved = accounts.profile(id); assertEquals(832, saved.points()); assertEquals(1550, saved.weaponKills().get("vector")); assertEquals(List.of("vector"), saved.suppressedWeapons()); assertFalse(saved.ownedWeapons().contains("vector")); assertEquals(4, saved.ownedWeapons().size());
+        assertEquals(1, db.queryForObject("SELECT COUNT(*) FROM equipped_suppressors WHERE account_id = ?", Integer.class, id));
+        assertEquals(400, client.request("POST", "/api/account/weapons/an94/suppressor", Map.of("equipped", true), true).statusCode());
+        var plan = matches.create(MatchService.Mode.RANKED, List.of(id), 1, "foundry", 5, 60); assertEquals(List.of("vector"), plan.players().getFirst().suppressedWeapons()); assertFalse(plan.players().getFirst().ownedWeapons().contains("vector"));
+        assertEquals(200, client.request("POST", path, Map.of("equipped", false), true).statusCode()); assertTrue(accounts.profile(id).suppressedWeapons().isEmpty()); assertEquals(832, accounts.profile(id).points());
+    }
+
+    @Test void resultLedgersAcceptEveryFirearmAndKnifeIncludingAllThreeNewGuns() {
+        var a = account(); var b = account(); var plan = matches.create(MatchService.Mode.CASUAL, List.of(a.id(), b.id()), 0, "foundry", 30, 60); matches.claim(plan.id(), "expanded-catalog-engine");
+        Map<String, Integer> ledger = new java.util.LinkedHashMap<>();
+        for (String id : List.of("rifle", "pistol", "shotgun", "sniper", "smg", "lmg", "dmr", "ak47", "m4a1", "famas", "mp5", "p90", "ump45", "awp", "m82", "spas12", "deagle", "m249", "m14", "glock18c", "an94", "s686", "vector", "knife")) ledger.put(id, 1);
+        assertEquals(catalog.weaponCount() + 1, ledger.size());
+        var result = new MatchService.Completion("expanded-catalog-engine", plan.id().toString(), List.of(new MatchService.Performance(a.id().toString(), false, ledger.size(), 0, ledger), new MatchService.Performance(b.id().toString(), false, 0, ledger.size(), Map.of())));
+        assertTrue(matches.complete(plan.id(), result));
+        var saved = accounts.profile(a.id()); assertEquals(ledger.size(), saved.weaponKills().size()); for (String id : List.of("an94", "s686", "vector")) assertEquals(1, saved.weaponKills().get(id));
+    }
+
     @Test void temporaryRankedAiAssignmentsAreServerOwnedAndAnAccountCannotJoinTwoActiveMatches() {
         var a = account(); var b = account();
         var plan = matches.create(MatchService.Mode.RANKED, List.of(a.id(), b.id()), 1, "foundry", 5, 60); assertTrue(plan.rankedAiEnabled());
@@ -180,7 +245,7 @@ class OnlineServerTest {
 
     @Test void onlyTheAssignedEngineCanSettleAnImmutableResultOnceIncludingKnifeMastery() throws Exception {
         var a = account(); var b = account(); var plan = matches.create(MatchService.Mode.RANKED, List.of(a.id(), b.id()), 0, "foundry", 5, 60); matches.claim(plan.id(), "test-engine-result");
-        var players = List.of(new MatchService.Performance(a.id().toString(), false, 2, 1, Map.of("knife", 1, "rifle", 1)), new MatchService.Performance(b.id().toString(), false, 1, 2, Map.of("sniper", 1)));
+        var players = List.of(new MatchService.Performance(a.id().toString(), false, 2, 1, Map.of("knife", 1, "rifle", 1), 2, 1, false, plan.teams().get(a.id().toString())), new MatchService.Performance(b.id().toString(), false, 1, 2, Map.of("sniper", 1), 1, 2, false, plan.teams().get(b.id().toString())));
         var result = new MatchService.Completion("test-engine-result", plan.id().toString(), players);
         var anonymous = new Browser(); assertEquals(401, anonymous.request("POST", "/internal/matches/" + plan.id() + "/results", result, false).statusCode());
         assertEquals(400, engine("/internal/matches/" + plan.id() + "/results", new MatchService.Completion("wrong-engine", plan.id().toString(), players)).statusCode());
@@ -199,15 +264,15 @@ class OnlineServerTest {
         assertTrue(matches.cancel(next.id(), "test-engine-cancel")); assertFalse(matches.cancel(next.id(), "test-engine-cancel")); assertNull(matches.active(a.id())); assertEquals(0, accounts.profile(a.id()).points());
     }
 
-    @Test void theRealSharedJsEngineAuthenticatesTwoWebSocketsAndSettlesIntoPostgres() throws Exception {
-        var a = account(); var b = account(); var plan = matches.create(MatchService.Mode.RANKED, List.of(a.id(), b.id()), 0, "foundry", 1, 60);
+    @Test void theRealSharedJsEngineAuthenticatesSixWebSocketsAndSettlesTeamResultsIntoPostgres() throws Exception {
+        var people = List.of(account(), account(), account(), account(), account(), account()); var plan = matches.create(MatchService.Mode.RANKED, people.stream().map(AccountService.Profile::id).toList(), 0, "foundry", 1, 60);
         var builder = new ProcessBuilder("node", "scripts/test-online-engine.mjs").directory(Path.of(System.getProperty("project.root")).normalize().toFile()).redirectErrorStream(true);
         builder.environment().put("ONLINE_API_URL", base()); builder.environment().put("ENGINE_SECRET", ENGINE_KEY); builder.environment().put("SMOKE_MATCH_ID", plan.id().toString());
         Process process = builder.start();
         try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
             String ready = CompletableFuture.supplyAsync(() -> { try { return reader.readLine(); } catch (Exception error) { throw new RuntimeException(error); } }).get(15, TimeUnit.SECONDS);
             assertTrue(JSON.readTree(ready).get("ready").asBoolean());
-            var tickets = List.of(Map.of("ticket", matches.ticket(a.id()).ticket()), Map.of("ticket", matches.ticket(b.id()).ticket()));
+            var tickets = people.stream().map(p -> Map.of("ticket", matches.ticket(p.id()).ticket())).toList();
             process.getOutputStream().write((JSON.writeValueAsString(tickets) + "\n").getBytes(StandardCharsets.UTF_8)); process.getOutputStream().flush();
             String completed = CompletableFuture.supplyAsync(() -> { try { return reader.readLine(); } catch (Exception error) { throw new RuntimeException(error); } }).get(15, TimeUnit.SECONDS);
             assertTrue(process.waitFor(10, TimeUnit.SECONDS)); assertEquals(0, process.exitValue(), "Shared engine integration failed");

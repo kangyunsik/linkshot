@@ -10,8 +10,10 @@ if (publicUrl.protocol !== 'http:' || publicUrl.username || publicUrl.password |
 const port = Number(process.env.PREVIEW_PORT) || Number(publicUrl.port) || 4173;
 publicUrl.port = String(port);
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.json': 'application/json', '.svg': 'image/svg+xml' };
+let lan;
 const server = http.createServer(async (req, res) => {
   if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405); res.end(); return; }
+  if (lan && await lan.info(req, res)) return;
   try {
     const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
     const file = path.resolve(root, pathname === '/' ? 'index.html' : `.${pathname}`);
@@ -21,5 +23,6 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'HEAD') res.end(); else createReadStream(file).on('error', () => res.destroy()).pipe(res);
   } catch { res.writeHead(404); res.end('Not found. Run npm run build first.'); }
 });
+if (process.env.LAN_ENGINE_URL) { const { installLanProxy } = await import('./lan-proxy.mjs'); lan = installLanProxy(server, process.env.LAN_ENGINE_URL); }
 server.listen(port, '0.0.0.0', () => { console.log(`FE 미리보기: ${publicUrl.origin} · 종료: Ctrl+C`); console.log(`이 PC에서 접속: http://127.0.0.1:${port}`); });
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { server.close(() => process.exit(0)); server.closeAllConnections(); });
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { lan?.close(); server.close(() => process.exit(0)); server.closeAllConnections(); });

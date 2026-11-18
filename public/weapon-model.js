@@ -5,6 +5,8 @@ import { createViewmodelHands } from './viewmodel-hands.js';
 import { createFirearmBody } from './firearm-design.js';
 import { createKnifeBody } from './knife-design.js';
 import { NETWORK_PROTOCOL } from '/shared/world.js';
+import { createSuppressor, setModelSuppressor } from './weapon-attachments.js';
+export { setModelSuppressor } from './weapon-attachments.js';
 
 export function disposeModel(group) {
   const geometries = new Set(), materials = new Set();
@@ -49,7 +51,7 @@ export class WeaponModels {
     return this.textures.get(key);
   }
 
-  create(weaponId, skinId, firstPerson = false, outfitId = 'field', characterId = 'male', handsSkinId = skinId) {
+  create(weaponId, skinId, firstPerson = false, outfitId = 'field', characterId = 'male', handsSkinId = skinId, suppressor = false) {
     const weapon = getWeapon(weaponId), skin = getSkin(skinId), group = new THREE.Group(), shape = weaponModel(weapon); group.name = `weapon-${weapon.id}`;
     const material = (color, options = {}) => new THREE.MeshStandardMaterial({ color, roughness: .63, metalness: .35, ...(firstPerson ? { fog: false } : {}), ...options });
     const metal = this.finishTexture('metal'), polymer = this.finishTexture('polymer');
@@ -68,13 +70,16 @@ export class WeaponModels {
       luminous: material(skin.accent, { emissive: skin.accent, emissiveIntensity: .7 }),
     };
     const { body, muzzleZ, aimHeight } = weapon.melee ? createKnifeBody(this, group, materials) : createFirearmBody(this, group, weapon, shape, materials);
-    const used = new Set(); body.traverse((object) => { if (object.material) used.add(object.material); });
+    const attachment = weapon.melee ? null : createSuppressor(this, weapon, muzzleZ, materials.black);
+    if (attachment) { if (group.userData.breakAction) group.userData.breakAction.attach(attachment.mesh); else group.add(attachment.mesh); }
+    const used = new Set(); group.traverse((object) => { if (object.material) used.add(object.material); });
     for (const material of Object.values(materials)) if (!used.has(material)) material.dispose();
     if (firstPerson) createViewmodelHands(this, { group, shape, weaponId: weapon.id, outfit: getOutfit(outfitId), skin: getSkin(handsSkinId), character: getCharacter(characterId) });
     const muzzle = new THREE.Object3D(); muzzle.position.set(0, .02, muzzleZ); group.add(muzzle);
     const flash = new THREE.Mesh(new THREE.ConeGeometry(shape === 'shotgun' ? .11 : .07, .23, 5), new THREE.MeshBasicMaterial({ color: '#ffda98', transparent: true, opacity: .85, blending: THREE.AdditiveBlending, depthWrite: false }));
     flash.rotation.x = -Math.PI / 2; flash.position.set(0, .02, muzzleZ - .10); flash.visible = false; group.add(flash);
-    Object.assign(group.userData, { weaponId: weapon.id, modelBase: shape, skinId: skin.id, characterId: getCharacter(characterId).id, firearmBody: body, muzzle, flash, aimHeight, aimPoint: new THREE.Vector3(0, aimHeight, .015) });
+    Object.assign(group.userData, { weaponId: weapon.id, modelBase: shape, skinId: skin.id, characterId: getCharacter(characterId).id, firearmBody: body, muzzle, flash, baseMuzzleZ: muzzleZ, suppressorMesh: attachment?.mesh, suppressorTip: attachment?.tip, aimHeight, aimPoint: new THREE.Vector3(0, aimHeight, .015) });
+    setModelSuppressor(group, suppressor);
     group.traverse((child) => { child.castShadow = !firstPerson; child.receiveShadow = !firstPerson; if (firstPerson) { child.renderOrder = 10; child.frustumCulled = false; } });
     return group;
   }
@@ -93,15 +98,28 @@ export class ArmoryPreview {
     const rim = new THREE.DirectionalLight('#85d9df', 3); rim.position.set(-2, 1, -2); this.scene.add(rim);
     this.resize = () => { const rect = canvas.getBoundingClientRect(); this.renderer.setSize(Math.max(1, rect.width), Math.max(1, rect.height), false); this.camera.aspect = rect.width / Math.max(1, rect.height); this.camera.updateProjectionMatrix(); };
     this.observer = new ResizeObserver(this.resize); this.observer.observe(canvas); this.resize();
-    const animate = (time) => { if (this.stopped) return; this.frame = requestAnimationFrame(animate); if (this.model) this.model.rotation.y = -.15 + Math.sin(time / 3000) * .22; this.renderer.render(this.scene, this.camera); }; this.frame = requestAnimationFrame(animate);
+    this.visible = true; this.visibility = new IntersectionObserver(([entry]) => { this.visible = entry.isIntersecting; }); this.visibility.observe(canvas);
+    const animate = (time) => { if (this.stopped) return; this.frame = requestAnimationFrame(animate); if (!this.visible || document.hidden) return; if (this.model) this.model.rotation.y = -.15 + Math.sin(time / 3000) * .22; this.renderer.render(this.scene, this.camera); }; this.frame = requestAnimationFrame(animate);
   }
-  set(weaponId, skinId) {
+  set(weaponId, skinId, suppressor = false) {
+    const key = `${weaponId}/${skinId}/${suppressor}`; if (key === this.key) return; this.key = key;
     if (this.model) { this.scene.remove(this.model); disposeModel(this.model); }
-    this.model = this.models.create(weaponId, skinId); this.scene.add(this.model);
+    this.model = this.models.create(weaponId, skinId, false, 'field', 'male', skinId, suppressor); this.scene.add(this.model);
     this.camera.position.set(getWeapon(weaponId).type === 'SNIPER' ? 1.9 : getWeapon(weaponId).type === 'LMG' ? 1.65 : 1.45, .48, 1.25); this.camera.lookAt(0, -.01, -.25);
   }
+  drawThumbnails(cards, skinId) {
+    if (this.thumbnailSkin === skinId || !this.model) return;
+    this.thumbnailSkin = skinId;
+    const selected = { weaponId: this.model.userData.weaponId, skinId: this.model.userData.skinId, suppressor: this.model.userData.suppressor === true };
+    for (const card of cards) {
+      const canvas = card.querySelector('canvas'); if (!canvas) continue;
+      this.set(card.dataset.weapon, skinId); this.renderer.render(this.scene, this.camera);
+      canvas.getContext('2d').drawImage(this.canvas, 0, 0, canvas.width, canvas.height);
+    }
+    this.set(selected.weaponId, selected.skinId, selected.suppressor); this.renderer.render(this.scene, this.camera);
+  }
   dispose() {
-    this.stopped = true; cancelAnimationFrame(this.frame); this.observer.disconnect();
+    this.stopped = true; cancelAnimationFrame(this.frame); this.observer.disconnect(); this.visibility.disconnect();
     if (this.model) disposeModel(this.model); this.models.dispose(); this.renderer.dispose();
   }
 }

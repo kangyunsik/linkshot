@@ -4,6 +4,7 @@ import { roomLobbyAction } from './room-lobby.js';
 import { isWeaponId } from '../shared/catalog.js';
 import { NETWORK_PROTOCOL } from '../shared/world.js';
 import { isTeamGame } from '../shared/game-types.js';
+import { highestRank } from '../shared/ranks.js';
 
 export class CustomGateway {
   constructor({ send, clock, capacity }) {
@@ -36,7 +37,8 @@ export class CustomGateway {
       const next = data.type === 'create' ? await this.directory.create(data, connection.account) : await this.directory.authorize(data.code, data.password, connection.account);
       if (connection.socket.readyState !== WebSocket.OPEN) { this.directory.discardEmpty(next); return; }
       const profile = connection.profile;
-      next.addPlayer(profile.id, profile.callsign, false, { ownedWeapons: profile.ownedWeapons, weaponKills: profile.weaponKills, outfitId: profile.outfitId, characterId: profile.characterId, weaponId: isWeaponId(data.weaponId) ? data.weaponId : 'rifle', skinId: data.skinId });
+      next.addPlayer(profile.id, profile.callsign, false, { ownedWeapons: profile.ownedWeapons, weaponKills: profile.weaponKills, suppressedWeapons: profile.suppressedWeapons, suppressor: data.suppressor, outfitId: profile.outfitId, characterId: profile.characterId, weaponId: isWeaponId(data.weaponId) ? data.weaponId : 'rifle', skinId: data.skinId });
+      next.players.get(profile.id).rankBadge = highestRank(profile);
       if (next.staging && ['blue', 'red'].includes(data.teamId) && isTeamGame(next.gameType) && next.gameType !== 'defense') next.team(profile.id, profile.id, data.teamId);
       connection.roomCode = next.code;
       this.send(connection.socket, { ...next.snapshot(false), type: 'joined', id: profile.id, events: [], impacts: next.impactHistory() }); this.publishList();

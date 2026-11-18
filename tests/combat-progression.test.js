@@ -7,10 +7,11 @@ import { RULES, playerPose } from '../shared/world.js';
 import { EMPTY_INPUT, movePlayer } from '../shared/movement.js';
 import { ShotFeedback } from '../public/shot-feedback.js';
 
-test('twenty sequential slots swap PX–9/PD–9 and only four starters are free', () => {
-  assert.deepEqual(WEAPONS.map((weapon) => weapon.slot), Array.from({ length: 20 }, (_, i) => i + 1));
+test('twenty-three sequential slots preserve the original twenty and only four starters are free', () => {
+  assert.deepEqual(WEAPONS.map((weapon) => weapon.slot), Array.from({ length: 23 }, (_, i) => i + 1));
   assert.equal(WEAPONS[1].id, 'pistol'); assert.equal(WEAPONS[4].id, 'smg'); assert.equal(WEAPONS[19].id, 'glock18c');
   assert.equal(getWeapon('glock18c').automatic, true); assert.equal(getWeapon('glock18c').magazine, 33);
+  assert.deepEqual(WEAPONS.slice(20).map((weapon) => weapon.id), ['an94', 's686', 'vector']);
   assert.deepEqual(FREE_WEAPON_IDS, ['rifle', 'pistol', 'shotgun', 'sniper']);
   for (const weapon of WEAPONS.slice(4)) assert.ok(weapon.price >= 600 && weapon.price <= 2000);
 });

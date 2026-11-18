@@ -15,7 +15,7 @@ test('lobby, generated assets, map, settings persistence and responsive layout',
   await expect(page).toHaveTitle(/^LINKSHOT/);
   await expect(page.locator('.page-heading h1, .page-heading p')).toHaveCount(0);
   const asset = await page.request.get('/assets/foundry-hero.png'); expect(asset.ok()).toBeTruthy(); expect(asset.headers()['content-type']).toBe('image/png');
-  await page.getByRole('button', { name: '전장 브리핑', exact: true }).click();
+  await page.locator('#briefing-button').click();
   await expect(page.locator('#briefing-dialog')).toBeVisible();
   await page.getByRole('button', { name: '맵 브리핑 닫기' }).click();
   await page.getByRole('button', { name: '설정', exact: true }).first().click();

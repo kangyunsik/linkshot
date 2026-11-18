@@ -1,10 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileViewmodelPrograms, renderViewmodelFrame, normalizeWeaponHand } from '../public/viewmodel-renderer.js';
+import { compileViewmodelPrograms, renderViewmodelFrame, normalizeWeaponHand, VIEWMODEL_HIP_OFFSET, VIEWMODEL_ADS_Z, VIEWMODEL_SNIPER_OFFSET, viewmodelHipOffset } from '../public/viewmodel-renderer.js';
 
 test('weapon handedness defaults safely to right without accepting arbitrary saved transforms', () => {
   assert.equal(normalizeWeaponHand('left'), 'left');
   for (const value of ['right', undefined, null, 1, -1, 'LEFT', {}, '__proto__']) assert.equal(normalizeWeaponHand(value), 'right');
+});
+
+test('the idle viewmodel is lower and farther outward without changing ADS eye distance', () => {
+  assert.ok(VIEWMODEL_HIP_OFFSET.x > .18); assert.ok(VIEWMODEL_HIP_OFFSET.y < -.20); assert.equal(VIEWMODEL_HIP_OFFSET.z, -.54); assert.equal(VIEWMODEL_ADS_Z, -.35); assert.equal(Object.isFrozen(VIEWMODEL_HIP_OFFSET), true);
+});
+test('all sniper hip models clear more of the center and use the same mirror transform for the left hand', () => {
+  assert.equal(viewmodelHipOffset({ type: 'SNIPER' }), VIEWMODEL_SNIPER_OFFSET);
+  assert.equal(viewmodelHipOffset({ type: 'ASSAULT' }), VIEWMODEL_HIP_OFFSET);
+  assert.ok(VIEWMODEL_SNIPER_OFFSET.x > VIEWMODEL_HIP_OFFSET.x); assert.ok(VIEWMODEL_SNIPER_OFFSET.y < VIEWMODEL_HIP_OFFSET.y);
+  assert.equal(Object.isFrozen(VIEWMODEL_SNIPER_OFFSET), true);
 });
 
 function fixture() {

@@ -628,6 +628,93 @@
         }
       ],
       "sha256": "b7bd7288ea2f64d509f971f7d6312592c6fd8e433bdc82d1267ad07e5767a988"
+    },
+    {
+      "file": "reload-an94.wav",
+      "weaponId": "an94",
+      "seconds": 2.35,
+      "fixedPitch": 1.07,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "insert",
+          "at": 1.12
+        },
+        {
+          "part": "feed",
+          "at": 1.45
+        },
+        {
+          "part": "back",
+          "at": 1.82
+        },
+        {
+          "part": "lock",
+          "at": 2.18
+        }
+      ],
+      "sha256": "956463bca9b78a419d9faffd203a1f601d00a1e3164ba5e970b0bc1887c57f94"
+    },
+    {
+      "file": "reload-s686.wav",
+      "weaponId": "s686",
+      "seconds": 2.65,
+      "fixedPitch": 0.98,
+      "stages": [
+        {
+          "part": "back",
+          "at": 0.02
+        },
+        {
+          "part": "handle",
+          "at": 0.3
+        },
+        {
+          "part": "seat",
+          "at": 0.75
+        },
+        {
+          "part": "seat2",
+          "at": 1.13
+        },
+        {
+          "part": "close",
+          "at": 2.2
+        },
+        {
+          "part": "lock",
+          "at": 2.46
+        }
+      ],
+      "sha256": "a5a68eb891c8b9452d9e44e82485eaa291c58b64c70e28da393110b6f369031b"
+    },
+    {
+      "file": "reload-vector.wav",
+      "weaponId": "vector",
+      "seconds": 1.95,
+      "fixedPitch": 1.25,
+      "stages": [
+        {
+          "part": "release",
+          "at": 0.02
+        },
+        {
+          "part": "insert",
+          "at": 0.94
+        },
+        {
+          "part": "pull",
+          "at": 1.45
+        },
+        {
+          "part": "lock",
+          "at": 1.78
+        }
+      ],
+      "sha256": "f4a07b7bec38e3be2be795fe26cf0ce95a853cd2069a31455114e05343b3a70b"
     }
   ]
 }

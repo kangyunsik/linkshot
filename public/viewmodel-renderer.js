@@ -1,5 +1,9 @@
 export const VIEWMODEL_LAYER = 1;
 export const normalizeWeaponHand = (value) => value === 'left' ? 'left' : 'right';
+export const VIEWMODEL_HIP_OFFSET = Object.freeze({ x: .26, y: -.28, z: -.54 });
+export const VIEWMODEL_SNIPER_OFFSET = Object.freeze({ x: .37, y: -.37, z: -.48 });
+export const viewmodelHipOffset = (weapon) => weapon.type === 'SNIPER' ? VIEWMODEL_SNIPER_OFFSET : VIEWMODEL_HIP_OFFSET;
+export const VIEWMODEL_ADS_Z = -.35;
 
 export async function compileViewmodelPrograms(renderer, scene, camera) {
   const mask = camera.layers.mask;

@@ -36,6 +36,12 @@ test('canonical online IDs and profile callsigns retain all 24 characters in rea
   pending = frame(b, 'joined'); b.send(JSON.stringify({ type: 'join', code: created.room.code })); const joined = await pending;
   for (const profile of f.profiles) assert.equal(joined.players.find((p) => p.id === profile.id).name, profile.callsign);
 });
+test('custom rooms display the highest canonical rank and ignore a forged badge in the client loadout', async (t) => {
+  const f = await fixture(t); f.profiles[0].competitive = { ffa: { rankTier: 'PLATINUM', rankDivision: 4, rankPoints: 10 }, teams: { rankTier: 'GOLD', rankDivision: 1, rankPoints: 80 } };
+  const socket = await f.connect(f.profiles[0]); const pending = frame(socket, 'joined');
+  socket.send(JSON.stringify({ type: 'create', bots: 0, rankBadge: { tier: 'CHALLENGER', ladder: 'teams', division: 1 } }));
+  const state = await pending; assert.deepEqual(state.players[0].rankBadge, { tier: 'PLATINUM', ladder: 'ffa', division: 4 });
+});
 
 test('WAN staging keeps canonical accounts in a server-owned team lobby until readiness/start or explicit late entry', async (t) => {
   const f = await fixture(t), a = await f.connect(f.profiles[0]), b = await f.connect(f.profiles[1]);
@@ -49,6 +55,18 @@ test('WAN staging keeps canonical accounts in a server-owned team lobby until re
   const lateProfile = { ...f.profiles[0], id: randomUUID(), callsign: 'LATE' }, c = await f.connect(lateProfile);
   waiting = frame(c, 'joined'); c.send(JSON.stringify({ type: 'join', code: room.code })); const late = await waiting; assert.equal(late.players.find((p) => p.id === lateProfile.id).roomStatus, 'waiting');
   room.applyDamage(room.players.get(f.profiles[0].id), room.players.get(f.profiles[1].id), 100, false, {}, getWeapon('rifle'), Date.now()); assert.equal(room.phase, 'ended'); assert.equal(room.result.rewards[lateProfile.id], undefined); assert.ok(Object.values(room.result.rewards).every((reward) => reward.points === 0)); assert.equal(f.settlements.length, 0);
+});
+
+test('WAN custom staging accepts earned suppressors and rejects forged mastery without changing permanent preferences', async (t) => {
+  const f = await fixture(t); Object.assign(f.profiles[0], { weaponKills: { rifle: 1550 }, suppressedWeapons: ['rifle'] }); Object.assign(f.profiles[1], { weaponKills: { rifle: 1549 }, suppressedWeapons: ['rifle'] });
+  const a = await f.connect(f.profiles[0]), b = await f.connect(f.profiles[1]);
+  let waiting = frame(a, 'joined'); a.send(JSON.stringify({ type: 'create', staging: true, bots: 0, weaponId: 'rifle', suppressor: true })); const joined = await waiting, room = f.app.custom.directory.rooms.get(joined.room.code);
+  assert.equal(joined.players.find((player) => player.id === f.profiles[0].id).suppressor, true);
+  waiting = frame(b, 'joined'); b.send(JSON.stringify({ type: 'join', code: room.code, weaponId: 'rifle', suppressor: true, weaponKills: { rifle: 999999 } })); const guest = await waiting;
+  assert.equal(guest.players.find((player) => player.id === f.profiles[1].id).suppressor, false);
+  waiting = frame(b, 'error'); b.send(JSON.stringify({ type: 'room-loadout', weaponId: 'rifle', suppressor: true, weaponKills: { rifle: 1550 } })); assert.match((await waiting).message, /Lv.5/);
+  const done = frame(a, 'pong'); a.send(JSON.stringify({ type: 'room-loadout', weaponId: 'rifle', suppressor: false })); a.send(JSON.stringify({ type: 'ping' })); await done;
+  assert.equal(room.players.get(f.profiles[0].id).suppressor, false); assert.deepEqual(f.profiles[0].suppressedWeapons, ['rifle']); assert.equal(f.profiles[1].weaponKills.rifle, 1549); assert.equal(f.settlements.length, 0);
 });
 
 for (const [gameType, mapId] of [['hardpoint', 'relay'], ['defense', 'bastion']]) test(`authenticated WAN ${gameType} enforces map compatibility, canonical teams and noncompetitive settlement`, async (t) => {

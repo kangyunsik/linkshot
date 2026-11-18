@@ -26,10 +26,12 @@ export class OnlineApi {
   queueHeartbeat() { return this.request('/api/queue/heartbeat', { method: 'POST' }); }
   ticket() { return this.request('/api/match/ticket', { method: 'POST' }); }
   customTicket() { return this.request('/api/custom/ticket', { method: 'POST' }); }
+  rankBadgeTicket(engineId) { return this.request('/api/account/rank-badge-ticket', { method: 'POST', body: { engineId } }); }
   receipt(id) { return this.request(`/api/results/${encodeURIComponent(id)}`); }
   history() { return this.request('/api/results'); }
   register(username, password) { return this.request('/api/auth/register', { method: 'POST', body: { username, password } }); }
   updateCallsign(callsign) { return this.request('/api/account/callsign', { method: 'POST', body: { callsign } }); }
+  setSuppressor(weaponId, equipped) { return this.request(`/api/account/weapons/${encodeURIComponent(weaponId)}/suppressor`, { method: 'POST', body: { equipped } }); }
   async login(username, password) { const result = await this.request('/api/auth/login', { method: 'POST', form: true, body: { username, password } }); this.token = null; await this.refreshCsrf(); return result.profile; }
   async logout() { await this.request('/api/auth/logout', { method: 'POST' }); this.token = null; }
 }

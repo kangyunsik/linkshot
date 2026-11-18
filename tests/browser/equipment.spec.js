@@ -54,6 +54,7 @@ test('a legacy fallback knife still works, but is never equipped by pressing G w
 });
 
 test('the static solo worker keeps the current gun when G has nothing to swap with, without WebSocket or API traffic', async ({ page }) => {
+  await page.route('**/runtime-config.js', (route) => route.fulfill({ contentType: 'text/javascript', body: "export const APP_MODE = 'solo'; export const PROFILE_STORAGE = 'browser';" }));
   const sockets = [], apis = [], errors = []; page.on('websocket', (socket) => sockets.push(socket.url())); page.on('pageerror', (error) => errors.push(error.message)); page.on('request', (request) => { if (new URL(request.url()).pathname.startsWith('/api/')) apis.push(request.url()); });
   await page.goto(`http://127.0.0.1:${Number(process.env.PREVIEW_PORT) || 4173}`); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
   await page.getByRole('button', { name: '연습전 시작', exact: true }).click(); await expect(page.locator('#pause-overlay')).toBeVisible(); await page.getByRole('button', { name: '교전 시작', exact: true }).click();

@@ -6,31 +6,33 @@ const muzzleEnds = { rifle: -.82, smg: -.58, shotgun: -.97, sniper: -1.3, pistol
 
 function makeTemplate(weapon, shape) {
   const g = new FirearmGeometry(), id = weapon.id;
-  const famas = id === 'famas', ak = id === 'ak47', awp = id === 'awp', m82 = id === 'm82', p90 = id === 'p90', mp5 = id === 'mp5', ump = id === 'ump45';
+  const famas = id === 'famas', ak = id === 'ak47', an94 = id === 'an94', s686 = id === 's686', vector = id === 'vector', awp = id === 'awp', m82 = id === 'm82', p90 = id === 'p90', mp5 = id === 'mp5', ump = id === 'ump45';
   const aimHeight = famas ? .132 : shape === 'sniper' ? .195 : shape === 'shotgun' ? .11 : shape === 'pistol' ? id === 'deagle' ? .12 : .085 : shape === 'lmg' || shape === 'dmr' ? .16 : .14;
-  const muzzleZ = m82 ? -1.52 : id === 'deagle' ? -.40 : muzzleEnds[shape];
+  const muzzleZ = an94 ? -.86 : s686 ? -.98 : vector ? -.51 : m82 ? -1.52 : id === 'deagle' ? -.40 : muzzleEnds[shape];
   const rail = (length, z, y = .073) => {
     g.block('low-rail', [.057, .011, length], [0, y, z]);
     for (let i = 0; i < length / .04; i++) g.block('rail-tooth', [.061, .005, .014], [0, y + .008, z + length / 2 - i * .04], 'steel', 'frame', .0007);
   };
-  const irons = (height, rear = .13, front = -.42) => {
-    const base = famas ? .092 : mp5 ? .045 : .055, top = height - .019;
+  const irons = (height, rear = .13, front = -.42, frontParent = 'frame') => {
+    const base = famas ? .092 : mp5 ? .045 : .055, openingHalf = .008, bevel = .0007, top = height - openingHalf;
     // The old MP5/shotgun rear pedestal was a solid tall rectangle right in
     // front of the eye. An open fork supports the notch without that wall.
     g.block('rear-sight-pedestal', [.05, .006, .018], [0, base, rear], 'black', 'frame', .0007);
     for (const side of [-1, 1]) {
       g.block('rear-sight-open-leg', [.005, top - base, .010], [side * .021, (top + base) / 2, rear], 'black', 'frame', .0007);
-      g.block('rear-sight-ear', [.005, .016, .010], [side * .018, height - .008, rear], 'black', 'frame', .0007);
+      // Center the actual opening (including bevels) on the aiming axis,
+      // rather than placing that axis along the top edge of the rear ears.
+      g.block('rear-sight-ear', [.005, openingHalf * 2, .010], [side * .018, height - bevel, rear], 'black', 'frame', bevel);
     }
-    g.block('rear-sight-notch', [.04, .0035, .010], [0, height - .018, rear], 'black', 'frame', .0007);
+    g.block('rear-sight-notch', [.04, .0035, .010], [0, height - openingHalf - .0035 / 2 - bevel, rear], 'black', 'frame', bevel);
     const supportBase = ak ? .060 : famas ? .053 : mp5 ? .026 : .040;
     const towerBase = ak ? .084 : famas ? .083 : mp5 ? .079 : .064, towerTop = height - .018;
-    g.block('front-sight-foot', [.04, .006, .022], [0, supportBase, front], 'black', 'frame', .0007);
-    for (const side of [-1, 1]) g.block('front-sight-open-leg', [.005, towerBase - supportBase, .016], [side * .014, (towerBase + supportBase) / 2, front], 'black', 'frame', .0007);
-    g.block('front-sight-bridge', [.033, .0035, .018], [0, towerBase, front], 'black', 'frame', .0007);
-    g.block('front-sight-tower', [.008, towerTop - towerBase, .014], [0, (towerBase + towerTop) / 2, front], 'black', 'frame', .0007);
-    g.block('front-sight-post', [.0035, .018, .007], [0, height - .0097, front], 'steel', 'frame', .0007);
-    g.ring('front-sight-hood', .0165, .0018, [0, height - .006, front - .004]);
+    g.block('front-sight-foot', [.04, .006, .022], [0, supportBase, front], 'black', frontParent, .0007);
+    for (const side of [-1, 1]) g.block('front-sight-open-leg', [.005, towerBase - supportBase, .016], [side * .014, (towerBase + supportBase) / 2, front], 'black', frontParent, .0007);
+    g.block('front-sight-bridge', [.033, .0035, .018], [0, towerBase, front], 'black', frontParent, .0007);
+    g.block('front-sight-tower', [.008, towerTop - towerBase, .014], [0, (towerBase + towerTop) / 2, front], 'black', frontParent, .0007);
+    g.block('front-sight-post', [.0035, .018, .007], [0, height - .0097, front], 'steel', frontParent, .0007);
+    g.ring('front-sight-hood', .0165, .0018, [0, height, front - .004], 'black', frontParent);
   };
   const opticMount = (height, z, frameHeight = .063, base = shape === 'lmg' ? .092 : p90 ? .106 : .079, name = 'optic-foot') => {
     g.block(name, [.054, .008, .055], [0, base, z], 'black', 'frame', .0012);
@@ -93,7 +95,11 @@ function makeTemplate(weapon, shape) {
   };
 
   if (shape === 'rifle') {
-    if (famas) {
+    if (an94) {
+      receiver(.116, .17, -.29); handguard(-.55, -.27, .096, 'plate'); stock(false, .37); magazine('rifle', -.10);
+      g.profile('an94-reciprocating-upper', [[-.30, .035], [.105, .035], [.145, .052], [.105, .071], [-.26, .071], [-.30, .054]], .093, 'plate', 'frame', { bevel: .003, round: .005 });
+      g.block('an94-canted-magwell', [.094, .028, .12], [0, -.048, -.095]); rail(.45, -.17, .079); optic();
+    } else if (famas) {
       g.profile('famas-bullpup-shell', [[-.53, -.023], [-.48, -.058], [.27, -.068], [.36, -.038], [.36, .035], [.29, .065], [-.43, .058], [-.53, .028]], .105, 'coat', 'frame', { bevel: .006, round: .012 });
       g.profile('famas-low-carry-handle', [[-.25, .069], [-.23, .097], [-.19, .111], [.135, .111], [.16, .096], [.17, .069]], .028, 'black', 'frame', { bevel: .002, holes: [[[-.17, .079], [-.155, .093], [.11, .093], [.13, .079]]] });
       g.block('famas-butt-pad', [.109, .116, .018], [0, -.018, .371], 'rubber');
@@ -122,14 +128,29 @@ function makeTemplate(weapon, shape) {
         g.profile('mp5-lower-trigger-housing', [[-.16, -.01], [.12, -.01], [.14, -.045], [.06, -.07], [-.14, -.059]], .071, 'rubber', 'frame', { round: .009 });
         for (const side of [-1, 1]) g.tube('mp5-stock-guide', .008, .22, [side * .035, -.009, .225], 'steel');
         g.block('mp5-slim-butt-pad', [.085, .115, .017], [0, -.028, .34], 'rubber'); irons(aimHeight, .10, -.40);
+      } else if (vector) {
+        g.profile('vector-super-v-receiver', [[-.24, .034], [-.21, -.035], [-.15, -.069], [-.13, -.17], [-.035, -.196], [.025, -.12], [.035, -.047], [.16, -.045], [.18, .032], [.12, .064], [-.19, .064]], .119, 'coat', 'frame', { bevel: .005, round: .008 });
+        g.profile('vector-lower-recoil-housing', [[-.147, -.066], [-.045, -.052], [.007, -.108], [-.042, -.20], [-.13, -.178]], .10, 'rubber', 'frame', { bevel: .004, round: .007 });
       } else receiver(ump ? .113 : .099, .14, -.20);
-      handguard(-.36, -.20, .09, ump ? 'rubber' : 'plate'); magazine('rifle', -.023);
+      handguard(vector ? -.32 : -.36, vector ? -.16 : -.20, .09, ump ? 'rubber' : 'plate'); magazine('rifle', vector ? -.055 : -.023);
       if (ump) {
         g.profile('ump-folding-stock', [[.12, .017], [.30, .018], [.32, -.047], [.25, -.063], [.12, -.026]], .045, 'black', 'frame', { round: .005, holes: [[[.17, -.003], [.27, -.003], [.27, -.025], [.17, -.015]]] });
         g.block('ump-butt-pad', [.075, .11, .016], [0, -.025, .33], 'rubber');
       } else if (!mp5) stock(false, .32);
     }
     if (!mp5) { rail(.27, -.055); optic(); } barrel(-.33, .019);
+  } else if (shape === 'shotgun' && s686) {
+    receiver(.106, .15, -.23);
+    g.profile('s686-walnut-stock', [[.10, .02], [.16, .045], [.39, .04], [.42, .01], [.42, -.08], [.34, -.09], [.22, -.11], [.18, -.19], [.13, -.19], [.09, -.07]], .087, 'wood', 'frame', { bevel: .005, round: .009 });
+    g.block('s686-butt-pad', [.095, .13, .018], [0, -.022, .429], 'rubber'); g.block('s686-action-latch', [.027, .009, .045], [0, .073, .065], 'steel');
+    g.groups.set('break', [0, 0, -.15]);
+    for (const [name, y] of [['upper', .02], ['lower', -.033]]) {
+      g.tube(`s686-${name}-barrel`, .024, .715, [0, y, -.4175], 'steel', 'break');
+      g.tube(`s686-${name}-muzzle`, .030, .055, [0, y, muzzleZ + .0275 + .15], 'black', 'break', { bore: .014 });
+    }
+    g.block('s686-top-rib', [.022, .010, .67], [0, .048, -.40], 'black', 'break');
+    g.profile('s686-walnut-foreend', [[-.46, -.035], [-.40, -.067], [-.10, -.057], [-.08, -.025], [-.12, .005], [-.42, .005]], .089, 'wood', 'break', { bevel: .004, round: .008 });
+    irons(aimHeight, .105, -.88 + .15, 'break');
   } else if (shape === 'shotgun') {
     receiver(.116, .15, -.19); stock(id === 'shotgun', .40);
     g.tube('shotgun-shell-tube', .027, .65, [0, -.058, -.48], 'black');
@@ -138,7 +159,7 @@ function makeTemplate(weapon, shape) {
     for (let i = 0; i < 7; i++) g.tube('pump-rib', .058, .007, [0, 0, -.105 + i * .033], 'black', 'pump');
     for (let i = 0; i < 4; i++) g.tube('spare-shell', .012, .085, [.065, -.012, .065 - i * .035], 'brass');
     if (id === 'spas12') {
-      g.profile('spas-folded-stock', [[-.12, .093], [.34, .093], [.40, .066], [.40, .12], [.32, .129], [-.12, .117]], .032, 'black', 'frame', { bevel: .003, holes: [[[.02, .100], [.27, .100], [.27, .112], [.02, .112]]] });
+      g.profile('spas-folded-stock', [[-.12, .093], [.34, .093], [.40, .066], [.40, .12], [.32, .129], [-.12, .117]], .032, 'black', 'frame', { bevel: .003, position: [0, -.04, 0], holes: [[[.02, .100], [.27, .100], [.27, .112], [.02, .112]]] });
       handguard(-.71, -.31, .076, 'black');
     }
     irons(aimHeight, .105, -.78); barrel(-.18, .032);
@@ -159,9 +180,10 @@ function makeTemplate(weapon, shape) {
     g.profile('contoured-pistol-slide', [[deagle ? -.31 : -.27, .008], [.085, .008], [.11, .029], [.105, deagle ? .098 : .072], [-.18, deagle ? .098 : .072], [deagle ? -.31 : -.27, deagle ? .073 : .049]], width, deagle ? 'steel' : 'coat', 'slide', { bevel: .004, round: .006 });
     g.profile('polymer-pistol-frame', [[-.20, -.006], [.15, -.008], [.16, -.039], [.11, -.069], [-.15, -.063], [-.20, -.039]], .075, 'rubber', 'frame', { bevel: .004, round: .009 });
     for (const side of [-1, 1]) for (let i = 0; i < 5; i++) g.block('slide-serration', [.0018, .027, .004], [side * (width / 2 + .001), .045, .034 + i * .010], 'black', 'slide', .0003);
-    for (const side of [-1, 1]) g.block('rear-pistol-sight', [.009, .013, .018], [side * .024, aimHeight + .004, .07], 'black', 'slide');
-    g.block('front-pistol-sight', [.008, .012, .015], [0, aimHeight - .006, -.22], 'black', 'slide');
-    g.block('pistol-sight-dot', [.004, .004, .002], [0, aimHeight, -.21], 'luminous', 'slide');
+    const rearClearance = aimHeight - (deagle ? .102 : .076);
+    for (const side of [-1, 1]) g.block('rear-pistol-sight', [.009, rearClearance * 2, .018], [side * .024, aimHeight - .0018, .07], 'black', 'slide');
+    g.block('front-pistol-sight', [.008, .012, .015], [0, aimHeight - .006 - .0016, -.22], 'black', 'slide');
+    g.block('pistol-sight-dot', [.004, .004, .002], [0, aimHeight - .004, -.21], 'luminous', 'slide');
     if (glock) { magazine('pistol', .115); for (const z of [-.17, -.20]) g.block('glock-slide-port', [.043, .002, .017], [0, .074, z], 'black', 'slide'); }
     else g.block('pistol-magazine-floorplate', [.083, .019, .073], [0, -.215, .135], 'black');
     barrel(-.24, deagle ? .023 : .017);
@@ -183,7 +205,7 @@ function makeTemplate(weapon, shape) {
   }
 
   // Shared grip/trigger landmarks retain the already approved hand placement.
-  if (id !== 'm14') g.profile('ergonomic-pistol-grip', [[.082, -.057], [.159, -.062], [.186, -.207], [.163, -.224], [.10, -.211], [.077, -.09]], .069, 'rubber', 'frame', { bevel: .006, round: .008 });
+  if (id !== 'm14' && !s686) g.profile('ergonomic-pistol-grip', [[.082, -.057], [.159, -.062], [.186, -.207], [.163, -.224], [.10, -.211], [.077, -.09]], .069, 'rubber', 'frame', { bevel: .006, round: .008 });
   g.profile('open-trigger-guard', [[.005, -.062], [.095, -.062], [.109, -.12], [.085, -.139], [.014, -.134], [.001, -.11]], .055, 'black', 'frame', { bevel: .002, holes: [[[.018, -.075], [.079, -.075], [.09, -.116], [.075, -.124], [.022, -.119]]] });
   g.block('trigger', [.01, .032, .01], [0, -.088, .049], 'steel');
   for (const side of [-1, 1]) {
@@ -202,8 +224,9 @@ export function createFirearmBody(models, group, weapon, shape, materials) {
     const geometry = models.sharedOperatorGeometry(`firearm-v2/${weapon.id}/${part.parent}/${part.slot}`, part.geometry);
     const mesh = new THREE.Mesh(geometry, materials[part.slot]); mesh.name = `${part.parent}-${part.slot}`; parents.get(part.parent).add(mesh);
   }
+  if (weapon.id === 'an94') parents.get('magazine').rotation.z = -.14;
   const reticle = new THREE.Mesh(new THREE.CircleGeometry(.00115, 8), materials.luminous); reticle.name = 'sight-reference'; reticle.position.set(0, template.aimHeight, .025); body.add(reticle);
-  Object.assign(group.userData, { magazine: parents.get('magazine'), magazineExtras: [], pump: parents.get('pump'), slide: parents.get('slide'), reticle, design: 'sculpted-firearms-v2' });
+  Object.assign(group.userData, { magazine: parents.get('magazine'), magazineExtras: [], pump: parents.get('pump'), breakAction: parents.get('break'), slide: parents.get('slide'), reticle, design: 'sculpted-firearms-v2' });
   body.userData.features = template.features;
   return { body, muzzleZ: template.muzzleZ, aimHeight: template.aimHeight };
 }

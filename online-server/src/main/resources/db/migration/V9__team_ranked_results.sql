@@ -1,0 +1,10 @@
+ALTER TABLE online_matches ADD COLUMN game_type VARCHAR(16) NOT NULL DEFAULT 'ffa' CHECK (game_type IN ('ffa', 'teams'));
+ALTER TABLE match_players ADD COLUMN team_id VARCHAR(4) CHECK (team_id IN ('blue', 'red'));
+ALTER TABLE match_results ADD COLUMN team_id VARCHAR(4) CHECK (team_id IN ('blue', 'red'));
+ALTER TABLE match_results ADD COLUMN won BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE match_results ADD COLUMN outcome VARCHAR(4) NOT NULL DEFAULT 'LOSS' CHECK (outcome IN ('WIN', 'LOSS', 'DRAW'));
+ALTER TABLE match_results ADD COLUMN rank_tier_before VARCHAR(16) NOT NULL DEFAULT 'UNRANKED';
+ALTER TABLE match_results ADD COLUMN rank_division_before INTEGER NOT NULL DEFAULT 5;
+ALTER TABLE match_results ADD COLUMN rank_points_before INTEGER NOT NULL DEFAULT 0;
+UPDATE match_results SET won = win_bonus > 0;
+UPDATE match_results SET outcome = 'WIN' WHERE won;

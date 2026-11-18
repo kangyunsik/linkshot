@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { EQUIPMENT } from '../../shared/catalog.js';
 
 test.use({ deviceScaleFactor: 2 });
 
@@ -105,14 +106,14 @@ test('every world gun and both skin-map variants reuse precompiled wall-clipping
     Object.assign(player, { x: 24, y: 0, z: 6, yaw: 0, pitch: 0 }); game.camera.position.set(21, 1.4, 8); game.camera.lookAt(24, 1.2, 6);
     const before = game.renderer.info.programs.length; let maximum = before, checked = 0;
     for (const weapon of EQUIPMENT) for (const skin of ['standard', 'circuit']) {
-      player.weaponId = weapon.id; player.weaponSkinId = skin; game.applySnapshot(room.snapshot()); const avatar = game.remote.get(player.id);
+      player.weaponId = weapon.id; player.weaponSkinId = skin; player.suppressor = !weapon.melee; game.applySnapshot(room.snapshot()); const avatar = game.remote.get(player.id);
       avatar.group.position.set(player.x, player.y, player.z); avatar.group.rotation.y = 0; poseOperator(avatar, 0); avatar.weapon.userData.flash.visible = true; avatar.weaponWall.update(game.world, avatar.group.position, 0);
       game.renderFrame(); maximum = Math.max(maximum, game.renderer.info.programs.length); checked++;
     }
     const retained = game.combat.warmup.children.filter((object) => object.userData.worldWeaponWarmup).length;
     await game.dispose(); delete window.__performance; return { before, maximum, checked, retained };
   });
-  expect(result.checked).toBe(42); expect(result.retained).toBe(42); expect(result.maximum).toBe(result.before);
+  expect(result.checked).toBe(EQUIPMENT.length * 2); expect(result.retained).toBe(EQUIPMENT.length * 2); expect(result.maximum).toBe(result.before);
 });
 
 test('static scenery batching reduces draw calls while retaining transforms, shadows and rendered silhouettes', async ({ page }) => {
