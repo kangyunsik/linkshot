@@ -146,6 +146,16 @@ test('ranked AI assignments still require explicit permission from the authorita
   const f = await fixture(t, { bots: 1 }); await assert.rejects(() => f.app.load(f.id), /Invalid authoritative/); assert.equal(f.app.matches.size, 0);
 });
 
+test('rated AI uses the frozen mode rating for all five levels and ignores browser difficulty claims', async (t) => {
+  for (const [botRating, difficulty] of [[1099, 'beginner'], [1100, 'intermediate'], [1500, 'advanced'], [1899, 'advanced'], [1900, 'expert'], [2299, 'expert'], [2300, 'extreme']]) {
+    const f = await fixture(t, { humans: 1, bots: 3, rankedAiEnabled: true, botRating });
+    const socket = await f.join(f.players[0], { botDifficulty: 'beginner' }), match = f.app.matches.get(f.id);
+    assert.equal(match.room.botDifficulty, difficulty);
+    assert.equal(socket.joined.room.botDifficulty, difficulty);
+    f.players[0].casualRating = 100; assert.equal(match.room.botDifficulty, difficulty);
+  }
+});
+
 test('a single human can play a temporary ranked AI match without it ending immediately or trusting browser AI flags', async (t) => {
   const f = await fixture(t, { humans: 1, bots: 3, rankedAiEnabled: true, botRating: 1700 }); const socket = await f.join(f.players[0], { weaponId: 'm82', bots: 7 }); const match = f.app.matches.get(f.id);
   f.app.tick(1 / 60); assert.equal(match.room.phase, 'active'); assert.equal(match.room.botDifficulty, 'advanced'); assert.equal(socket.joined.players.filter((player) => player.isBot).length, 3);

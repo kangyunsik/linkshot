@@ -31,7 +31,7 @@ export class LobbyRoom extends Room {
     this.host(id); if (this.phase === 'active') throw new Error('AI 구성은 경기 시작 전에 변경해 주세요.');
     if (data.remove === true) { const player = this.players.get(data.id); if (!player?.isBot) throw new Error('제거할 AI를 확인해 주세요.'); this.removePlayer(player.id); return; }
     const difficulty = data.difficulty ?? this.botDifficulty;
-    if (!BOT_DIFFICULTIES.some((level) => level.id === difficulty)) throw new Error('초급·중급·고급 중 AI 난이도를 선택해 주세요.');
+    if (!BOT_DIFFICULTIES.some((level) => level.id === difficulty)) throw new Error(`${BOT_DIFFICULTIES.map((level) => level.label).join('·')} 중 AI 난이도를 선택해 주세요.`);
     if (data.id !== undefined) {
       const player = this.players.get(data.id); if (!player?.isBot) throw new Error('변경할 AI를 확인해 주세요.');
       player.botDifficulty = difficulty; return;

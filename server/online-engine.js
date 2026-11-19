@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
-import { Room } from '../shared/simulation.js';
+import { Room, botDifficultyForRating } from '../shared/simulation.js';
 import { NETWORK_PROTOCOL, RULES, MATCHMAKING_MAPS as MAPS } from '../shared/world.js';
 import { isWeaponId, getWeapon, getSkin, ownsWeapon } from '../shared/catalog.js';
 import { EMPTY_INPUT, advanceTime } from '../shared/movement.js';
@@ -94,7 +94,7 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
       const gameType = plan.gameType || 'ffa';
       if (plan.gameType && plan.players.length + plan.bots !== (gameType === 'teams' ? 6 : 4)) throw new Error('Invalid competitive roster size.');
       if (!['ffa', 'teams'].includes(gameType) || gameType === 'teams' && (plan.mode !== 'RANKED' || plan.players.some((p) => !['blue', 'red'].includes(plan.teams?.[p.id])))) throw new Error('Invalid authoritative teams.');
-      const room = new OnlineRoom(id.slice(0, 5).toUpperCase(), { mode: plan.mode.toLowerCase(), gameType, mapId: plan.mapId, bots: 0, fragLimit: plan.fragLimit, roundSeconds: plan.roundSeconds, botDifficulty: average >= 1500 ? 'advanced' : average >= 1100 ? 'intermediate' : 'beginner', clock });
+      const room = new OnlineRoom(id.slice(0, 5).toUpperCase(), { mode: plan.mode.toLowerCase(), gameType, mapId: plan.mapId, bots: 0, fragLimit: plan.fragLimit, roundSeconds: plan.roundSeconds, botDifficulty: botDifficultyForRating(average), clock });
       for (const profile of plan.players) {
         const player = room.addPlayer(profile.id, profile.callsign, false, { ownedWeapons: profile.ownedWeapons, weaponKills: profile.weaponKills, suppressedWeapons: profile.suppressedWeapons, outfitId: profile.outfitId, characterId: profile.characterId });
         player.rankBadge = highestRank(profile);

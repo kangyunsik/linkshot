@@ -116,14 +116,14 @@ test('solo worker preserves bot difficulty and E-selected weapon, then accepts m
     await route.fulfill({ response, body: code });
   });
   await page.goto('/'); await expect(page.getByText('SOLO READY · LOCAL SIMULATION')).toBeVisible();
-  await page.locator('#deployment-settings-button').click(); await page.getByLabel('봇 난이도', { exact: true }).selectOption('advanced'); await page.reload();
-  await expect(page.getByLabel('봇 난이도', { exact: true })).toHaveValue('advanced');
+  await page.locator('#deployment-settings-button').click(); await expect(page.locator('#bot-difficulty option')).toHaveText(['초급', '중급', '고급', '최고급', '극한']); await page.getByLabel('봇 난이도', { exact: true }).selectOption('extreme'); await page.reload();
+  await expect(page.getByLabel('봇 난이도', { exact: true })).toHaveValue('extreme');
   await page.getByRole('button', { name: '연습전 시작', exact: true }).click(); await expect(page.locator('#respawn-overlay')).toBeVisible();
   await page.keyboard.press('KeyE'); await expect(page.locator('#respawn-loadout')).toBeVisible();
   await page.locator('#respawn-weapon-choices [data-weapon=sniper]').click();
   await expect(page.locator('#hud-weapon-name')).toHaveText('SR–1'); await expect(page.locator('#respawn-overlay')).toBeHidden();
   await expect.poll(() => page.evaluate(() => document.pointerLockElement?.id)).toBe('game-canvas');
-  expect(await page.evaluate(() => window.__soloState.room.botDifficulty)).toBe('advanced');
+  expect(await page.evaluate(() => window.__soloState.room.botDifficulty)).toBe('extreme');
   const position = await page.evaluate(() => { const p = window.__soloState.players.find((p) => p.id === 'local-operator'); return { x: p.x, z: p.z }; });
   await page.keyboard.down('KeyW');
   await expect.poll(() => page.evaluate((origin) => { const p = window.__soloState.players.find((p) => p.id === 'local-operator'); return Math.hypot(p.x - origin.x, p.z - origin.z); }, position)).toBeGreaterThan(0.8);

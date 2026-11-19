@@ -38,9 +38,9 @@ test('sniper AI braces before each aimed shot, crouches at range and repositions
   for (let i = 0; i < 60 * 16; i++) {
     const now = tick(); crouched ||= bot.crouching;
     if (shots.length && bot.moveSpeed > .2) movedAfterShot = true;
-    if (bot.lastShot === now) shots.push({ speed: bot.moveSpeed, ads: aimed, elapsed: now - (bot.botBrain.sniperSettleAt - 220), grounded: bot.grounded });
+    if (bot.lastShot === now) shots.push({ speed: bot.moveSpeed, ads: aimed, elapsed: now - bot.botBrain.sniperAimStartedAt, required: bot.botBrain.sniperSettleAt - bot.botBrain.sniperAimStartedAt, grounded: bot.grounded });
   }
-  assert.ok(shots.length >= 3); assert.ok(shots.every((shot) => shot.speed < .2 && shot.ads && shot.grounded && shot.elapsed >= 219)); assert.ok(movedAfterShot && crouched);
+  assert.ok(shots.length >= 3); assert.ok(shots.every((shot) => shot.speed < .2 && shot.ads && shot.grounded && shot.required > 0 && shot.elapsed >= shot.required - .001)); assert.ok(movedAfterShot && crouched);
 });
 
 test('full-body paths round thin L-shaped corners without cutting through walls or getting stuck', () => {

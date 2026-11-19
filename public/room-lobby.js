@@ -1,7 +1,7 @@
 import { getMap, RULES } from '/shared/world.js';
 import { TEAM_NAMES } from '/shared/teams.js';
 import { getWeapon } from '/shared/catalog.js';
-import { BOT_DIFFICULTIES } from '/shared/simulation.js';
+import { BOT_DIFFICULTIES, getBotDifficulty } from '/shared/simulation.js';
 import { isTeamGame, isObjectiveGame, gameTypeName } from '/shared/game-types.js';
 import { rankBadgeNode } from './rank-badges.js';
 
@@ -51,7 +51,7 @@ export class RoomLobbyView {
         const copy = element('div'), name = element('b', `${player.isBot ? 'AI · ' : ''}${player.name}${player.id === room.hostId ? ' / 방장' : ''}${player.id === id ? ' / 나' : ''}`);
         const badge = rankBadgeNode(player.rankBadge); if (badge) name.prepend(badge);
         const status = player.roomStatus === 'playing' ? '교전 중' : teams && !player.teamConfirmed ? '팀 선택 필요 · 임시 배정' : player.ready ? '준비 완료' : '대기 중';
-        copy.append(name, element('small', `${status} · ${getWeapon(player.weaponId).name}${player.isBot ? ` · ${player.botDifficulty === 'advanced' ? '고급' : player.botDifficulty === 'intermediate' ? '중급' : '초급'}` : ''}`)); row.append(copy);
+        copy.append(name, element('small', `${status} · ${getWeapon(player.weaponId).name}${player.isBot ? ` · ${getBotDifficulty(player.botDifficulty).label}` : ''}`)); row.append(copy);
         if (team && !defense && player.roomStatus === 'waiting' && (host || player.id === id)) {
           const select = element('select'); select.setAttribute('aria-label', `${player.name} 팀`); select.dataset.control = `team-${player.id}`;
           for (const value of ['blue', 'red']) { const option = element('option', TEAM_NAMES[value]); option.value = value; select.append(option); } select.value = player.teamId;

@@ -62,3 +62,15 @@ test('hosts edit each existing AI difficulty independently, including at full ca
   assert.equal(bots[0].botDifficulty, 'advanced'); assert.equal(room.snapshot().players.find((p) => p.id === bots[1].id).botDifficulty, 'intermediate');
   guest.ready = true; room.start(host.id); assert.equal(bots[0].botDifficulty, 'advanced'); assert.throws(() => room.bot(host.id, { id: bots[0].id, difficulty: 'beginner' }), /경기 시작 전/);
 });
+
+test('hosts can independently select highest and extreme AI, preserving both settings through match start and respawn', () => {
+  const { room, host, guest } = fixture();
+  for (const difficulty of ['expert', 'extreme']) room.bot(host.id, { teamId: 'red', difficulty });
+  const bots = [...room.players.values()].filter((p) => p.isBot);
+  assert.deepEqual(bots.map((p) => p.botDifficulty), ['expert', 'extreme']);
+  assert.deepEqual(room.snapshot().players.filter((p) => p.isBot).map((p) => p.botDifficulty), ['expert', 'extreme']);
+  guest.ready = true; room.start(host.id);
+  for (const bot of bots) room.spawn(bot);
+  assert.deepEqual(bots.map((p) => p.botDifficulty), ['expert', 'extreme']);
+  assert.ok(bots.every((p) => p.hp === 100));
+});

@@ -30,7 +30,29 @@ export function alertBotsToShot(players, shooter, origin, rays, world, now, rand
   }
 }
 
+export const BOT_OPTICS = Object.freeze({ sniperSightBonus: 40, sniperAimNearMeters: 30, sniperAimCapMs: 3200 });
+
+// Seeing an opponent is independent of the equipped firearm's bullet range.
+export function botSightRange(weapon, behavior) {
+  return behavior.sightRange + (weapon.type === 'SNIPER' ? BOT_OPTICS.sniperSightBonus : 0);
+}
+
 export function botLongRange(weapon, behavior) {
-  const extra = weapon.type === 'SNIPER' ? 45 : weapon.type === 'DMR' ? 30 : ['ASSAULT','LMG'].includes(weapon.type) ? 22 : 0;
-  return Math.min(weapon.range, behavior.firingRange + extra);
+  const sight = botSightRange(weapon, behavior);
+  const extra = weapon.type === 'DMR' ? 30 : ['ASSAULT','LMG'].includes(weapon.type) ? 22 : 0;
+  return Math.min(weapon.range, sight, weapon.type === 'SNIPER' ? sight : behavior.firingRange + extra);
+}
+
+export function botSniperAimWindow(distance, behavior) {
+  const extra = Math.max(0, (Number.isFinite(distance) ? distance : 0) - BOT_OPTICS.sniperAimNearMeters);
+  return {
+    minMs: Math.min(BOT_OPTICS.sniperAimCapMs, Math.round(behavior.sniperAimMinMs + extra * behavior.sniperAimDistanceMinMs)),
+    maxMs: Math.min(BOT_OPTICS.sniperAimCapMs, Math.round(behavior.sniperAimMaxMs + extra * behavior.sniperAimDistanceMaxMs)),
+  };
+}
+
+// The caller samples one roll per continuous aim, not a new delay each tick.
+export function botSniperAimMs(distance, behavior, roll) {
+  const { minMs, maxMs } = botSniperAimWindow(distance, behavior), mix = Number.isFinite(roll) ? Math.max(0, Math.min(1, roll)) : .5;
+  return Math.round(minMs + (maxMs - minMs) * mix);
 }

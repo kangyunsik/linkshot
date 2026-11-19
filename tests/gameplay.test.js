@@ -163,7 +163,7 @@ test('all thirty-four hollow buildings have walkable stairs, floors and roofs wi
   for (const world of MAPS) { assert.equal(world.coverWalls.length, 8); assert.ok(world.buildings.every((building) => building.solidPanels > building.windows.length)); }
 });
 
-test('beginner preserves the current AI; medium and advanced improve reaction, aim and bursts without extra HP', () => {
+test('beginner preserves the current AI; all four higher levels improve reaction, aim and bursts without extra HP', () => {
   assert.equal(BOT_DIFFICULTIES[0].behavior, BOT_BEHAVIOR); assert.equal(getBotDifficulty('__proto__').id, 'beginner');
   for (let i = 1; i < BOT_DIFFICULTIES.length; i++) {
     const before = BOT_DIFFICULTIES[i - 1].behavior, after = BOT_DIFFICULTIES[i].behavior;

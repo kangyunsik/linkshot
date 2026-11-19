@@ -30,7 +30,7 @@ test('HTTP serves the client and whitelisted modules without exposing project fi
     const response = await fetch(url); assert.equal(response.status, 200, url); const source = await response.text();
     for (const match of source.matchAll(/from\s+['"](\.\.?\/[^'"]+\.js)['"]/g)) await publicModule(new URL(match[1], url).href);
   }
-  await publicModule(`${base}/shared/simulation.js`); assert.ok(seen.has(`${base}/shared/bot-awareness.js`));
+  await publicModule(`${base}/shared/simulation.js`); assert.ok(seen.has(`${base}/shared/bot-awareness.js`)); assert.ok(seen.has(`${base}/shared/ray-index.js`));
   assert.equal((await fetch(`${base}/vendor/three.core.js`)).status, 200);
   assert.equal((await fetch(`${base}/package.json`)).status, 404);
   assert.equal((await fetch(`${base}/server/index.js`)).status, 404);

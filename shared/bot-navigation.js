@@ -73,12 +73,20 @@ function gridFor(world) {
     const blocked = nearby(data, point).some((box) => box.maxY > RULES.stepHeight && box.minY < RULES.crouchHeight && point.x > box.minX && point.x < box.maxX && point.z > box.minZ && point.z < box.maxZ);
     cells[i] = blocked ? 0 : 1;
   }
-  const grid = { width, height, minX, minZ, cells, floors, layers, cellCount, checked: new Uint32Array(size), links: new Uint32Array(size), visited: new Uint32Array(size), parents: new Int32Array(size), queue: new Int32Array(size), serial: 0 };
+  const grid = { width, height, minX, minZ, cells, floors, layers, cellCount, checked: new Uint32Array(size), links: new Uint32Array(size), visited: new Uint32Array(size), parents: new Int32Array(size), queue: new Int32Array(size), costs: new Uint32Array(size), estimates: new Uint32Array(size), heapPositions: new Int32Array(size), serial: 0 };
   grids.set(data, grid); return grid;
 }
 
 export function findPath(from, to, world = WORLD, variant = 0) {
-  const grid = gridFor(world), { width, height, minX, minZ, cells, floors, layers, cellCount, checked, links, visited, parents, queue } = grid;
+  // No grid/search is needed for a legal straight route on the same floor.
+  // Layered terrain still goes through the navigation graph and ramp links.
+  if (!world.terrain && Math.abs((from.y || 0) - (to.y || 0)) < .2 && canTraverse(from, to, world, RULES.crouchHeight)) {
+    // Preserve bounded waypoint spacing for callers that consume one point at
+    // a time, without constructing/searching the grid for a clear segment.
+    const steps = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.z - from.z) / GRID));
+    return Array.from({ length: steps }, (_, i) => ({ x: from.x + (to.x - from.x) * (i + 1) / steps, z: from.z + (to.z - from.z) * (i + 1) / steps }));
+  }
+  const grid = gridFor(world), { width, height, minX, minZ, cells, floors, layers, cellCount, checked, links, visited, parents, queue, costs, estimates, heapPositions } = grid;
   const point = (index, overrideY) => { const cell = index % cellCount; return { x: minX + cell % width * GRID, z: minZ + Math.floor(cell / width) * GRID, y: overrideY ?? floors[index] }; };
   const cell = (p) => ({ x: clamp(Math.round((p.x - minX) / GRID), 0, width - 1), z: clamp(Math.round((p.z - minZ) / GRID), 0, height - 1) });
   const nodeAt = (x, z, y) => { let best = -1, error = Infinity; for (let layer = 0; layer < layers.length; layer++) { const index = layer * cellCount + z * width + x; if (cells[index] && Math.abs(floors[index] - y) < error) { best = index; error = Math.abs(floors[index] - y); } } return best; };
@@ -94,10 +102,34 @@ export function findPath(from, to, world = WORLD, variant = 0) {
     if (reachable === undefined) return []; start = reachable;
   }
   if (++grid.serial === 0xffffffff) { visited.fill(0); grid.serial = 1; }
-  const serial = grid.serial; queue[0] = start; visited[start] = serial; parents[start] = -1;
+  const serial = grid.serial;
+  const heuristic = (index) => { const flat = index % cellCount; return Math.abs(b.x - flat % width) + Math.abs(b.z - Math.floor(flat / width)); };
+  // A* with a reusable indexed heap. The Manhattan lower bound is admissible
+  // across layers too: every graph edge moves exactly one horizontal cell.
+  // Prefer progress on equal costs, varying only ties for each bot/route.
+  const tie = (index) => {
+    if (!variant) return index;
+    let value = Math.imul(index ^ variant, 0x7feb352d);
+    value = Math.imul(value ^ value >>> 15, 0x846ca68b);
+    return (value ^ value >>> 16) >>> 0;
+  };
+  const compare = (a, b) => estimates[a] - estimates[b] || costs[b] - costs[a] || tie(a) - tie(b);
+  queue[0] = start; visited[start] = serial; parents[start] = -1; costs[start] = 0; estimates[start] = heuristic(start); heapPositions[start] = 0;
   let count = 1, closest = start, best = Infinity;
-  for (let i = 0; i < count; i++) {
-    const current = queue[i], flat = current % cellCount, x = flat % width, z = Math.floor(flat / width), distance = Math.abs(b.x - x) + Math.abs(b.z - z) + Math.abs(floors[current] - (to.y || 0)) * 6;
+  while (count) {
+    const current = queue[0], last = queue[--count];
+    if (count) {
+      let position = 0; queue[0] = last; heapPositions[last] = 0;
+      while (position * 2 + 1 < count) {
+        let child = position * 2 + 1;
+        if (child + 1 < count && compare(queue[child + 1], queue[child]) < 0) child++;
+        if (compare(queue[position], queue[child]) <= 0) break;
+        const swap = queue[position]; queue[position] = queue[child]; queue[child] = swap;
+        heapPositions[queue[position]] = position; heapPositions[swap] = child; position = child;
+      }
+    }
+    heapPositions[current] = -1;
+    const flat = current % cellCount, x = flat % width, z = Math.floor(flat / width), distance = Math.abs(b.x - x) + Math.abs(b.z - z) + Math.abs(floors[current] - (to.y || 0)) * 6;
     if (distance < best) { best = distance; closest = current; } if (current === end) break;
     // Equal-length routes need not use the same side of every obstacle. Keep
     // variant=0 stable for tools/tests, and vary only tie order, not walkability.
@@ -108,10 +140,19 @@ export function findPath(from, to, world = WORLD, variant = 0) {
       if (nx < 0 || nx >= width || nz < 0 || nz >= height) continue;
       for (let layer = 0; layer < layers.length; layer++) {
         const next = layer * cellCount + nz * width + nx, bit = 1 << (side * layers.length + layer);
-        if (!cells[next] || visited[next] === serial || Math.abs(floors[current] - floors[next]) > RULES.stepHeight + .001) continue;
+        const seen = visited[next] === serial, cost = costs[current] + 1;
+        if (!cells[next] || seen && (heapPositions[next] < 0 || cost >= costs[next]) || Math.abs(floors[current] - floors[next]) > RULES.stepHeight + .001) continue;
         if (!(checked[current] & bit)) { checked[current] |= bit; if (canTraverse(point(current), point(next), world, RULES.crouchHeight, false)) links[current] |= bit; }
         if (!(links[current] & bit)) continue;
-        visited[next] = serial; parents[next] = current; queue[count++] = next;
+        costs[next] = cost; estimates[next] = cost + heuristic(next); parents[next] = current;
+        let position = seen ? heapPositions[next] : count++;
+        visited[next] = serial; queue[position] = next; heapPositions[next] = position;
+        while (position > 0) {
+          const parent = (position - 1) >>> 1;
+          if (compare(queue[parent], next) <= 0) break;
+          queue[position] = queue[parent]; heapPositions[queue[position]] = position; position = parent;
+        }
+        queue[position] = next; heapPositions[next] = position;
       }
     }
   }

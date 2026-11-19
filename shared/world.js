@@ -2,6 +2,7 @@ import { expandBuildings } from './buildings.js';
 import { addSpawnZones } from './spawns.js';
 import { TEAM_WORLDS } from './team-worlds.js';
 import { surfaceBounds, surfaceRay, surfaceNormal } from './terrain.js';
+import { createRayIndex, indexedRayDistance } from './ray-index.js';
 export const NETWORK_PROTOCOL = 23;
 export const BULLET_MARK_RULES = Object.freeze({ lifetimeMs: 60_000, fadeMs: 6000, maxMarks: 6144, historyLimit: 2048, cellScale: 40 });
 
@@ -262,19 +263,26 @@ export function bounds(box, padding = 0) {
 
 export function rayBox(origin, direction, box, maxDistance = 100) {
   const b = 'minX' in box ? box : bounds(box);
-  let near = 0;
-  let far = maxDistance;
-  for (const [axis, lo, hi] of [['x', 'minX', 'maxX'], ['y', 'minY', 'maxY'], ['z', 'minZ', 'maxZ']]) {
-    if (Math.abs(direction[axis]) < 1e-9) {
-      if (origin[axis] < b[lo] || origin[axis] > b[hi]) return null;
-    } else {
-      let a = (b[lo] - origin[axis]) / direction[axis];
-      let c = (b[hi] - origin[axis]) / direction[axis];
-      if (a > c) [a, c] = [c, a];
-      near = Math.max(near, a);
-      far = Math.min(far, c);
-      if (near > far) return null;
-    }
+  // Hot for every bot sight ray/pellet. Avoid allocating axis arrays and using
+  // dynamic property lookups for each obstacle; keep the same slab equations.
+  let near = 0, far = maxDistance, a, c;
+  if (Math.abs(direction.x) < 1e-9) { if (origin.x < b.minX || origin.x > b.maxX) return null; }
+  else {
+    a = (b.minX - origin.x) / direction.x; c = (b.maxX - origin.x) / direction.x;
+    near = Math.max(near, Math.min(a, c)); far = Math.min(far, Math.max(a, c));
+    if (near > far) return null;
+  }
+  if (Math.abs(direction.y) < 1e-9) { if (origin.y < b.minY || origin.y > b.maxY) return null; }
+  else {
+    a = (b.minY - origin.y) / direction.y; c = (b.maxY - origin.y) / direction.y;
+    near = Math.max(near, Math.min(a, c)); far = Math.min(far, Math.max(a, c));
+    if (near > far) return null;
+  }
+  if (Math.abs(direction.z) < 1e-9) { if (origin.z < b.minZ || origin.z > b.maxZ) return null; }
+  else {
+    a = (b.minZ - origin.z) / direction.z; c = (b.maxZ - origin.z) / direction.z;
+    near = Math.max(near, Math.min(a, c)); far = Math.min(far, Math.max(a, c));
+    if (near > far) return null;
   }
   return near <= maxDistance ? surfaceRay(origin, direction, b, near, far) : null;
 }
@@ -312,11 +320,20 @@ export function aimDirection(yaw, pitch) {
 }
 
 const rayColliders = new WeakMap();
+function rayIndex(world) {
+  let index = rayColliders.get(world);
+  if (!index) {
+    index = createRayIndex(world.obstacles.map((box, i) => ({ ...bounds(box), id: box.id || `obstacle-${i}`, kind: box.kind })));
+    rayColliders.set(world, index);
+  }
+  return index;
+}
 export function wallDistance(origin, direction, maxDistance = 200, world = WORLD, details = null) {
   let nearest = maxDistance;
   if (details) details.box = null;
-  if (Object.isFrozen(world) && !rayColliders.has(world)) rayColliders.set(world, world.obstacles.map((box, index) => ({ ...bounds(box), id: box.id || `obstacle-${index}`, kind: box.kind })));
-  for (const box of rayColliders.get(world) || world.obstacles) {
+  if (Object.isFrozen(world)) return indexedRayDistance(rayIndex(world), origin, direction, maxDistance, rayBox, details);
+  // Editable worlds/tools deliberately bypass the immutable-map index.
+  for (const box of world.obstacles) {
     const hit = rayBox(origin, direction, box, nearest);
     if (hit !== null) { nearest = hit; if (details) details.box = box; }
   }
@@ -346,5 +363,11 @@ export function hasLineOfSight(a, b, world = WORLD) {
   const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
   const distance = Math.hypot(dx, dy, dz);
   if (distance < 0.001) return true;
-  return wallDistance(a, { x: dx / distance, y: dy / distance, z: dz / distance }, distance, world) >= distance - 0.01;
+  const direction = { x: dx / distance, y: dy / distance, z: dz / distance };
+  if (Object.isFrozen(world)) return indexedRayDistance(rayIndex(world), a, direction, distance, rayBox, null, true) >= distance - .01;
+  for (const box of world.obstacles) {
+    const hit = rayBox(a, direction, box, distance);
+    if (hit !== null && hit < distance - .01) return false;
+  }
+  return true;
 }
