@@ -32,7 +32,7 @@ public class MatchService {
         public Performance(String id, boolean bot, int kills, int deaths, Map<String, Integer> weaponKills, int humanKills, int humanDeaths, boolean abandoned, String teamId) { this(id, bot, kills, deaths, weaponKills, humanKills, humanDeaths, abandoned, teamId, 0); }
     }
     public record Completion(String engineId, String roundId, List<Performance> players) {}
-    public record Receipt(UUID matchId, Mode mode, int points, int completion, int killBonus, int winBonus, boolean abandoned, int casualRatingDelta, int rankPointsDelta, int casualRatingAfter, String rankTier, int rankDivision, int rankPointsAfter, int placementsPlayed, boolean won, String rankTierBefore, int rankDivisionBefore, int rankPointsBefore, String outcome, int kills, int deaths, int assists, String mapId) {}
+    public record Receipt(UUID matchId, Mode mode, int points, int completion, int killBonus, int winBonus, boolean abandoned, int casualRatingDelta, int rankPointsDelta, int casualRatingAfter, String rankTier, int rankDivision, int rankPointsAfter, int placementsPlayed, boolean won, String rankTierBefore, int rankDivisionBefore, int rankPointsBefore, String outcome, int kills, int deaths, int assists, String mapId, int ratingDelta, int ratingMultiplier) {}
     private final JdbcTemplate db;
     private final AccountService accounts;
     private final GameCatalog catalog;
@@ -163,20 +163,22 @@ public class MatchService {
         String prior = db.queryForObject("SELECT result_hash FROM online_matches WHERE id = ?", String.class, id);
         if (plan.status().equals("COMPLETED")) { if (!fingerprint.equals(prior)) throw new IllegalArgumentException("A different result was already settled"); return false; }
         if (!plan.status().equals("CLAIMED")) throw new IllegalArgumentException("Match cannot be settled");
-        Performance winner = ordered.stream().filter(player -> !player.abandoned()).sorted(Comparator.comparingInt(Performance::kills).reversed().thenComparingInt(Performance::deaths)).findFirst().orElse(null);
+        String winner = "teams".equals(plan.gameType()) ? null : RatingPolicy.winnerFfa(ordered);
         String winnerTeam = "teams".equals(plan.gameType()) ? RatingPolicy.winnerTeam(ordered) : null;
-        Map<String, AccountService.Profile> before = new TreeMap<>();
-        for (Performance player : ordered) if (!player.bot()) before.put(player.id(), accounts.profile(UUID.fromString(player.id())));
         var ratingChanges = ratings.settle(plan.mode(), ordered, plan.botRating(), plan.gameType());
         for (Performance player : ordered) {
             if (player.bot()) continue;
-            UUID account = UUID.fromString(player.id()); boolean won = !player.abandoned() && ("teams".equals(plan.gameType()) ? winnerTeam != null && winnerTeam.equals(player.teamId()) : winner != null && winner.id().equals(player.id()));
+            UUID account = UUID.fromString(player.id()); boolean won = !player.abandoned() && ("teams".equals(plan.gameType()) ? winnerTeam != null && winnerTeam.equals(player.teamId()) : player.id().equals(winner));
             int completion = player.abandoned() ? 0 : catalog.reward("completion"), killBonus = player.abandoned() ? 0 : player.kills() * catalog.reward("perKill"), winBonus = !player.abandoned() && won ? catalog.reward("victory") : 0;
             int points = completion + killBonus + winBonus; var rating = ratingChanges.get(player.id());
-            db.update("INSERT INTO match_results(match_id, account_id, kills, deaths, points, weapon_kills, abandoned, rating_delta, rank_points_delta, completion, kill_bonus, win_bonus, human_kills, human_deaths) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", id, account, player.kills(), player.deaths(), points, json.writeValueAsString(player.weaponKills()), player.abandoned(), rating.ratingDelta(), rating.pointsDelta(), completion, killBonus, winBonus, player.humanKills(), player.humanDeaths());
-            var priorProfile = before.get(player.id()).competitive().get(plan.mode() == Mode.RANKED ? "teams" : "ffa");
             String outcome = player.abandoned() ? "LOSS" : "teams".equals(plan.gameType()) && winnerTeam == null ? "DRAW" : won ? "WIN" : "LOSS";
-            db.update("UPDATE match_results SET team_id = ?, won = ?, rank_tier_before = ?, rank_division_before = ?, rank_points_before = ?, outcome = ?, assists = ? WHERE match_id = ? AND account_id = ?", player.teamId(), won, priorProfile.rankTier(), priorProfile.rankDivision(), priorProfile.rankPoints(), outcome, player.assists(), id, account);
+            db.update("""
+                INSERT INTO match_results(match_id, account_id, kills, deaths, points, weapon_kills, abandoned, rating_delta, rank_points_delta,
+                    completion, kill_bonus, win_bonus, human_kills, human_deaths, team_id, won, rank_tier_before, rank_division_before,
+                    rank_points_before, outcome, assists, rating_multiplier)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, id, account, player.kills(), player.deaths(), points, json.writeValueAsString(player.weaponKills()), player.abandoned(), rating.ratingDelta(), rating.pointsDelta(),
+                completion, killBonus, winBonus, player.humanKills(), player.humanDeaths(), player.teamId(), won, rating.tierBefore(), rating.divisionBefore(), rating.pointsBefore(), outcome, player.assists(), rating.multiplier());
             db.update("UPDATE profiles SET kills = LEAST(1000000000, kills + ?), deaths = LEAST(1000000000, deaths + ?), points = LEAST(1000000000, points + ?), rounds_played = rounds_played + 1, wins = wins + ?, active_match_id = NULL, last_match_id = ? WHERE account_id = ? AND active_match_id = ?", player.kills(), player.deaths(), points, won ? 1 : 0, id, account, id);
             var profileAfter = accounts.profile(account); var after = profileAfter.competitive().get(plan.mode() == Mode.RANKED ? "teams" : "ffa");
             db.update("UPDATE match_results SET casual_rating_after = ?, rank_tier_after = ?, rank_division_after = ?, rank_points_after = ?, placements_after = ? WHERE match_id = ? AND account_id = ?", profileAfter.casualRating(), after.rankTier(), after.rankDivision(), after.rankPoints(), after.placementsPlayed(), id, account);
@@ -236,7 +238,8 @@ public class MatchService {
     public Receipt receipt(UUID id, UUID account) {
         return db.query("SELECT r.*, m.mode, m.map_id FROM match_results r JOIN online_matches m ON m.id = r.match_id WHERE r.match_id = ? AND r.account_id = ?", (row, index) -> {
             Mode mode = Mode.valueOf(row.getString("mode"));
-            return new Receipt(id, mode, row.getInt("points"), row.getInt("completion"), row.getInt("kill_bonus"), row.getInt("win_bonus"), row.getBoolean("abandoned"), mode == Mode.CASUAL ? row.getInt("rating_delta") : 0, row.getInt("rank_points_delta"), row.getInt("casual_rating_after"), row.getString("rank_tier_after"), row.getInt("rank_division_after"), row.getInt("rank_points_after"), row.getInt("placements_after"), row.getBoolean("won"), row.getString("rank_tier_before"), row.getInt("rank_division_before"), row.getInt("rank_points_before"), row.getString("outcome"), row.getInt("kills"), row.getInt("deaths"), row.getInt("assists"), row.getString("map_id"));
+            int ratingDelta = row.getInt("rating_delta");
+            return new Receipt(id, mode, row.getInt("points"), row.getInt("completion"), row.getInt("kill_bonus"), row.getInt("win_bonus"), row.getBoolean("abandoned"), mode == Mode.CASUAL ? ratingDelta : 0, row.getInt("rank_points_delta"), row.getInt("casual_rating_after"), row.getString("rank_tier_after"), row.getInt("rank_division_after"), row.getInt("rank_points_after"), row.getInt("placements_after"), row.getBoolean("won"), row.getString("rank_tier_before"), row.getInt("rank_division_before"), row.getInt("rank_points_before"), row.getString("outcome"), row.getInt("kills"), row.getInt("deaths"), row.getInt("assists"), row.getString("map_id"), ratingDelta, row.getInt("rating_multiplier"));
         }, id, account).stream().findFirst().orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND));
     }
     public List<Receipt> history(UUID account) { return db.queryForList("SELECT r.match_id FROM match_results r JOIN online_matches m ON m.id = r.match_id WHERE r.account_id = ? ORDER BY m.completed_at DESC LIMIT 20", UUID.class, account).stream().map(id -> receipt(id, account)).toList(); }

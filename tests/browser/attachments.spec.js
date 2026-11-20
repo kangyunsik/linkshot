@@ -40,7 +40,7 @@ test('online attachment choices use account mastery and CSRF without granting un
     } else status = 404;
     return route.fulfill({ status, headers, contentType: 'application/json', body: JSON.stringify(body) });
   });
-  const errors = []; page.on('pageerror', (error) => errors.push(error.message)); await page.goto('/'); await expect(page.locator('#profile-casual-rating')).toHaveText('배치 중');
+  const errors = []; page.on('pageerror', (error) => errors.push(error.message)); await page.goto('/'); await page.locator('#dashboard-ffa').click(); await expect(page.locator('#hero-rank-tier')).toHaveText('배치 중');
   await page.getByRole('tab', { name: '랭크: 팀전 랭크', exact: true }).click(); await page.locator('#online-loadout-button').click();
   await expect(page.locator('#weapon-choices button')).toHaveCount(WEAPONS.length); await expect(page.getByLabel('온라인 소음기 장착')).toBeDisabled(); await expect(page.getByLabel('온라인 소음기 장착')).not.toBeChecked();
   await page.locator('#weapon-choices [data-weapon=vector]').click(); await expect(page.getByLabel('온라인 소음기 장착')).toBeEnabled(); await page.getByLabel('온라인 소음기 장착').check(); await expect(page.getByLabel('온라인 소음기 장착')).toBeEnabled();
@@ -56,7 +56,7 @@ test('all suppressors have hollow bores, preserve the aim axis and share owner-m
     const [THREE, { WeaponModels, disposeModel, setModelSuppressor }, { WEAPONS }] = await Promise.all([import('/vendor/three.module.js'), import('/weapon-model.js'), import('/shared/catalog.js')]);
     const models = new WeaponModels(), checks = [];
     for (const weapon of WEAPONS) {
-      const model = models.create(weapon.id, 'standard', true, 'field', 'male', 'standard', true), data = model.userData, attachment = data.suppressorMesh; model.updateMatrixWorld(true); attachment.material.side = THREE.DoubleSide;
+      const model = models.create(weapon.id, 'standard', true, 'field', 'male', true), data = model.userData, attachment = data.suppressorMesh; model.updateMatrixWorld(true); attachment.material.side = THREE.DoubleSide;
       const centers = weapon.id === 's686' ? [.02, -.033] : [.02], clearBores = centers.every((y) => new THREE.Raycaster(new THREE.Vector3(0, y, data.suppressorTip - .03), new THREE.Vector3(0, 0, 1), 0, data.baseMuzzleZ - data.suppressorTip + .04).intersectObject(attachment, false).length === 0);
       const tip = data.muzzle.position.z, height = data.aimHeight; setModelSuppressor(model, false); const restored = data.muzzle.position.z === data.baseMuzzleZ && !attachment.visible && data.flash.scale.x === 1;
       setModelSuppressor(model, true); checks.push({ id: weapon.id, clearBores, restored, extension: data.baseMuzzleZ - tip, aimUnchanged: data.aimHeight === height, flash: data.flash.scale.x, visible: attachment.visible, finite: [...attachment.geometry.getAttribute('position').array].every(Number.isFinite) });

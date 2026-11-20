@@ -7,7 +7,7 @@ test('world-visible barrels and muzzle flashes cannot protrude through a solid w
     const renderer = new THREE.WebGLRenderer({ antialias: false }); renderer.localClippingEnabled = true; renderer.setSize(320, 240);
     const target = new THREE.WebGLRenderTarget(320, 240), scene = new THREE.Scene(); scene.background = new THREE.Color('#33434e'); scene.add(new THREE.HemisphereLight('#ffffff', '#708080', 3));
     const wallGeometry = new THREE.BoxGeometry(4, 3, .2), wallMaterial = new THREE.MeshBasicMaterial({ color: '#8899aa' }), wall = new THREE.Mesh(wallGeometry, wallMaterial); wall.position.y = 1.5; scene.add(wall);
-    const models = new WeaponModels(), weapon = models.create('m82', 'standard', false, 'field', 'male', 'standard', true), group = new THREE.Group(); group.position.z = .5; weapon.position.set(.1, 1.19, -.16); group.add(weapon); scene.add(group);
+    const models = new WeaponModels(), weapon = models.create('m82', 'standard', false, 'field', 'male', true), group = new THREE.Group(); group.position.z = .5; weapon.position.set(.1, 1.19, -.16); group.add(weapon); scene.add(group);
     const camera = new THREE.PerspectiveCamera(60, 4 / 3, .05, 20); camera.position.set(1.8, 1.55, -3); camera.lookAt(0, 1.2, 0); renderer.setRenderTarget(target);
     const pixels = () => { renderer.render(scene, camera); const bytes = new Uint8Array(320 * 240 * 4); renderer.readRenderTargetPixels(target, 0, 0, 320, 240, bytes); return bytes; };
     const difference = (a, b) => { let count = 0; for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 12) count++; return count; };

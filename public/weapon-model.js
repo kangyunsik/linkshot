@@ -2,6 +2,7 @@ import * as THREE from '/vendor/three.module.js';
 import { getWeapon, getSkin, weaponModel } from '/shared/catalog.js';
 import { getOutfit, getCharacter } from '/shared/outfits.js';
 import { createViewmodelHands } from './viewmodel-hands.js';
+import { createViewmodelReload } from './viewmodel-reload.js';
 import { createFirearmBody } from './firearm-design.js';
 import { createKnifeBody } from './knife-design.js';
 import { NETWORK_PROTOCOL } from '/shared/world.js';
@@ -51,7 +52,7 @@ export class WeaponModels {
     return this.textures.get(key);
   }
 
-  create(weaponId, skinId, firstPerson = false, outfitId = 'field', characterId = 'male', handsSkinId = skinId, suppressor = false) {
+  create(weaponId, skinId, firstPerson = false, outfitId = 'field', characterId = 'male', suppressor = false) {
     const weapon = getWeapon(weaponId), skin = getSkin(skinId), group = new THREE.Group(), shape = weaponModel(weapon); group.name = `weapon-${weapon.id}`;
     const material = (color, options = {}) => new THREE.MeshStandardMaterial({ color, roughness: .63, metalness: .35, ...(firstPerson ? { fog: false } : {}), ...options });
     const metal = this.finishTexture('metal'), polymer = this.finishTexture('polymer');
@@ -74,7 +75,10 @@ export class WeaponModels {
     if (attachment) { if (group.userData.breakAction) group.userData.breakAction.attach(attachment.mesh); else group.add(attachment.mesh); }
     const used = new Set(); group.traverse((object) => { if (object.material) used.add(object.material); });
     for (const material of Object.values(materials)) if (!used.has(material)) material.dispose();
-    if (firstPerson) createViewmodelHands(this, { group, shape, weaponId: weapon.id, outfit: getOutfit(outfitId), skin: getSkin(handsSkinId), character: getCharacter(characterId) });
+    if (firstPerson) {
+      createViewmodelHands(this, { group, shape, weaponId: weapon.id, outfit: getOutfit(outfitId), character: getCharacter(characterId) });
+      createViewmodelReload(this, group, weapon);
+    }
     const muzzle = new THREE.Object3D(); muzzle.position.set(0, .02, muzzleZ); group.add(muzzle);
     const flash = new THREE.Mesh(new THREE.ConeGeometry(shape === 'shotgun' ? .11 : .07, .23, 5), new THREE.MeshBasicMaterial({ color: '#ffda98', transparent: true, opacity: .85, blending: THREE.AdditiveBlending, depthWrite: false }));
     flash.rotation.x = -Math.PI / 2; flash.position.set(0, .02, muzzleZ - .10); flash.visible = false; group.add(flash);
@@ -104,7 +108,7 @@ export class ArmoryPreview {
   set(weaponId, skinId, suppressor = false) {
     const key = `${weaponId}/${skinId}/${suppressor}`; if (key === this.key) return; this.key = key;
     if (this.model) { this.scene.remove(this.model); disposeModel(this.model); }
-    this.model = this.models.create(weaponId, skinId, false, 'field', 'male', skinId, suppressor); this.scene.add(this.model);
+    this.model = this.models.create(weaponId, skinId, false, 'field', 'male', suppressor); this.scene.add(this.model);
     this.camera.position.set(getWeapon(weaponId).type === 'SNIPER' ? 1.9 : getWeapon(weaponId).type === 'LMG' ? 1.65 : 1.45, .48, 1.25); this.camera.lookAt(0, -.01, -.25);
   }
   drawThumbnails(cards, skinId) {

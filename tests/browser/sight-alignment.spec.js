@@ -51,7 +51,9 @@ test('the live hip pose moves down and outward, reducing central occlusion witho
       const game = new FPSGame({ canvas: document.getElementById('game-canvas'), minimap: document.getElementById('minimap'), mapId: 'foundry', settings: { fov: 82, sensitivity: 1, quality: 'low' }, audio: { step() {}, stopReload() {} }, send() {}, onMenu() {}, onFatal(message) { throw new Error(message); } });
       window.__clearViewGame = game; game.applySnapshot(room.snapshot(), player.id); await game.prepareGraphics(); cancelAnimationFrame(game.frameId);
       game.switchAnimation = 0; game.weapon.position.set(.18, -.20, -.54); let now = performance.now();
-      for (let frame = 0; frame < 60; frame++) { now += 1000 / 60; game.previousFrame = now - 1000 / 60; game.animate(now); cancelAnimationFrame(game.frameId); }
+      // This fixture has no pointer lock, so it deliberately runs at the
+      // menu's 30 Hz cap rather than submitting only skipped 60 Hz frames.
+      for (let frame = 0; frame < 36; frame++) { now += 1000 / 30; game.previousFrame = now - 1000 / 30; game.animate(now); cancelAnimationFrame(game.frameId); }
       const hip = game.weapon.position.clone(), target = new THREE.WebGLRenderTarget(320, 240), checks = [];
       const pixels = () => { game.renderer.setRenderTarget(target); game.renderFrame(); const data = new Uint8Array(320 * 240 * 4); game.renderer.readRenderTargetPixels(target, 0, 0, 320, 240, data); return data; };
       const coverage = (image, background) => { let visible = 0, center = 0; for (let y = 0; y < 240; y++) for (let x = 0; x < 320; x++) { const i = (y * 320 + x) * 4; if (Math.abs(image[i] - background[i]) + Math.abs(image[i + 1] - background[i + 1]) + Math.abs(image[i + 2] - background[i + 2]) <= 12) continue; visible++; if (x >= 80 && x < 240 && y >= 60 && y < 156) center++; } return { visible, center }; };

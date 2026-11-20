@@ -7,11 +7,12 @@
 - Source: https://quaternius.com/packs/universalbasecharacters.html
 - Download: https://quaternius.itch.io/universal-base-characters
 - License: CC0 1.0 Universal — https://creativecommons.org/publicdomain/zero/1.0/
-- Files: `models/operator-human-v2.glb`, `models/operator-hair-v2.glb`, `models/operator-female-v3.glb`, `models/operator-hair-female-v3.glb`, `models/operator-hair-female-short-v3.glb`
-- Original models: Superhero Male/Female FullBody; SimpleParted, Buns and BuzzedFemale hair, from the free Standard archive.
+- Files: `models/operator-human-v2.glb`, `models/operator-hair-v2.glb`, `models/operator-female-v3.glb`, `models/operator-hair-female-v3.glb`
+- Original models: Superhero Male/Female FullBody; SimpleParted and Buns hair, from the free Standard archive.
 - Changes: self-contained GLB packaging, higher-resolution resized textures, softened skin contrast and normal shading, refined hair/eye materials, runtime clothing materials, tactical equipment and procedural skeletal posing/IK. Only the free Standard assets are included; no paid Source assets are used.
 - Original license: `models/LICENSE-Quaternius.txt`
-- `operator-male.png` and `operator-female.png` are actual in-engine renders of those characters wearing the generated clothing materials below, not photographs or standalone image-model portraits. Reproduce them with `scripts/render-characters.mjs`; source/model and material licenses remain applicable.
+- NARI, RHEA and JIN use the same licensed body/hand rigs with original hairstyles, facial shaping, skin tints and field jackets. Their design draft is a reference, not a texture or a 3D asset.
+- The five character cards and five wardrobe images are actual game renders. Reproduce them with `npm run assets:characters`; source/model and material licenses remain applicable.
 
 ## First-person hand anatomy
 
@@ -22,7 +23,7 @@
 
 ## Operator clothing materials
 
-- `operator-fabric.png`, `operator-armor.png`, `operator-jacket.png`: generated locally with ComfyUI and Animagine XL 4.0 Opt in the user's image engine, then used on the actual in-game skinned character and equipment, not only on shop cards. The jacket image is cropped to its garment panel before UV mapping.
+- The jackets, zip seams, cargo pockets, collars, boots and cloth weave are modeled in `public/operator-clothing.js` and use the existing body skeleton. `operator-armor.png` is the ComfyUI/Animagine fabric texture used on first-person gloves only; it does not depict equipped armor.
 - Model source and license: https://huggingface.co/cagliostrolab/animagine-xl-4.0 — CreativeML Open RAIL++-M.
 - Prompts, seeds and image model provenance: `asset-manifest.json`.
 - The image engine generates materials; the 3D anatomical base is the separately licensed Quaternius asset above. No claim is made that a 2D image model generated the 3D rig.

@@ -27,19 +27,39 @@ class RatingPolicyTest {
         var result = RatingPolicy.settle(true, List.of(new RatingPolicy.Player("a", 1000, 0, 0, 0, 0, false), new RatingPolicy.Player("b", 1000, 0, 0, 0, 0, false)));
         assertTrue(result.values().stream().allMatch(change -> change.ratingDelta() == 0 && change.outcome() == 0));
     }
-    @Test void fivePlacementsAssignATierWithoutGrantingPromotionPointsEarly() {
+    @Test void placementRpIsSignedAndDoubledBeforeThereIsAnEstablishedTierBalance() {
         var state = new RatingPolicy.RankProgress(0, 0, 0, 0);
-        for (int i = 1; i <= 5; i++) { state = RatingPolicy.advance(state, 1000, 1).progress(); assertEquals(i < 5 ? "UNRANKED" : "SILVER", RatingPolicy.tier(state)); }
-        assertEquals(5, RatingPolicy.division(state)); assertEquals(0, state.points());
+        var win = RatingPolicy.advance(state, 1032, 1, RatingPolicy.PlacementRun.EMPTY);
+        assertEquals(50, win.pointDelta()); assertEquals("UNRANKED", RatingPolicy.tier(win.progress())); assertEquals(0, win.progress().points());
+        var loss = RatingPolicy.advance(win.progress(), 1000, -1, RatingPolicy.PlacementRun.EMPTY);
+        assertEquals(-50, loss.pointDelta());
+        var draw = RatingPolicy.advance(new RatingPolicy.RankProgress(0, 0, 4, 4), 1000, 0, RatingPolicy.PlacementRun.EMPTY);
+        assertEquals("SILVER", RatingPolicy.tier(draw.progress())); assertEquals(5, RatingPolicy.division(draw.progress())); assertEquals(0, draw.progress().points());
     }
     @Test void hundredPointsPromotesAndALossBelowZeroDemotesWithoutMixingShopCurrency() {
-        var before = new RatingPolicy.RankProgress(4, 90, 10, 20); var promoted = RatingPolicy.advance(before, 1000, 1);
+        var before = new RatingPolicy.RankProgress(4, 90, 5, 20); var promoted = RatingPolicy.advance(before, 1000, 1, RatingPolicy.PlacementRun.EMPTY);
         assertEquals(5, promoted.progress().index()); assertEquals("SILVER", RatingPolicy.tier(promoted.progress())); assertEquals(16, promoted.progress().points());
-        var demoted = RatingPolicy.advance(new RatingPolicy.RankProgress(5, 0, 10, 21), 1000, -1); assertEquals(4, demoted.progress().index()); assertEquals(75, demoted.progress().points());
-        assertEquals(0, RatingPolicy.advance(new RatingPolicy.RankProgress(0, 0, 10, 30), 0, -1).progress().points());
+        var demoted = RatingPolicy.advance(new RatingPolicy.RankProgress(5, 0, 5, 21), 1000, -1, RatingPolicy.PlacementRun.EMPTY); assertEquals(4, demoted.progress().index()); assertEquals(75, demoted.progress().points());
+        assertEquals(0, RatingPolicy.advance(new RatingPolicy.RankProgress(0, 0, 5, 30), 0, -1, RatingPolicy.PlacementRun.EMPTY).progress().points());
     }
-    @Test void placementAndDiamondCapsRemainBoundedForExtremeRatings() {
-        assertEquals(14, RatingPolicy.advance(new RatingPolicy.RankProgress(0, 0, 4, 4), 10_000, 1).progress().index());
-        var cap = RatingPolicy.advance(new RatingPolicy.RankProgress(24, 100, 10, 50), 4000, 1); assertEquals(24, cap.progress().index()); assertEquals(100, cap.progress().points());
+    @Test void highCombatPerformanceWithAllFiveWinsCanPlaceGoldVAndNoHigher() {
+        var last = new RatingPolicy.RankProgress(0, 0, 4, 4);
+        var gold = RatingPolicy.advance(last, 1100, 1, new RatingPolicy.PlacementRun(5, 30, 20, 200)).progress();
+        assertEquals("GOLD", RatingPolicy.tier(gold)); assertEquals(5, RatingPolicy.division(gold)); assertEquals(0, gold.points());
+        for (var run : List.of(new RatingPolicy.PlacementRun(5, 30, 21, 200), new RatingPolicy.PlacementRun(5, 19, 0, 200), new RatingPolicy.PlacementRun(4, 40, 10, 100))) {
+            var capped = RatingPolicy.advance(last, 10_000, 1, run).progress();
+            assertEquals("SILVER", RatingPolicy.tier(capped)); assertEquals(1, RatingPolicy.division(capped)); assertEquals(99, capped.points());
+        }
+        assertEquals(0, RatingPolicy.advance(last, 0, -1, new RatingPolicy.PlacementRun(0, 1, 30, -200)).progress().index());
+        var cap = RatingPolicy.advance(new RatingPolicy.RankProgress(24, 100, 5, 50), 4000, 1, RatingPolicy.PlacementRun.EMPTY); assertEquals(24, cap.progress().index()); assertEquals(100, cap.progress().points());
+    }
+    @Test void onlyMatchesOneThroughTwentyDoubleBothPositiveAndNegativeRp() {
+        for (int outcome : List.of(-1, 0, 1)) {
+            var early = new RatingPolicy.RankProgress(6, 50, 5, 19); var regular = new RatingPolicy.RankProgress(6, 50, 5, 20);
+            var accelerated = RatingPolicy.advance(early, 1100, outcome, RatingPolicy.PlacementRun.EMPTY);
+            var normal = RatingPolicy.advance(regular, 1100, outcome, RatingPolicy.PlacementRun.EMPTY);
+            assertEquals(2, RatingPolicy.progressionMultiplier(early)); assertEquals(1, RatingPolicy.progressionMultiplier(regular));
+            assertEquals(2 * normal.pointDelta(), accelerated.pointDelta()); assertEquals(20, accelerated.progress().games()); assertEquals(21, normal.progress().games());
+        }
     }
 }

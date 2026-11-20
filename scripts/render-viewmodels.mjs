@@ -3,9 +3,10 @@ import { chromium } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { createGameServer } from '../server/index.js';
+import { getCharacter } from '../shared/outfits.js';
 
 const tag = String(process.env.VIEWMODEL_TAG || 'review').replace(/[^a-z0-9-]/gi, '');
-const character = process.env.VIEWMODEL_CHARACTER === 'female' ? 'female' : 'male', pose = ['hip', 'ads', 'reload', 'grip'].includes(process.env.VIEWMODEL_POSE) ? process.env.VIEWMODEL_POSE : 'hip';
+const character = getCharacter(process.env.VIEWMODEL_CHARACTER).id, pose = ['hip', 'ads', 'reload', 'grip'].includes(process.env.VIEWMODEL_POSE) ? process.env.VIEWMODEL_POSE : 'hip';
 const app = createGameServer({ port: 0, host: '127.0.0.1', loop: false }); let browser;
 try {
   const info = await app.listen(), chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -13,7 +14,8 @@ try {
   const page = await browser.newPage({ viewport: { width: 1600, height: 1080 } });
   await page.route('**/app.js', (route) => route.fulfill({ contentType: 'text/javascript', body: '' })); await page.goto(`http://127.0.0.1:${info.port}`);
   const metrics = await page.evaluate(async ({ character, pose }) => {
-    const [THREE, { WeaponModels, disposeModel }, { getWeapon }, { VIEWMODEL_HIP_OFFSET, VIEWMODEL_ADS_Z }] = await Promise.all([import('/vendor/three.module.js'), import('/weapon-model.js'), import('/shared/catalog.js'), import('/viewmodel-renderer.js')]);
+    const [THREE, { WeaponModels, disposeModel }, { getWeapon }, { VIEWMODEL_ADS_Z, viewmodelHipOffset }, { applyViewmodelReload }, { reloadFraming }] =
+      await Promise.all([import('/vendor/three.module.js'), import('/weapon-model.js'), import('/shared/catalog.js'), import('/viewmodel-renderer.js'), import('/viewmodel-reload.js'), import('/reload-time.js')]);
     const host = document.createElement('div'); host.style.cssText = 'position:fixed;inset:0;z-index:10000;background:#263945;color:#dae9e7;font:12px monospace'; document.body.append(host);
     const canvas = document.createElement('canvas'); host.append(canvas);
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); renderer.setSize(1600, 1080); renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.15;
@@ -22,7 +24,7 @@ try {
     scene.add(new THREE.HemisphereLight('#d6eaf0', '#4a4038', 2.2));
     const light = new THREE.DirectionalLight('#ffe2c0', 3.5); light.position.set(-2, 3, 2); scene.add(light);
     const fill = new THREE.DirectionalLight('#a5d5ed', .7); fill.position.set(2, 1, -2); scene.add(fill);
-    const ids = ['rifle', 'pistol', 'shotgun', 'sniper', 'smg', 'lmg', 'dmr', 'p90', 'ak47', 'm82', 'famas', 'mp5'];
+    const ids = ['rifle', 'pistol', 'shotgun', 's686', 'sniper', 'lmg', 'dmr', 'p90', 'ak47', 'm82', 'famas', 'mp5'];
     const models = new WeaponModels(), manager = THREE.DefaultLoadingManager, oldStart = manager.onStart, oldLoad = manager.onLoad; let loading = false;
     const ready = new Promise((resolve) => { manager.onLoad = resolve; }); manager.onStart = () => { loading = true; };
     const entries = ids.map((id) => { const model = models.create(id, 'standard', true, 'field', character); model.visible = false; scene.add(model); return model; });
@@ -30,10 +32,16 @@ try {
     renderer.setScissorTest(true); const checks = [];
     for (const [index, model] of entries.entries()) {
       const col = index % 4, row = Math.floor(index / 4); model.visible = true;
-      model.position.set(pose === 'ads' ? 0 : VIEWMODEL_HIP_OFFSET.x, pose === 'ads' ? -model.userData.aimHeight : VIEWMODEL_HIP_OFFSET.y - (pose === 'reload' ? .18 : 0), pose === 'ads' ? VIEWMODEL_ADS_Z : VIEWMODEL_HIP_OFFSET.z);
-      if (pose !== 'grip') { camera.fov = pose === 'ads' ? 82 * getWeapon(ids[index]).zoom : 82; camera.updateProjectionMatrix(); }
+      const id = ids[index], weapon = getWeapon(id), hip = viewmodelHipOffset(weapon);
+      model.position.set(pose === 'ads' ? 0 : hip.x, pose === 'ads' ? -model.userData.aimHeight : hip.y, pose === 'ads' ? VIEWMODEL_ADS_Z : hip.z);
+      if (pose !== 'grip') { camera.fov = pose === 'ads' ? 82 * weapon.zoom : 82; camera.updateProjectionMatrix(); }
       if (pose === 'grip') model.position.set(0, 0, 0);
-      if (pose === 'reload') model.rotation.set(-.25, 0, -.65);
+      if (pose === 'reload') {
+        const t = { shotgun: .365, s686: .615, lmg: .635, sniper: .84, p90: .58 }[id] ?? .55;
+        const frame = reloadFraming(t,weapon);
+        model.position.x += frame.x; model.position.y += frame.y; model.position.z += frame.z;
+        model.rotation.set(frame.pitch,frame.yaw,frame.roll); applyViewmodelReload(model,weapon,t,0);
+      }
       renderer.setViewport(col * 400, (2 - row) * 360, 400, 360); renderer.setScissor(col * 400, (2 - row) * 360, 400, 360); renderer.render(scene, camera);
       const label = document.createElement('div'); label.textContent = `${ids[index].toUpperCase()} / ${character} / ${pose}`; label.style.cssText = `position:absolute;left:${col * 400 + 14}px;top:${row * 360 + 12}px;letter-spacing:1px`; host.append(label);
       checks.push({ id: ids[index], calls: renderer.info.render.calls, triangles: renderer.info.render.triangles }); model.visible = false;

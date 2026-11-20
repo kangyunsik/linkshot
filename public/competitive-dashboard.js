@@ -29,10 +29,13 @@ export class CompetitiveDashboard {
     nodes['hero-combat-counts'].textContent = stats.available ? `${number(stats.kills)}/${number(stats.deaths)}/${number(stats.assists)}` : '—';
     nodes['hero-combat-counts'].title = stats.available ? `${stats.kills} K / ${stats.deaths} D / ${stats.assists} A` : '';
     nodes['hero-kda'].title = stats.available ? `(${stats.kills} K + ${stats.assists} A) / ${Math.max(1, stats.deaths)} D` : '';
-    this.renderHistory(key, stats.recent);
+    this.renderHistory(key, stats.recent, !!profile);
     this.renderMap(mode, mapId);
   }
-  renderHistory(key, matches) {
+  renderHistory(key, matches, signedIn) {
+    const empty = document.getElementById('match-empty-message');
+    empty.hidden = matches.length > 0;
+    if (!empty.hidden) empty.textContent = signedIn ? '아직 경기 기록이 없습니다. 첫 랭크 경기를 완료하면 여기에 표시됩니다.' : '로그인 후 개인전·팀전 전적을 확인할 수 있습니다.';
     const historyKey = JSON.stringify([key, matches]);
     if (historyKey === this.historyKey) return;
     this.historyKey = historyKey;

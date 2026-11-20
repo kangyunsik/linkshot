@@ -15,9 +15,10 @@ test('each mode shows its own tier, win rate, K/DA and ten games without page or
   let healthChecks = 0;
   await context.route(api + '/api/**', (route) => { const path = new URL(route.request().url()).pathname; if (path === '/api/health') healthChecks++; return route.fulfill({ headers: { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Credentials': 'true' }, contentType: 'application/json', body: JSON.stringify(path === '/api/health' ? { service: 'linkshot-online', matchmaking: true } : path === '/api/account' ? user : { state: 'IDLE' }) }); });
   const errors = []; page.on('pageerror', (error) => errors.push(error.message)); await page.goto(origin);
-  await expect(page.locator('#profile-casual-rating')).toHaveText('실버 IV'); await expect(page.locator('#profile-rank-tier')).toHaveText('골드 II');
+  await expect(page.locator('#hero-rank-tier')).toHaveText('골드 II'); await expect(page.locator('#wallet-button')).toHaveAccessibleName(/계정 105,500 LP/);
   await page.locator('#dashboard-ffa').click(); await expect(page.locator('#hero-rank-tier')).toHaveText('실버 IV'); await expect(page.locator('#hero-winrate')).toHaveText('25.0%'); await expect(page.locator('#hero-kda')).toHaveText('2.50'); await expect(page.locator('#hero-record')).toHaveText('5/2/13'); await expect(page.locator('#hero-combat-counts')).toHaveText('80/40/20');
   await expect(page.locator('#recent-match-list > li')).toHaveCount(10); await expect(page.locator('#recent-match-list > li').first()).toHaveAttribute('data-match', 'ffa-match-0');
+  await expect(page.locator('#match-empty-message')).toBeHidden();
   await page.locator('#dashboard-teams').click(); await expect(page.locator('#hero-rank-tier')).toHaveText('골드 II'); await expect(page.locator('#hero-winrate')).toHaveText('70.0%'); await expect(page.locator('#recent-match-list > li').first()).toHaveAttribute('data-match', 'teams-match-0');
   for (const [width, height] of [[1920,1080],[1440,900],[1366,768],[1280,720],[1024,600],[820,768],[740,667],[390,844],[375,667],[360,640],[360,600],[1280,540],[740,540],[390,560],[360,480]]) {
     await page.setViewportSize({ width, height });
@@ -46,7 +47,7 @@ test('each mode shows its own tier, win rate, K/DA and ten games without page or
     }
     expect(new Set(frames.map(frame => JSON.stringify(frame))).size, `fixed map allocation ${width}x${height}`).toBe(1);
   }
-  await page.locator('#mode-practice').click(); await page.locator('#dashboard-ffa').click(); await page.locator('#rank-card').click(); await expect(page.locator('#rank-detail-emblem')).toHaveAttribute('src', /ranks\/ffa\/silver\.svg/); await page.keyboard.press('Escape');
+  await page.locator('#mode-practice').click(); await page.locator('#dashboard-ffa').click(); await page.locator('.hero-rank').click(); await expect(page.locator('#rank-detail-emblem')).toHaveAttribute('src', /ranks\/ffa\/silver\.svg/); await page.keyboard.press('Escape');
   await page.locator('#mode-casual').click(); await expect(page.locator('#hero-rank-tier')).toHaveText('실버 IV'); await page.locator('#dashboard-teams').click();
   const checks = healthChecks; await expect.poll(() => healthChecks).toBeGreaterThan(checks); await expect(page.locator('#hero-rank-tier')).toHaveText('골드 II');
   await page.reload(); await expect(page.locator('#dashboard-teams')).toHaveAttribute('aria-pressed', 'true'); await expect(page.locator('#hero-rank-tier')).toHaveText('골드 II'); expect(errors).toEqual([]);

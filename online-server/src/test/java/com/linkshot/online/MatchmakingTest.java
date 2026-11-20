@@ -80,13 +80,14 @@ class MatchmakingTest {
     @Test void aCasualAiVictoryRaisesOnlyCasualRatingAndStillSettlesRewardsOnce() {
         var a = account(); var plan = matches.create(MatchService.Mode.CASUAL, List.of(a.id()), 1, "foundry", 5, 60);
         settle(plan, List.of(new MatchService.Performance(a.id().toString(), false, 2, 0, Map.of("rifle", 2), 0, 0, false), new MatchService.Performance("bot-test-0001", true, 0, 2, Map.of(), 0, 0, false)));
-        var profile = accounts.profile(a.id()); assertEquals(1012, profile.casualRating()); assertEquals(0, profile.placementsPlayed()); assertEquals(190, profile.points()); assertEquals(12, matches.receipt(plan.id(), a.id()).casualRatingDelta());
+        var profile = accounts.profile(a.id()); var receipt = matches.receipt(plan.id(), a.id()); assertEquals(1024, profile.casualRating()); assertEquals(0, profile.placementsPlayed()); assertEquals(190, profile.points()); assertEquals(24, receipt.casualRatingDelta()); assertEquals(24, receipt.ratingDelta()); assertEquals(50, receipt.rankPointsDelta()); assertEquals(2, receipt.ratingMultiplier()); assertEquals(1000, plan.botRating());
     }
     @Test void aRankedAiVictoryCountsPlacementAndUsesTheFrozenRankedBotRating() {
         var a = account(); db.update("UPDATE profiles SET ranked_rating = 1800, casual_rating = 1200 WHERE account_id = ?", a.id());
         var plan = matches.create(MatchService.Mode.RANKED, List.of(a.id()), 1, "foundry", 5, 60); assertTrue(plan.rankedAiEnabled()); assertEquals(1800, plan.botRating());
         settle(plan, List.of(new MatchService.Performance(a.id().toString(), false, 2, 0, Map.of("rifle", 2), 0, 0, false), new MatchService.Performance("bot-test-0001", true, 0, 2, Map.of(), 0, 0, false)));
-        assertEquals(1816, db.queryForObject("SELECT ranked_rating FROM profiles WHERE account_id = ?", Integer.class, a.id())); assertEquals(1200, accounts.profile(a.id()).casualRating()); assertEquals(1, accounts.profile(a.id()).placementsPlayed()); assertEquals(1, accounts.profile(a.id()).placementWins()); assertEquals(1800, matches.plan(plan.id()).botRating());
+        assertEquals(1832, db.queryForObject("SELECT ranked_rating FROM profiles WHERE account_id = ?", Integer.class, a.id())); assertEquals(1200, accounts.profile(a.id()).casualRating()); assertEquals(1, accounts.profile(a.id()).placementsPlayed()); assertEquals(1, accounts.profile(a.id()).placementWins()); assertEquals(1800, matches.plan(plan.id()).botRating());
+        var receipt = matches.receipt(plan.id(), a.id()); assertEquals(32, receipt.ratingDelta()); assertEquals(2, receipt.ratingMultiplier()); assertEquals(50, receipt.rankPointsDelta()); assertEquals(0, receipt.casualRatingDelta());
     }
     @Test void disablingTheTemporaryPolicyRejectsRankedAiAndTheDatabaseStillRequiresAnExplicitAssignmentFlag() {
         var strict = new MatchService(db, accounts, catalog, properties, ratings, engines, false); var a = account(); assertFalse(strict.rankedAiEnabled());
@@ -101,6 +102,46 @@ class MatchmakingTest {
             if (i < 4) assertEquals("UNRANKED", accounts.profile(a.id()).rankTier());
         }
         var profile = accounts.profile(a.id()); assertEquals(5, profile.placementsPlayed()); assertEquals(5, profile.placementWins()); assertEquals(0, accounts.profile(b.id()).placementWins()); assertNotEquals("UNRANKED", profile.rankTier()); assertTrue(profile.rankPoints() > 0); assertEquals(1140, profile.points()); assertEquals(1000, profile.casualRating()); assertEquals(4, profile.ownedWeapons().size()); assertTrue(matches.receipt(last.id(), a.id()).rankPointsDelta() > 0);
+    }
+    @Test void cumulativePlacementCombatDecidesGoldVIndependentlyOnEachLadder() {
+        var a = account(); var b = account();
+        for (int i = 0; i < 5; i++) {
+            // Strong personal placement sample (28 K / 11 D). Weak in teams,
+            // despite also winning all five there. Final games alone do not qualify.
+            var personal = matches.create(MatchService.Mode.CASUAL, List.of(a.id(), b.id()), 0, "foundry", 20, 60);
+            int kills = i < 4 ? 6 : 4, deaths = i < 4 ? 2 : 3;
+            settle(personal, List.of(new MatchService.Performance(a.id().toString(), false, kills, deaths, Map.of("rifle", kills)), new MatchService.Performance(b.id().toString(), false, deaths, kills, Map.of("pistol", deaths))));
+            var receipt = matches.receipt(personal.id(), a.id());
+            assertEquals("UNRANKED", receipt.rankTierBefore()); assertEquals(i == 4 ? "GOLD" : "UNRANKED", receipt.rankTier()); assertEquals(5, receipt.rankDivision()); assertEquals(0, receipt.rankPointsAfter());
+            assertEquals(50, receipt.rankPointsDelta()); assertEquals(2, receipt.ratingMultiplier());
+
+            var team = matches.create(MatchService.Mode.RANKED, List.of(a.id(), b.id()), 0, "foundry", 40, 60);
+            settle(team, List.of(new MatchService.Performance(a.id().toString(), false, 6, 5, Map.of("rifle", 6)), new MatchService.Performance(b.id().toString(), false, 5, 6, Map.of("rifle", 5))));
+        }
+        var profile = accounts.profile(a.id());
+        assertEquals(5, profile.competitive().get("ffa").placementWins()); assertEquals(5, profile.competitive().get("teams").placementWins());
+        assertEquals("GOLD", profile.competitive().get("ffa").rankTier()); assertEquals(5, profile.competitive().get("ffa").rankDivision());
+        assertEquals("SILVER", profile.competitive().get("teams").rankTier());
+    }
+    @Test void twentiethAndTwentyFirstResultsPersistDifferentMultipliersPerPlayerAndLadder() {
+        var a = account(); var b = account();
+        for (var mode : MatchService.Mode.values()) {
+            String prefix = mode == MatchService.Mode.RANKED ? "" : "ffa_";
+            String ratingField = mode == MatchService.Mode.RANKED ? "ranked_rating" : "casual_rating", ladder = mode == MatchService.Mode.RANKED ? "teams" : "ffa";
+            db.update("UPDATE profiles SET " + prefix + "ranked_games = 19, " + prefix + "rank_placements = 5, " + prefix + "rank_index = 5, " + prefix + "rank_tier = 'SILVER', " + prefix + "rank_points = 70 WHERE account_id IN (?, ?)", a.id(), b.id());
+            int baseMmr = mode == MatchService.Mode.RANKED ? 16 : 12;
+            for (int i = 0; i < 2; i++) {
+                db.update("UPDATE profiles SET " + ratingField + " = 1000, " + prefix + "rank_index = 5, " + prefix + "rank_tier = 'SILVER', " + prefix + "rank_points = 70 WHERE account_id IN (?, ?)", a.id(), b.id());
+                var plan = matches.create(mode, List.of(a.id(), b.id()), 0, "foundry", 20, 60);
+                // One account is already on its 21st match while the other is on its 20th.
+                if (i == 0) db.update("UPDATE profiles SET " + prefix + "ranked_games = 20 WHERE account_id = ?", b.id());
+                settle(plan, List.of(new MatchService.Performance(a.id().toString(), false, 2, 1, Map.of("rifle", 2)), new MatchService.Performance(b.id().toString(), false, 1, 2, Map.of("pistol", 1))));
+                var win = matches.receipt(plan.id(), a.id()); var loss = matches.receipt(plan.id(), b.id());
+                assertEquals((2 - i) * baseMmr, win.ratingDelta()); assertEquals((2 - i) * 25, win.rankPointsDelta()); assertEquals(2 - i, win.ratingMultiplier());
+                assertEquals(-baseMmr, loss.ratingDelta()); assertEquals(-25, loss.rankPointsDelta()); assertEquals(1, loss.ratingMultiplier());
+                assertEquals(190, win.points()); assertEquals(70, loss.points()); assertEquals(20 + i, accounts.profile(a.id()).competitive().get(ladder).rankedGames());
+            }
+        }
     }
     @Test void shorteningPlacementsFinishesExistingFivePlusAccountsWithoutResettingEstablishedRanks() throws Exception {
         var waiting = account(); var placed = account(); var unfinished = account();
@@ -281,18 +322,24 @@ class MatchmakingTest {
         assertEquals("ASSIGNED", queue.status(a.id()).state()); assertNull(matches.active(b.id()));
     }
     @Test void accountPurchasesDebitCanonicalPricesOnceAndNeverChangeRatingOrImportDeviceOwnership() throws Exception {
-        var a = account(); db.update("UPDATE profiles SET points = 5000 WHERE account_id = ?", a.id());
+        var a = account(); db.update("UPDATE profiles SET points = 23000 WHERE account_id = ?", a.id());
         try (var threads = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
             var one = threads.submit(() -> accounts.purchaseWeapon(a.username(), "m82"));
             var two = threads.submit(() -> accounts.purchaseWeapon(a.username(), "m82"));
             one.get(); two.get();
         }
-        var after = accounts.profile(a.id()); assertEquals(3000, after.points()); assertEquals(1, after.ownedWeapons().stream().filter("m82"::equals).count());
+        var after = accounts.profile(a.id()); assertEquals(21000, after.points()); assertEquals(1, after.ownedWeapons().stream().filter("m82"::equals).count());
         assertThrows(IllegalArgumentException.class, () -> accounts.purchaseWeapon(a.username(), "knife"));
         assertThrows(IllegalArgumentException.class, () -> accounts.selectOutfit(a.username(), "orbital", false));
-        after = accounts.selectOutfit(a.username(), "orbital", true); assertEquals(2100, after.points()); assertTrue(after.ownedOutfits().contains("orbital")); assertEquals("orbital", after.outfitId());
-        assertEquals(2100, accounts.selectOutfit(a.username(), "orbital", true).points());
-        assertEquals("female", accounts.selectCharacter(a.username(), "female").characterId());
+        try (var threads = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var one = threads.submit(() -> accounts.selectOutfit(a.username(), "orbital", true));
+            var two = threads.submit(() -> accounts.selectOutfit(a.username(), "orbital", true));
+            one.get(); two.get();
+        }
+        after = accounts.profile(a.id()); assertEquals(1000, after.points()); assertTrue(after.ownedOutfits().contains("orbital")); assertEquals("orbital", after.outfitId());
+        assertEquals("field", accounts.selectOutfit(a.username(), "field", false).outfitId());
+        assertEquals(1000, accounts.selectOutfit(a.username(), "orbital", false).points());
+        assertEquals("nari", accounts.selectCharacter(a.username(), "nari").characterId());
         assertEquals(1000, after.casualRating()); assertEquals(0, after.placementsPlayed());
         var poor = account(); assertThrows(IllegalArgumentException.class, () -> accounts.purchaseWeapon(poor.username(), "m82")); assertFalse(accounts.profile(poor.id()).ownedWeapons().contains("m82")); assertEquals(0, accounts.profile(poor.id()).points());
     }

@@ -27,7 +27,6 @@ test('lobby, generated assets, map, settings persistence and responsive layout',
   await page.getByRole('button', { name: '방 목록 닫기' }).click();
   // Public documentation screenshots must not retain this machine's real LAN address.
   await page.locator('#lan-address').evaluate((element) => { element.textContent = '192.0.2.10:3000'; });
-  await page.locator('#profile-device').evaluate((element) => { element.textContent = '기기 #DEMO'; });
   await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/lobby-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();

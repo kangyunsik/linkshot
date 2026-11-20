@@ -84,7 +84,10 @@ export async function publicationFiles(directory, temporary) {
     prefix = [`--git-dir=${path.join(repository, '.git')}`, `--work-tree=${directory}`];
   }
   const output = execFileSync('git', [...prefix, '-c', 'core.excludesFile=/dev/null', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'], options);
-  return [...new Set(output.split('\0').filter(Boolean))].sort();
+  // A removed asset still appears in --cached until its removal is staged.
+  // Exclude only those Git confirms absent; keep scanning all present files.
+  const deleted = new Set(execFileSync('git', [...prefix, 'ls-files', '--deleted', '-z'], options).split('\0'));
+  return [...new Set(output.split('\0').filter(file => file && !deleted.has(file)))].sort();
 }
 
 async function main() {

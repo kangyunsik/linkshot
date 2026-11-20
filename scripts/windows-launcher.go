@@ -130,6 +130,7 @@ type economyConfig struct {
 	Version int `json:"version"`
 	Points struct { Completion int64 `json:"completion"`; PerKill int64 `json:"perKill"`; Victory int64 `json:"victory"` } `json:"points"`
 	Outfits []struct { ID string `json:"id"`; Price int64 `json:"price"` } `json:"outfits"`
+	Characters []string `json:"characters"`
 	Weapons []struct { ID string `json:"id"`; Price int64 `json:"price"` } `json:"weapons"`
 	FreeWeapons []string `json:"freeWeapons"`
 	Mastery struct { SuppressorLevel int `json:"suppressorLevel"`; SuppressorKills int64 `json:"suppressorKills"` } `json:"mastery"`
@@ -178,8 +179,11 @@ func (s *profileStore) weaponCounts(raw map[string]int64) map[string]int64 {
 func (s *profileStore) combatIDs() []string {
 	ids := []string{}; for _, item := range s.economy.Weapons { ids = append(ids, item.ID) }; return append(ids, "knife")
 }
+func (s *profileStore) validCharacter(id string) bool {
+	for _, character := range s.economy.Characters { if character == id { return true } }; return false
+}
 func (s *profileStore) migrateWeapons() {
-	if s.profile.CharacterID != "male" && s.profile.CharacterID != "female" { s.profile.CharacterID = "male" }
+	if !s.validCharacter(s.profile.CharacterID) { s.profile.CharacterID = "male" }
 	owned := s.profile.OwnedWeapons; s.profile.OwnedWeapons = []string{}
 	for _, item := range s.economy.Weapons { found := item.Price == 0; for _, id := range owned { if id == item.ID { found = true } }; if found { s.profile.OwnedWeapons = append(s.profile.OwnedWeapons, item.ID) } }
 	s.profile.WeaponKills = s.weaponCounts(s.profile.WeaponKills)
@@ -198,6 +202,7 @@ func openProfileStore(content fs.FS) (*profileStore, error) {
 	s := &profileStore{file: filepath.Join(dir, "profile.json"), prices: map[string]int64{}, weaponPrices: map[string]int64{}}
 	config, err := fs.ReadFile(content, "economy.json"); if err != nil { return nil, err }
 	if err := json.Unmarshal(config, &s.economy); err != nil || s.economy.Version != 1 { return nil, fmt.Errorf("invalid economy configuration") }
+	if len(s.economy.Characters) == 0 { s.economy.Characters = []string{"male", "female"} } // Older bundled catalogs.
 	for _, outfit := range s.economy.Outfits { if outfit.Price < 0 || outfit.Price > 1000000 { return nil, fmt.Errorf("invalid cosmetic price") }; s.prices[outfit.ID] = outfit.Price }
 	if _, ok := s.prices["field"]; !ok { return nil, fmt.Errorf("missing default cosmetic") }
 	for _, item := range s.economy.Weapons { if item.Price != 0 && (item.Price < 600 || item.Price > 2000) { return nil, fmt.Errorf("invalid weapon price") }; s.weaponPrices[item.ID] = item.Price }
@@ -249,7 +254,7 @@ func (s *profileStore) serve(w http.ResponseWriter, r *http.Request) {
 	case "name":
 		name := cleanCallsign(operation.Callsign); changed = name != next.Callsign; next.Callsign = name
 	case "character":
-		if operation.CharacterID != "male" && operation.CharacterID != "female" { responseError("존재하지 않는 캐릭터입니다."); return }
+		if !s.validCharacter(operation.CharacterID) { responseError("존재하지 않는 캐릭터입니다."); return }
 		changed = next.CharacterID != operation.CharacterID; next.CharacterID = operation.CharacterID
 	case "round":
 		if !validLocalID(operation.RoundID) { responseError("라운드 ID가 올바르지 않습니다."); return }

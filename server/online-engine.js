@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
-import { Room, botDifficultyForRating } from '../shared/simulation.js';
+import { Room } from '../shared/simulation.js';
 import { NETWORK_PROTOCOL, RULES, MATCHMAKING_MAPS as MAPS } from '../shared/world.js';
 import { isWeaponId, getWeapon, getSkin, ownsWeapon } from '../shared/catalog.js';
 import { EMPTY_INPUT, advanceTime } from '../shared/movement.js';
@@ -12,6 +12,7 @@ import { CustomGateway } from './custom-gateway.js';
 import { LanGateway } from './lan-gateway.js';
 import { onlineBrowserOrigins } from '../shared/online-network.js';
 import { highestRank } from '../shared/ranks.js';
+import { ratedBotBaseline, assignRatedBotDifficulties } from './rated-bots.js';
 
 const validId = (id) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 const neutral = (player) => ({ ...EMPTY_INPUT, yaw: player.yaw, pitch: player.pitch, weaponId: player.weaponId });
@@ -94,7 +95,7 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
       const gameType = plan.gameType || 'ffa';
       if (plan.gameType && plan.players.length + plan.bots !== (gameType === 'teams' ? 6 : 4)) throw new Error('Invalid competitive roster size.');
       if (!['ffa', 'teams'].includes(gameType) || gameType === 'teams' && (plan.mode !== 'RANKED' || plan.players.some((p) => !['blue', 'red'].includes(plan.teams?.[p.id])))) throw new Error('Invalid authoritative teams.');
-      const room = new OnlineRoom(id.slice(0, 5).toUpperCase(), { mode: plan.mode.toLowerCase(), gameType, mapId: plan.mapId, bots: 0, fragLimit: plan.fragLimit, roundSeconds: plan.roundSeconds, botDifficulty: botDifficultyForRating(average), clock });
+      const room = new OnlineRoom(id.slice(0, 5).toUpperCase(), { mode: plan.mode.toLowerCase(), gameType, mapId: plan.mapId, bots: 0, fragLimit: plan.fragLimit, roundSeconds: plan.roundSeconds, botDifficulty: ratedBotBaseline(average, gameType), clock });
       for (const profile of plan.players) {
         const player = room.addPlayer(profile.id, profile.callsign, false, { ownedWeapons: profile.ownedWeapons, weaponKills: profile.weaponKills, suppressedWeapons: profile.suppressedWeapons, outfitId: profile.outfitId, characterId: profile.characterId });
         player.rankBadge = highestRank(profile);
@@ -102,6 +103,7 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
       }
       for (let i = 0; i < plan.bots; i++) room.addPlayer(`bot-${randomUUID()}`, `AI ${i + 1}`, true);
       if (gameType === 'teams' && Math.abs([...room.players.values()].filter((p) => p.teamId === 'blue').length - [...room.players.values()].filter((p) => p.teamId === 'red').length) > 1) throw new Error('Unbalanced authoritative teams.');
+      if (plan.bots) assignRatedBotDifficulties(room.players.values(), gameType, room.botDifficulty);
       room.phase = 'waiting'; room.roundId = id; room.hostId = null;
       const match = { id, plan, room, sockets: new Map(), ready: new Set(), countdownEndsAt: null, disconnected: new Map(), abandoned: new Set(), deadline: clock() + 30_000, settlement: 'pending', lastHeartbeat: clock(), nextSettle: 0, settling: false, lastHealthy: clock() };
       matches.set(id, match); return match;
@@ -110,7 +112,10 @@ export function createOnlineEngine({ client = new SpringEngineClient(), host = p
   }
   function snapshot(match, flush = true) {
     const state = match.room.snapshot(flush);
-    return { ...state, online: { matchId: match.id, settlement: match.settlement, connected: match.sockets.size, expected: match.plan.players.length, ready: match.ready.size, countdownEndsAt: match.countdownEndsAt, countdownMs }, players: state.players.map((player) => ({ ...player, connected: player.isBot || match.sockets.has(player.id), abandoned: !!match.room.players.get(player.id).abandoned })) };
+    return { ...state, online: { matchId: match.id, settlement: match.settlement, connected: match.sockets.size, expected: match.plan.players.length, ready: match.ready.size, countdownEndsAt: match.countdownEndsAt, countdownMs }, players: state.players.map((player) => {
+      const member = match.room.players.get(player.id);
+      return { ...player, connected: player.isBot || match.sockets.has(player.id), abandoned: !!member.abandoned, ...(player.isBot ? { botDifficulty: member.botDifficulty } : {}) };
+    }) };
   }
   function activate(match) {
     const room = match.room; room.phase = 'active'; room.startedAt = clock(); room.endsAt = room.startedAt + room.roundSeconds * 1000; match.countdownEndsAt = null;

@@ -1,10 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkText, publicationRisk, pngMetadata } from '../scripts/security-audit.mjs';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { checkText, publicationRisk, pngMetadata, publicationFiles } from '../scripts/security-audit.mjs';
 
 test('publication guard blocks local credentials and generated output, including force-tracked files', () => {
   for (const file of ['.env', '.env.production', '.npmrc', 'private.key', 'service-account-prod.json', 'release/game.zip', '.toolchain/go/bin/go', 'artifacts/lobby.png', 'profile.json', 'profile.json.tmp', 'linkshot-profile-backup.json', 'data/profiles.json', 'online-server/target/postgres-tests/PG_VERSION', 'online-server/app.jar', 'next-plan.md']) assert.ok(publicationRisk(file), file);
   for (const file of ['.env.example', '.env.production.example', 'public/assets/foundry-hero.png', 'shared/catalog.js']) assert.equal(publicationRisk(file), null, file);
+});
+
+test('publication scan excludes deleted files but retains changed and new present files', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'linkshot-scope-'));
+  try {
+    execFileSync('git', ['init', '--quiet'], { cwd: root });
+    for (const file of ['removed.png', 'tracked.js', '.gitignore']) await writeFile(path.join(root, file), file === '.gitignore' ? 'ignored.txt\n' : '');
+    execFileSync('git', ['add', '.'], { cwd: root });
+    await unlink(path.join(root, 'removed.png'));
+    for (const file of ['tracked.js', 'new.js', 'ignored.txt']) await writeFile(path.join(root, file), 'changed');
+    const files = await publicationFiles(root, root);
+    assert.deepEqual(files, ['.gitignore', 'new.js', 'tracked.js']);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('security findings identify rules without exposing the matching values', () => {

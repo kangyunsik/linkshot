@@ -21,7 +21,8 @@ async function mockApi(context, user, handler = () => null) {
 
 test('ranked loadout cards, actual weapon thumbnails and skins update immediately and survive refresh independently of local equipment', async ({ context, page }) => {
   const errors = []; page.on('pageerror', (error) => errors.push(error.message)); const user = profile(); user.ownedWeapons.push('awp'); await mockApi(context, user);
-  await page.goto(origin); await expect(page.locator('#hero-rank-tier')).toHaveText('브론즈 I'); await expect(page.locator('#profile-casual-rating')).toHaveText('실버 IV');
+  await page.goto(origin); await expect(page.locator('#hero-rank-tier')).toHaveText('브론즈 I');
+  await page.locator('#dashboard-ffa').click(); await expect(page.locator('#hero-rank-tier')).toHaveText('실버 IV');
   await page.getByRole('tab', { name: '랭크: 팀전 랭크', exact: true }).click(); await page.locator('#armory-button').click();
   await expect(page.locator('#weapon-choices button')).toHaveCount(WEAPONS.length); await expect(page.locator('#skin-choices button')).toHaveCount(6);
   await page.locator('#weapon-choices [data-weapon=awp]').click(); await page.locator('#skin-choices [data-skin=arctic]').click();
@@ -30,7 +31,7 @@ test('ranked loadout cards, actual weapon thumbnails and skins update immediatel
   await page.getByRole('button', { name: '장비 저장', exact: true }).click();
   await expect(page.locator('#loadout-weapon')).toContainText('AWP'); await expect(page.locator('#loadout-skin')).toHaveText('ARCTIC GHOST'); await expect(page.locator('#armory-button')).toHaveAttribute('data-weapon', 'awp');
   await expect(page.locator('#loadout-description')).not.toContainText(/사망|E로/); await expect(page.locator('#loadout-preview')).toBeVisible();
-  await page.reload(); await expect(page.locator('#profile-rank-tier')).toHaveText('브론즈 I'); await page.locator('#mode-ranked').click(); await expect(page.locator('#loadout-weapon')).toContainText('AWP'); await expect(page.locator('#loadout-skin')).toHaveText('ARCTIC GHOST');
+  await page.reload(); await expect(page.locator('#hero-rank-tier')).toHaveText('브론즈 I'); await page.locator('#mode-ranked').click(); await expect(page.locator('#loadout-weapon')).toContainText('AWP'); await expect(page.locator('#loadout-skin')).toHaveText('ARCTIC GHOST');
   await page.locator('#mode-practice').click(); await expect(page.locator('#loadout-weapon')).toContainText('AWP'); await page.locator('#mode-ranked').click(); await expect(page.locator('#loadout-weapon')).toContainText('AWP');
   for (const [width, height] of [[1440, 1000], [1366, 768], [390, 844]]) {
     await page.setViewportSize({ width, height }); await expect(page.locator('#hero-rank-tier')).toBeVisible(); await expect(page.locator('#armory-button')).toBeInViewport();
@@ -73,8 +74,10 @@ test('ranked countdown renders over the real arena, then victory lasts five seco
     match.room.teamScores.blue = 1; player.kills = 1; player.weaponKills.awp = 1; const started = Date.now(); match.room.finish(); engine.tick(1 / 60); await expect.poll(() => match.settlement).toBe('saved'); engine.broadcast();
     await expect(page.locator('#round-effect')).toHaveAttribute('data-kind', 'victory'); await expect(page.locator('#round-effect h2')).toHaveText('VICTORY'); await expect(page.locator('#round-overlay')).toBeHidden();
     engine.broadcast(); await expect(page.locator('#round-overlay')).toBeVisible({ timeout: 9000 }); expect(Date.now() - started).toBeGreaterThanOrEqual(4900);
-    await expect(page.locator('#online-rating-summary')).toContainText('승급'); await expect(page.locator('#ranked-results-transition')).toHaveText('승급'); await expect(page.locator('#profile-points')).toHaveText('170');
+    await expect(page.locator('#online-rating-summary')).toContainText('승급'); await expect(page.locator('#ranked-results-transition')).toHaveText('승급'); await expect(page.locator('#top-points')).toHaveText('170');
     await expect(page.locator('#ranked-results')).toHaveAttribute('data-phase', 'complete'); await expect(page.locator('#ranked-results-delta')).toHaveText('+26 RP'); await expect(page.locator('#ranked-results-progress')).toContainText('16 RP'); await expect(page.locator('#ranked-results-tiers')).toHaveText('브론즈 I → 실버 V');
+    await expect(page.locator('#ranked-results-emblem')).toHaveAttribute('src', /ranks\/silver/);
+    await expect(page.locator('#round-table')).toContainText('BOT · 중급');
     await page.screenshot({ path: 'artifacts/animated-ranked-results.png' });
     await page.locator('#round-leave').click(); await expect(page.locator('#lobby-match-result')).toBeVisible(); await expect(page.locator('#lobby-result-delta')).toHaveText('+26 RP'); await expect(page.locator('#lobby-result-detail')).toContainText('승급'); await expect(page.locator('#hero-rank-tier')).toHaveText('실버 V'); expect(errors).toEqual([]);
   } finally { await engine.close(); }
@@ -123,8 +126,8 @@ test('collapsed matchmaking stays in the reserved main action slot, can be cance
 test('all deployment modes share the same account armory and LP, while device records remain untouched', async ({ context, page }) => {
   const user = profile(); user.points = 108690;
   await mockApi(context, user); await page.goto(origin);
-  await expect(page.locator('#profile-rank-tier')).toHaveText('브론즈 I');
-  await expect(page.locator('#profile-points')).toHaveText('108,690');
+  await expect(page.locator('#hero-rank-tier')).toHaveText('브론즈 I');
+  await expect(page.locator('#top-points')).toHaveText('108,690');
   for (const mode of ['ranked', 'practice', 'lan', 'custom', 'casual']) {
     await page.locator(`#mode-${mode}`).click(); await page.locator('#armory-button').click();
     await expect(page.locator('#armory-dialog')).toBeVisible();
@@ -133,9 +136,9 @@ test('all deployment modes share the same account armory and LP, while device re
     if (mode === 'ranked') { await page.locator('#weapon-choices [data-weapon=awp]').click(); await expect(page.locator('#weapon-choices [data-weapon=awp]')).toHaveClass(/locked/); await expect(page.locator('#armory-owned-state')).toContainText('계정 LP로 영구 해금'); }
     if (mode === 'practice') await expect(page.locator('#weapon-choices [data-weapon=awp]')).toHaveClass(/locked/);
     await page.getByRole('button', { name: '장비 저장', exact: true }).click();
-    await expect(page.locator('#profile-points')).toHaveText('108,690');
+    await expect(page.locator('#top-points')).toHaveText('108,690');
   }
-  await page.locator('.profile-points').click(); await expect(page.locator('#shop-dialog')).toBeVisible(); await expect(page.locator('#shop-points')).toHaveText('108,690'); await expect(page.locator('#local-profile-points')).toHaveText('0 LP');
+  await page.locator('#wallet-button').click(); await expect(page.locator('#shop-dialog')).toBeVisible(); await expect(page.locator('#shop-points')).toHaveText('108,690'); await expect(page.locator('#shop-wallet-scope')).toHaveText('계정 지갑');
 });
 
 test('account LP unlocks a firearm for practice, LAN and custom without changing the offline wallet', async ({ context, page }) => {
@@ -144,14 +147,53 @@ test('account LP unlocks a firearm for practice, LAN and custom without changing
   await mockApi(context, user, pathname => {
     if (pathname === '/api/account/weapons/m82/purchase') { if (!user.ownedWeapons.includes('m82')) { user.points -= 2000; user.ownedWeapons.push('m82'); } purchases++; return user; }
   });
-  await page.goto(origin); await expect(page.locator('#profile-rank-tier')).toHaveText('브론즈 I'); await page.locator('#mode-practice').click(); await page.locator('#armory-button').click();
+  await page.goto(origin); await expect(page.locator('#hero-rank-tier')).toHaveText('브론즈 I'); await page.locator('#mode-practice').click(); await page.locator('#armory-button').click();
   await page.locator('#weapon-choices [data-weapon=m82]').click(); await expect(page.locator('#armory-unlock')).toHaveText('2,000 LP로 영구 해금'); await expect(page.locator('#armory-unlock')).toBeEnabled(); await page.locator('#armory-unlock').click(); await page.locator('#confirm-purchase').click();
-  await expect(page.locator('#purchase-dialog')).toBeHidden(); await expect(page.locator('#profile-points')).toHaveText('98,000'); await expect(page.locator('#armory-owned-state')).toContainText('영구 해금됨');
+  await expect(page.locator('#purchase-dialog')).toBeHidden(); await expect(page.locator('#top-points')).toHaveText('98,000'); await expect(page.locator('#armory-owned-state')).toContainText('영구 해금됨');
   await page.getByRole('button', { name: '장비 저장', exact: true }).click();
-  for (const mode of ['practice','lan','custom']) { await page.locator(`#mode-${mode}`).click(); await expect(page.locator('#profile-points')).toHaveText('98,000'); await expect(page.locator('#loadout-weapon')).toContainText('Barrett M82'); }
+  for (const mode of ['practice','lan','custom']) { await page.locator(`#mode-${mode}`).click(); await expect(page.locator('#top-points')).toHaveText('98,000'); await expect(page.locator('#loadout-weapon')).toContainText('Barrett M82'); }
   await page.locator('#mode-practice').click(); await page.locator('#create-button').click(); await expect(page.locator('#pause-overlay')).toBeVisible(); await expect(page.locator('#hud-weapon-name')).toHaveText('Barrett M82'); await page.locator('#leave-button').click();
   expect(purchases).toBe(1); expect(await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1')).points)).toBe(0);
-  await page.reload(); await expect(page.locator('#profile-points')).toHaveText('98,000'); await expect(page.locator('#loadout-weapon')).toContainText('Barrett M82');
+  await page.reload(); await expect(page.locator('#top-points')).toHaveText('98,000'); await expect(page.locator('#loadout-weapon')).toContainText('Barrett M82');
+});
+
+test('desktop wardrobe offers larger full and detail views, buys only unowned outfits, and shares the saved operator across modes', async ({ context, page }) => {
+  const user = { ...profile(), points: 20_500, characterId: 'male', outfitId: 'field', ownedOutfits: ['field', 'runner'] };
+  const purchases = [];
+  await mockApi(context, user, (path, request) => {
+    if (path === '/api/account/character') { user.characterId = request.postDataJSON().characterId; return user; }
+    if (path !== '/api/account/outfit') return null;
+    const { outfitId, purchase } = request.postDataJSON();
+    if (purchase) { purchases.push(outfitId); user.points -= 20_000; user.ownedOutfits.push(outfitId); }
+    user.outfitId = outfitId; return user;
+  });
+  await page.goto(origin); await expect(page.locator('#top-points')).toHaveText('20,500');
+  await page.setViewportSize({ width: 1280, height: 768 });
+  await page.locator('#wallet-button').click(); await expect(page.locator('#shop-wallet-scope')).toHaveText('계정 지갑');
+  await expect(page.locator('#operator-preview-fallback')).toBeHidden();
+  expect((await page.locator('#operator-preview').boundingBox()).height).toBeGreaterThan(450);
+  await page.locator('#operator-detail').click(); await expect(page.locator('#operator-detail')).toHaveAttribute('aria-pressed','true');
+  await page.locator('#operator-turn-right').click(); await page.locator('[data-character=rhea]').click();
+  await expect(page.locator('[data-character=rhea]')).toHaveAttribute('aria-pressed', 'true'); await expect(page.locator('#operator-preview-name')).toHaveText('RHEA');
+  await page.locator('#operator-full').click(); await expect(page.locator('#operator-full')).toHaveAttribute('aria-pressed','true');
+  await page.locator('[data-outfit=runner]').click(); await expect(page.locator('#shop-owned-state')).toHaveText('보유 중');
+  await page.locator('#shop-action').click(); await expect(page.locator('#shop-points')).toHaveText('20,500');
+  await page.locator('[data-outfit=orbital]').click(); await page.locator('#shop-action').click();
+  await expect(page.locator('#purchase-description')).toContainText('20,000 계정 LP');
+  await page.locator('#confirm-purchase').click(); await expect(page.locator('#purchase-dialog')).toBeHidden();
+  await expect(page.locator('#shop-points')).toHaveText('500'); await expect(page.locator('#shop-owned-state')).toHaveText('현재 장착 중');
+  await page.locator('[data-outfit=hazmat]').click(); await expect(page.locator('#shop-action')).toBeDisabled();
+  await expect(page.locator('#shop-point-note')).toContainText('19,500 LP');
+  await expect(page.locator('#shop-point-note')).toBeInViewport();
+  await expect(page.locator('#operator-turn-right')).toBeInViewport();
+  await page.getByLabel('외형 상점 닫기').click(); await expect(page.locator('#shop-dialog')).toBeHidden();
+  await page.reload(); await expect(page.locator('#appearance-name')).toHaveText('RHEA');
+  for (const mode of ['casual', 'ranked', 'practice', 'lan']) {
+    await page.locator(`#mode-${mode}`).click(); await expect(page.locator('#appearance-outfit')).toHaveText('시티라인'); await expect(page.locator('#top-points')).toHaveText('500');
+  }
+  expect(purchases).toEqual(['orbital']);
+  const local = await page.evaluate(() => JSON.parse(localStorage.getItem('linkshot-profile-v1')));
+  expect(local.points).toBe(0); expect(local.characterId).toBe('male'); expect(local.ownedOutfits).toEqual(['field']);
 });
 
 test('reduced-motion rank results show exact signed losses, demotion, draws and placements without replaying or leaking animations', async ({ page }) => {
@@ -166,9 +208,50 @@ test('reduced-motion rank results show exact signed losses, demotion, draws and 
   const loss = { matchId: 'loss', mode: 'CASUAL', outcome: 'LOSS', won: false, rankTierBefore: 'SILVER', rankDivisionBefore: 5, rankPointsBefore: 0, rankPointsDelta: -25, rankTier: 'BRONZE', rankDivision: 1, rankPointsAfter: 75, placementsPlayed: 5, kills: 3, deaths: 8, assists: 1 };
   await page.evaluate(receipt => { window.__results.setReceipt(receipt); window.__results.reveal(); window.__results.setReceipt(receipt); }, loss);
   await expect(page.locator('#ranked-results-delta')).toHaveText('-25 RP'); await expect(page.locator('#ranked-results-transition')).toHaveText('강등'); await expect(page.locator('#ranked-results-emblem')).toHaveAttribute('src', /ffa\/bronze/); await expect(page.locator('#ranked-results-progress')).toContainText('75 RP');
+  await expect(page.locator('#ranked-results-before-emblem')).toBeHidden();
+  expect(await page.locator('#ranked-results').evaluate(node => node.getAnimations({ subtree: true }).length)).toBe(0);
   await page.evaluate(receipt => { window.__results.pending('draw'); window.__results.setReceipt({ ...receipt, matchId: 'draw', outcome: 'DRAW', rankTierBefore: 'UNRANKED', rankTier: 'UNRANKED', rankPointsDelta: 0, rankPointsAfter: 0, placementsPlayed: 3 }); window.__results.reveal(); }, loss);
   await expect(page.locator('#ranked-results-delta')).toHaveText('+0 RP'); await expect(page.locator('#ranked-results-transition')).toHaveText('무승부'); await expect(page.locator('#ranked-results-progress')).toHaveText('배치 3 / 5'); await expect(page.locator('#ranked-results-track')).toHaveAttribute('aria-valuenow', '60');
   await page.evaluate(() => window.__results.reset()); await expect(page.locator('#ranked-results')).toBeHidden();
+});
+
+test('the in-game result holds the previous emblem, animates placement and demotion, and reveals the exact new rank without replay', async ({ page }) => {
+  await page.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript', body: '' }));
+  await page.emulateMedia({ reducedMotion: 'no-preference' }); await page.goto(origin);
+  await page.evaluate(async () => {
+    const { RankedResults } = await import('/ranked-results.js');
+    document.getElementById('lobby').hidden = true; document.getElementById('game-shell').hidden = false;
+    window.__results = new RankedResults();
+  });
+  const placement = { matchId: 'placed', mode: 'RANKED', outcome: 'WIN', won: true, rankTierBefore: 'UNRANKED', rankDivisionBefore: 5, rankPointsBefore: 0, rankPointsDelta: 50, rankTier: 'SILVER', rankDivision: 5, rankPointsAfter: 12, placementsPlayed: 5, ratingDelta: 32, ratingMultiplier: 2 };
+  const down = { ...placement, matchId: 'demoted', mode: 'CASUAL', outcome: 'LOSS', won: false, rankTierBefore: 'SILVER', rankDivisionBefore: 5, rankPointsBefore: 12, rankPointsDelta: -50, rankTier: 'BRONZE', rankDivision: 1, rankPointsAfter: 62, ratingDelta: -24 };
+  for (const [receipt, transition, before, after, ending] of [
+    [placement, 'placement', '/ranks/unranked', '/ranks/silver', '실버 V'],
+    [down, 'demotion', '/ranks/ffa/silver', '/ranks/ffa/bronze', '브론즈 I'],
+  ]) {
+    await page.evaluate(receipt => { const results = window.__results; document.getElementById('round-overlay').hidden = true; results.setReceipt(receipt); }, receipt);
+    await expect(page.locator('#ranked-results')).toHaveAttribute('data-badge', 'before');
+    expect(await page.locator('#ranked-results').evaluate(node => node.getAnimations({ subtree: true }).length)).toBe(0);
+    const animation = await page.evaluate(receipt => {
+      const panel = window.__results; document.getElementById('round-overlay').hidden = false; panel.reveal();
+      const [outgoing] = panel.beforeMark.getAnimations(), [incoming] = panel.mark.getAnimations();
+      panel.reveal(); panel.setReceipt(receipt);
+      return { same: outgoing === panel.beforeMark.getAnimations()[0] && incoming === panel.mark.getAnimations()[0], before: panel.beforeMark.getAttribute('src'), after: panel.mark.getAttribute('src'),
+        outgoing: outgoing.effect.getKeyframes().map(frame => Number(frame.opacity)), incoming: incoming.effect.getKeyframes().map(frame => Number(frame.opacity)),
+        hold: outgoing.effect.getTiming().delay, label: panel.current.textContent };
+    }, receipt);
+    expect(animation.same).toBe(true); expect(animation.hold).toBeGreaterThan(500);
+    expect(animation.before).toContain(before); expect(animation.after).toContain(after); expect(animation.label).not.toBe(ending);
+    expect(animation.outgoing).toEqual([1, 0]); expect(animation.incoming).toEqual([0, 1, 1]);
+    await expect(page.locator('#ranked-results')).toHaveAttribute('data-transition', transition);
+    await expect(page.locator('#ranked-results')).toHaveAttribute('data-phase', 'complete');
+    await expect(page.locator('#ranked-results-current')).toHaveText(ending);
+    await expect(page.locator('#ranked-results-progress')).toContainText(`${receipt.rankPointsAfter} RP`);
+    await expect(page.locator('#ranked-results-multiplier')).toHaveText('초반 MMR·RP ×2');
+    await expect(page.locator('#ranked-results-mmr')).toHaveText(`${receipt.ratingDelta > 0 ? '+' : ''}${receipt.ratingDelta} MMR`);
+    await expect(page.locator('#ranked-results-before-emblem')).toBeHidden();
+    expect(await page.locator('#ranked-results').evaluate(node => node.getAnimations({ subtree: true }).length)).toBe(0);
+  }
 });
 
 test('acceptance gauges count down from the server deadline without replaying on polling or folding the dialog', async ({ page }) => {

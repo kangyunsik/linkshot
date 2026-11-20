@@ -3,9 +3,6 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-const executeFile = promisify(execFile);
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const engine = process.env.ART_ENGINE_DIR || path.join(homedir(), 'engine');
@@ -56,27 +53,12 @@ const assets = [
     ['forge', 'dark gunmetal and burnt orange forged steel surface pattern, angular copper molten cracks, geometric armor camouflage, scratched metal, intricate abstract industrial pattern, seamless flat surface, no perspective'],
     ['camo', 'white gray black digital camouflage pattern texture, irregular angular geometric polygon patches, arctic military camouflage, flat graphic pattern, matte painted surface, seamless all over pattern, no perspective'],
   ].map(([id, pattern], i) => ({ file: `skin-${id}.png`, width: 768, height: 768, seed: 7092600 + i, prompt: `masterpiece, best quality, no humans, ${pattern}, game weapon skin texture, top down orthographic material swatch, flat even lighting, full frame abstract pattern` })),
-  ...[
-    ['field', 'military, soldier, olive green jacket, tactical vest, cargo pants, boots, orange trim, fingerless gloves, headset, goggles on forehead, uncovered head, practical field uniform'],
-    ['runner', 'scout, (hood down:1.4), uncovered head, dark gray hooded jacket with hood resting behind neck, mint green trim, tactical vest, cargo pants, boots, fingerless gloves, futuristic reconnaissance uniform'],
-    ['hazmat', 'hazmat specialist, yellow protective jacket, yellow cargo pants, dark gloves, boots, clear face shield raised above forehead, respirator hanging below chin, compact oxygen backpack, practical industrial workwear'],
-    ['orbital', 'astronaut, (transparent glass helmet:1.2), (face visible through glass:1.4), white and pale blue spacesuit, gloves, boots, compact life support backpack, blue chest control panel'],
-    ['retrobot', 'human pilot, orange armored vest over dark gray fabric uniform, orange shoulder guards, cargo pants, boots, fingerless gloves, headset, goggles on forehead, uncovered head, green equipment lights, retro futuristic pilot clothing'],
-  ].map(([id, character], i) => ({
-    file: `outfit-${id}.png`, width: 768, height: 1024, seed: 7093700 + i,
-    prompt: `masterpiece, best quality, very aesthetic, rating:general, 1boy, adult man, solo, (human:1.3), (uncovered human face:1.5), (visible eyes nose and mouth:1.4), short black hair, brown eyes, looking at viewer, full body, standing, ${character}, fully clothed, natural human anatomy, original character, game character concept illustration, entire body including boots, centered, plain dark blue gray background, soft studio lighting, detailed fabric`,
-    negative: 'worst quality, low quality, blurry, text, logo, watermark, signature, multiple people, crowd, cropped feet, close up, nude, naked, bikini, revealing clothes, blood, gore, weapon in hands, firearm, sword, robot, android, mannequin, blocky body, square head, mechanical face, (covered face:1.5), (faceless:1.5), full-face helmet, opaque visor, black face, mask over face, closed helmet, silhouette',
-  })),
-  { file: 'outfit-panels.png', width: 768, height: 768, seed: 7092800, prompt: 'masterpiece, best quality, no humans, neutral light gray futuristic polymer armor material texture, tiny geometric panel seams, fine matte microtexture, subtle fabric weave, clean abstract technical surface, even soft lighting, flat orthographic material swatch, seamless full frame pattern, no perspective' },
-  { file: 'operator-fabric.png', width: 768, height: 768, seed: 7094100, prompt: 'masterpiece, best quality, no humans, seamless neutral medium gray ripstop military uniform fabric texture, fine woven textile fibers, small subtle square ripstop grid, realistic matte cotton nylon cloth surface, monochrome gray material swatch, full frame flat orthographic view, uniform diffuse studio lighting, no objects, no folds, no symbols' },
   { file: 'operator-armor.png', width: 768, height: 768, seed: 7094101, prompt: 'masterpiece, best quality, no humans, seamless neutral medium gray ballistic vest cordura fabric texture, fine technical woven textile surface, subtle scuffed polymer microtexture, realistic tactical protective equipment material swatch, monochrome gray, flat orthographic full frame, uniform diffuse studio lighting, no objects, no symbols, no large panels' },
-  { file: 'operator-jacket.png', width: 768, height: 768, crop: [210, 250, 560, 640], seed: 7094102, prompt: 'masterpiece, best quality, no humans, front view tactical combat jacket chest panel fabric texture, neutral light gray military field jacket, cordura fabric, sewn cargo pockets, practical stitching, zipper in center, small webbing straps, natural cloth folds, matte woven textile, realistic game clothing diffuse texture, flat orthographic studio lighting, square full frame material, no head, no hands, no body, no text, no insignia' },
 ];
 const negative = 'worst quality, low quality, lowres, blurry, text, logo, watermark, signature, people, person, character, face, organic, plants, oversaturated';
-const selectedOutfits = process.argv.find((arg) => arg.startsWith('--outfit='))?.slice('--outfit='.length).split(',');
 const selectedAsset = process.argv.find((arg) => arg.startsWith('--asset='))?.slice('--asset='.length);
 if (selectedAsset && !assets.some((asset) => asset.file === selectedAsset)) throw new Error('Unknown asset filename');
-if (selectedOutfits?.some((id) => !assets.some((asset) => asset.file === `outfit-${id}.png` && id !== 'panels'))) throw new Error('알 수 없는 외형입니다. --outfit=field,runner,hazmat,orbital,retrobot 중 선택하세요.');
+if (process.argv.some(arg => arg === '--outfits' || arg.startsWith('--outfit='))) throw new Error('외형 카드는 npm run assets:characters로 실제 게임 모델에서 렌더링합니다.');
 
 async function api(route, options = {}) {
   const response = await fetch(`${base}${route}`, { ...options, signal: AbortSignal.timeout(30_000) });
@@ -105,8 +87,6 @@ for (const asset of assets) {
   if (selectedAsset && asset.file !== selectedAsset) continue;
   if (process.argv.includes('--maps') && !asset.file.endsWith('-hero.png')) continue;
   if (process.argv.includes('--materials') && !asset.file.startsWith('operator-')) continue;
-  if (selectedOutfits && !selectedOutfits.some((id) => asset.file === `outfit-${id}.png`)) continue;
-  if (process.argv.includes('--outfits') && !/^outfit-(?:field|runner|hazmat|orbital|retrobot)\.png$/.test(asset.file)) continue;
   const target = path.join(root, asset.documentationAsset ? 'docs/maps/concepts' : 'public/assets', asset.file);
   if (!process.argv.includes('--force')) {
     try { await access(target); console.log(`기존 애셋 유지: ${asset.file}`); continue; } catch { /* Generate missing assets. */ }
@@ -139,7 +119,6 @@ for (const asset of assets) {
   if (!response.ok) throw new Error(`이미지를 가져오지 못했습니다: ${response.status}`);
   const staged = path.join(root, 'artifacts/asset-staging', asset.file);
   await writeFile(staged, Buffer.from(await response.arrayBuffer()));
-  if (asset.crop) await executeFile(path.join(engine, '.venv/bin/python'), ['-c', 'from PIL import Image; import json,sys; p=sys.argv[1]; Image.open(p).crop(tuple(json.loads(sys.argv[2]))).resize((768,768),Image.Resampling.LANCZOS).save(p)', staged, JSON.stringify(asset.crop)]);
   await rename(staged, target);
   console.log(`저장 완료: ${path.relative(root, target)}`);
 }
@@ -149,7 +128,7 @@ const provenance = {
   modelSource: 'https://huggingface.co/cagliostrolab/animagine-xl-4.0',
   note: 'Locally generated images; no paid API or external image service used. Procedural meshes, UI and sounds are authored in this project.',
 };
-const describe = ({ file, prompt, seed, width, height, crop }) => ({ file, prompt, seed, width, height, ...(crop ? { crop } : {}) });
+const describe = ({ file, prompt, seed, width, height }) => ({ file, prompt, seed, width, height });
 await writeFile(path.join(root, 'public/assets/asset-manifest.json'), JSON.stringify({ ...provenance, assets: assets.filter(asset => !asset.documentationAsset).map(describe) }, null, 2));
 await writeFile(path.join(root, 'docs/maps/concepts/asset-manifest.json'), JSON.stringify({ ...provenance, assets: assets.filter(asset => asset.documentationAsset).map(describe) }, null, 2));
 console.log('모든 로컬 이미지 애셋이 준비되었습니다.');

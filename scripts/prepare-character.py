@@ -80,6 +80,5 @@ with zipfile.ZipFile(SOURCE) as archive:
     pack(archive, f'{prefix}/Hairstyles/Origin at 0/glTF (Godot)/Hair_SimpleParted.gltf', 'operator-hair-v2.glb')
     pack(archive, f'{prefix}/Base Characters/Godot - UE/Superhero_Female_FullBody.gltf', 'operator-female-v3.glb')
     pack(archive, f'{prefix}/Hairstyles/Origin at 0/glTF (Godot)/Hair_Buns.gltf', 'operator-hair-female-v3.glb')
-    pack(archive, f'{prefix}/Hairstyles/Origin at 0/glTF (Godot)/Hair_BuzzedFemale.gltf', 'operator-hair-female-short-v3.glb')
     license_text = archive.read(f'{prefix}/License_Standard.txt').decode('utf-8')
     (OUTPUT / 'LICENSE-Quaternius.txt').write_text('\n'.join(line.rstrip() for line in license_text.splitlines()) + '\n')

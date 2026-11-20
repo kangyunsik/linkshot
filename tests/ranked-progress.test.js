@@ -13,5 +13,13 @@ test('RP animation wraps through a promotion/demotion and lands on the immutable
 test('placement animations show five-game progress, with no invented established rank', () => {
   const receipt = { rankTierBefore: 'UNRANKED', rankTier: 'UNRANKED', rankPointsAfter: 0, placementsPlayed: 3 };
   assert.equal(rankedProgress(receipt, 0).progress, 0.4); assert.equal(rankedProgress(receipt, 1).progress, 0.6);
-  assert.equal(rankedProgress({ ...receipt, rankTier: 'GOLD', placementsPlayed: 5 }, 1).progress, 1);
+  const complete = { ...receipt, rankTier: 'GOLD', placementsPlayed: 5 };
+  assert.equal(rankedProgress(complete, 0).progress, 0.8);
+  assert.ok(rankedProgress(complete, 0.5).progress > 0.98);
+  assert.equal(rankedProgress(complete, 1).progress, 0);
+  assert.deepEqual(rankedProgress({ ...complete, rankPointsAfter: 27 }, 1), { points: 27, progress: .27 });
+});
+test('Challenger changes never invent another division of RP', () => {
+  const receipt = { rankTierBefore: 'DIAMOND', rankDivisionBefore: 1, rankPointsBefore: 100, rankTier: 'CHALLENGER', rankDivision: 1, rankPointsAfter: 100 };
+  for (const t of [0, .2, .5, .7, 1]) assert.deepEqual(rankedProgress(receipt, t), { points: 100, progress: 1 });
 });

@@ -5,3 +5,7 @@
 .hitmarker.headshot{width:42px;height:42px;color:#ffcf80;filter:drop-shadow(0 1px 1px #000d)}
 .hitmarker.headshot .head-accent,.hitmarker.protected .protected-accent{display:block}
 .hitmarker.protected{color:#83d8ff!important}
+#reload-indicator > i {
+  background: linear-gradient(90deg,#a3dbc9 var(--reload-progress,0%),#a3dbc933 var(--reload-progress,0%));
+  animation: none;
+}

@@ -1,0 +1,93 @@
+/* Visual finish for the desktop lobby. The operation grid, history allocation
+   and deployment slots are still owned by dashboard.css. */
+.lobby {
+  --desk-text: #e3e9e6;
+  --desk-muted: #aab9ba;
+  --desk-line: #82979444;
+  --desk-panel: #192428;
+  background: radial-gradient(ellipse at 37% -15%,#253336 0%,#141d22 43%,#11191d 78%);
+}
+.lobby .sidebar { background: #121b1f; border-color: #7e94923b; }
+.lobby .nav-button { color: #91a1a3; border-radius: 6px; }
+.lobby .nav-button:hover,.lobby .nav-button.active { color: #ecb19a; background: #cb987318; }
+.lobby .nav-button.active:before { background: #f2a887; box-shadow: none; border-radius: 2px; }
+.lobby .topbar,.lobby .lobby-footer { border-color: #91a5a139; }
+.lobby .topbar .wordmark { color: #f0f0e8; }
+.lobby .topbar .wordmark span { color: #efa484; }
+.lobby .wordmark small,.lobby .lobby-footer,.lobby .lobby-strip { color: #9aa9a6; }
+.lobby .operator-badge:hover { color: #eed6bd; }
+.lobby .top-points { background: #c4a06417; }
+.lobby .build-tag { color: #a9b9b4; border-color: var(--desk-line); }
+.lobby .page-heading .eyebrow { color: #b1bfbb; letter-spacing: .16em; }
+
+.lobby .competitive-hero,.lobby .deploy-card,.lobby .info-card {
+  border-color: var(--desk-line); border-radius: 7px; box-shadow: 0 8px 24px #0a151920;
+}
+.lobby .competitive-hero {
+  background: radial-gradient(ellipse at 12% 5%,color-mix(in srgb,var(--rank-ink) 11%,#253236),transparent 58%),
+    linear-gradient(148deg,#263237 0%,#182328 72%);
+}
+.record-heading { min-width: 0; }
+.record-heading .eyebrow { color: #aebfbb; font-size: 9px; letter-spacing: .13em; }
+.record-heading h2 { margin: 3px 0 0; font-size: 19px; font-weight: 650; letter-spacing: -.015em; color: var(--desk-text); }
+.lobby .hero-rank { position: relative; border-radius: 5px; }
+.lobby .hero-rank:hover { background: #c1d9d416; }
+.lobby .hero-rank > p { color: #bfcbc7; }
+.lobby .hero-rank > img { filter: drop-shadow(0 5px 13px #0d1c28b3); }
+.lobby .ladder-switch { border-color: #869b964a; background: #162125; border-radius: 5px; }
+.lobby .ladder-switch button { color: #b9c5c4; border-radius: 3px; }
+.lobby .ladder-switch button:hover { background: #74878438; }
+.lobby .ladder-switch button[aria-pressed=true] { color: #152522; background: #bdd3c1; font-weight: 700; }
+.lobby .competitive-stats { background: #111d21ad; border-color: #93a7a235; border-radius: 5px; }
+.lobby .competitive-stats span,.lobby .competitive-stats small { color: #aebebb; }
+.lobby .competitive-stats strong { color: #e6eeea; font-variant-numeric: tabular-nums; }
+.lobby .recent-matches { position: relative; }
+.lobby .recent-matches h3 { color: #dfebe7; }
+.lobby .recent-matches h3:before { content: ''; display: inline-block; width: 3px; height: 9px; background: #a5c2b4; vertical-align: 0; margin-right: 7px; border-radius: 1px; }
+.lobby .recent-matches header span { color: #b0c0bc; }
+.lobby .recent-match:not(.empty) { border-color: #76878138; border-left-color: var(--result-ink); background: linear-gradient(108deg,#273538,#1c282c 78%); }
+.lobby .match-map-name,.lobby .match-score small,.lobby .match-points small { color: #a9bbba; }
+.lobby .recent-match-list:not(:has(> [data-match])) { opacity: .48; }
+.lobby .recent-match-list:not(:has(> [data-match])) .match-copy { visibility: hidden; }
+.match-empty-message { position: absolute; align-self: center; top: 55%; transform: translateY(-50%); z-index: 1; max-width: 92%; margin: 0; padding: 6px 9px; border-radius: 4px; border: 1px solid #9fb6ab2e; background: #17242aee; color: #bfcfca; pointer-events: none; text-align: center; font-size: 11px; }
+.lobby .selected-map { border-top-color: var(--desk-line); }
+.lobby .selected-map small { color: #a6b7b4; }
+.lobby .hero-map-change { color: #d7e3de; background: #b2c3ae10; border: 1px solid var(--desk-line); border-radius: 5px; }
+.lobby .hero-map-change:not(:disabled):hover { border-color: #c4d5c1; background: #a4bca72a; }
+
+.lobby .deploy-card { background: linear-gradient(143deg,#273235,#192428 63%); }
+.lobby .deploy-card .card-eyebrow,.lobby .mode-information-button { color: #aebfba; }
+.lobby .deploy-card h2 { color: var(--desk-text); font-weight: 700; }
+.lobby .mode-switch { border-color: #8a9c9652; background: #121c20; border-radius: 6px; }
+.lobby .mode-switch > button { color: #aebdbc; border-color: transparent; border-radius: 4px; }
+.lobby .mode-switch > button:hover { color: #e5ece8; background: #afc0b51d; }
+.lobby .mode-switch > button[aria-selected=true] { color: #ffe3d1; background: #daa38324; border: 1px solid #dfac854e; font-weight: 700; }
+.lobby .mode-switch > button[aria-selected=true]::before { content: ''; display: inline-block; width: 4px; height: 4px; margin-right: 5px; border-radius: 50%; background: #f2aa89; vertical-align: .14em; }
+.lobby .deployment-actions > #create-button { background: #e9aa89; color: #171d1d; font-weight: 750; border-radius: 5px; }
+.lobby .deployment-actions > #create-button:hover:not(:disabled) { background: #fac4a3; }
+.lobby .deployment-actions > #create-button:disabled { color: #bdc2bc; background: #43504e; opacity: 1; cursor: not-allowed; }
+.lobby .deployment-actions > .secondary-button { color: #c8d3ca; border-color: #829a8e60; }
+.lobby .deployment-actions > .secondary-button:hover { background: #a5bca522; }
+.lobby .briefing-grid .weapon-info { background: radial-gradient(ellipse at 78% 45%,#385052,#1b282d 65%); }
+.lobby .weapon-info::before { background: linear-gradient(90deg,#1b282b 1%,#1b282bd0 35%,transparent 74%); }
+.lobby .network-info { background: linear-gradient(115deg,#202d31,#1a2528); }
+.lobby .info-card:hover { border-color: #acbeb4; }
+.lobby .info-copy .card-eyebrow,.lobby .info-copy p { color: #b2c1bd; }
+.lobby .loadout-skin { color: #bfd3b7; }
+.lobby .lobby-strip-left button { color: #d1dcd6; }
+
+@media(min-width:741px) and (min-height:761px) {
+  .lobby .deploy-card h2 { font-size: 21px; }
+  .lobby .mode-switch > button { font-size: 12px; }
+  .lobby .competitive-stats span { font-size: 11px; }.lobby .competitive-stats small { font-size: 9px; }
+  .lobby #hero-record { font-size: clamp(13px,1.5vw,20px); }.lobby #hero-combat-counts { font-size: clamp(11px,1.1vw,15px); }
+  .lobby .recent-matches h3 { font-size: 13px; }.lobby .recent-matches header span { font-size: 10px; }
+  .lobby .match-status { font-size: 10px; line-height: 12px; }.lobby .match-map-name { font-size: 8px; }
+  .lobby .match-score strong,.lobby .match-points strong { font-size: 11px; }
+  .lobby .selected-map strong { font-size: 12px; }
+  .lobby .lobby-strip,.lobby .lobby-footer { font-size: 8px; }
+}
+@media(max-height:760px), (max-width:740px) {
+  .record-heading h2 { font-size: 13px; }.record-heading .eyebrow { display: none; }
+  .match-empty-message { font-size: 8px; padding: 3px 6px; }
+}

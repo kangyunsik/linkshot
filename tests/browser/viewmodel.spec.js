@@ -58,7 +58,7 @@ test('anatomical first-person hands keep correct depth, remain visible near wall
       game.camera.remove(blocker); blocker.geometry.dispose(); blocker.material.dispose(); game.renderer.setRenderTarget(null); target.dispose();
       const { pump, supportArm } = game.activeModel.userData, left = game.activeModel.getObjectByName('left-hand');
       game.scene.updateMatrixWorld(true); const before = left.getWorldPosition(new THREE.Vector3()).sub(pump.getWorldPosition(new THREE.Vector3()));
-      const now = performance.now(); game.lastFire = now - 300; game.previousFrame = now - 16; game.animate(now); cancelAnimationFrame(game.frameId); game.scene.updateMatrixWorld(true);
+      const now = performance.now(); game.lastFire = now - 300; game.previousFrame = now - 40; game.animate(now); cancelAnimationFrame(game.frameId); game.scene.updateMatrixWorld(true);
       const after = left.getWorldPosition(new THREE.Vector3()).sub(pump.getWorldPosition(new THREE.Vector3())); game.renderFrame();
       const lights = []; game.scene.traverse((object) => { if (object.isLight) lights.push(object); });
       return { changed, preserved: preserved / Math.max(1, changed), worldChangedAbove, pumpOffset: supportArm.position.z, gripError: before.distanceTo(after), lightsShared: lights.every((light) => (light.layers.mask & 3) === 3), restored: game.camera.layers.mask === 1 && game.scene.background !== null && game.renderer.autoClear && game.renderer.info.autoReset, wallVisible: wall.some((value, i) => i % 4 === 0 && value > 150) };

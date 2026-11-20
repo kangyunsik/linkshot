@@ -57,12 +57,18 @@ test('leaving one round cannot claim completion points and a new round has its o
 });
 
 test('outfit purchases validate balance, charge once and cannot equip unowned outfits', () => {
-  const original = createProfile(identity); original.points = 249;
-  assert.throws(() => purchaseOutfit(original, 'runner'), /부족/); assert.equal(original.points, 249); assert.deepEqual(original.ownedOutfits, ['field']);
-  original.points = 250;
-  const bought = purchaseOutfit(original, 'runner'); assert.equal(bought.cost, 250); assert.equal(bought.profile.points, 0); assert.equal(bought.profile.equippedOutfitId, 'runner');
-  assert.equal(purchaseOutfit(bought.profile, 'runner').cost, 0); assert.equal(bought.profile.ownedOutfits.filter((id) => id === 'runner').length, 1);
-  assert.throws(() => equipOutfit(bought.profile, 'orbital'), /보유/); assert.throws(() => purchaseOutfit(original, '../unknown'), /존재/);
+  const original = createProfile(identity);
+  assert.equal(getOutfit('field').label, '필드 이슈'); assert.equal(purchaseOutfit(original, 'field').cost, 0);
+  for (const item of OUTFITS.filter(outfit => outfit.id !== 'field')) {
+    assert.equal(item.price, 20_000); original.points = 19_999;
+    assert.throws(() => equipOutfit(original, item.id), /보유/); assert.throws(() => purchaseOutfit(original, item.id), /부족/);
+    assert.equal(original.points, 19_999); assert.deepEqual(original.ownedOutfits, ['field']);
+    original.points = 20_000;
+    const bought = purchaseOutfit(original, item.id); assert.equal(bought.cost, 20_000); assert.equal(bought.profile.points, 0); assert.equal(bought.profile.equippedOutfitId, item.id);
+    assert.equal(purchaseOutfit(bought.profile, item.id).cost, 0);
+    assert.equal(equipOutfit({ ...bought.profile, equippedOutfitId: 'field' }, item.id).equippedOutfitId, item.id);
+  }
+  assert.throws(() => purchaseOutfit(original, '../unknown'), /존재/);
 });
 
 test('profile normalization blocks malformed values and prototype-shaped IDs', () => {
@@ -99,14 +105,14 @@ test('room finish freezes rewards once, excludes bots/late joiners and restart c
 test('browser storage restores identity, statistics, points and purchased outfits without a network service', async () => {
   const storage = memoryStorage(); let network = 0;
   const store = await new ProfileStore({ storage, fetcher: async () => { network++; }, name: 'ALPHA' }).load(); const id = store.profile.id;
-  await store.syncRound(round({ kills: 20, completed: true })); await store.purchase('runner');
+  await store.syncRound(round({ kills: 1000, completed: true, won: true })); await store.purchase('runner');
   const restored = await new ProfileStore({ storage, name: 'OTHER' }).load();
-  assert.equal(restored.profile.id, id); assert.equal(restored.profile.callsign, 'ALPHA'); assert.equal(restored.profile.kills, 20); assert.equal(restored.profile.points, 200); assert.equal(restored.profile.equippedOutfitId, 'runner');
+  assert.equal(restored.profile.id, id); assert.equal(restored.profile.callsign, 'ALPHA'); assert.equal(restored.profile.kills, 1000); assert.equal(restored.profile.points, 150); assert.equal(restored.profile.equippedOutfitId, 'runner');
   assert.equal(network, 0); assert.ok(storage.getItem(PROFILE_KEY));
 });
 
 test('host operation queue uses canonical balances and does not duplicate round rewards', async () => {
-  let hostProfile = createProfile('host-test-0001'); let posts = 0;
+  let hostProfile = { ...createProfile('host-test-0001'), points: 19_750 }; let posts = 0;
   const fetcher = async (_url, options = {}) => {
     if (!options.method) return new Response(JSON.stringify({ profile: hostProfile }));
     posts++; const result = applyProfileOperation(hostProfile, JSON.parse(options.body)); hostProfile = result.profile;
@@ -120,7 +126,7 @@ test('host operation queue uses canonical balances and does not duplicate round 
 });
 
 test('host conflicts roll back an optimistic purchase rather than granting a free outfit', async () => {
-  let hostProfile = createProfile('host-test-0002'); hostProfile.points = 250;
+  let hostProfile = createProfile('host-test-0002'); hostProfile.points = 20_000;
   const storage = memoryStorage();
   const fetcher = async (_url, options = {}) => {
     if (!options.method) return new Response(JSON.stringify({ profile: hostProfile }));

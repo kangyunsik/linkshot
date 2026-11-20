@@ -104,73 +104,11 @@
       "height": 768
     },
     {
-      "file": "outfit-field.png",
-      "prompt": "masterpiece, best quality, very aesthetic, rating:general, 1boy, adult man, solo, (human:1.3), (uncovered human face:1.5), (visible eyes nose and mouth:1.4), short black hair, brown eyes, looking at viewer, full body, standing, military, soldier, olive green jacket, tactical vest, cargo pants, boots, orange trim, fingerless gloves, headset, goggles on forehead, uncovered head, practical field uniform, fully clothed, natural human anatomy, original character, game character concept illustration, entire body including boots, centered, plain dark blue gray background, soft studio lighting, detailed fabric",
-      "seed": 7093700,
-      "width": 768,
-      "height": 1024
-    },
-    {
-      "file": "outfit-runner.png",
-      "prompt": "masterpiece, best quality, very aesthetic, rating:general, 1boy, adult man, solo, (human:1.3), (uncovered human face:1.5), (visible eyes nose and mouth:1.4), short black hair, brown eyes, looking at viewer, full body, standing, scout, (hood down:1.4), uncovered head, dark gray hooded jacket with hood resting behind neck, mint green trim, tactical vest, cargo pants, boots, fingerless gloves, futuristic reconnaissance uniform, fully clothed, natural human anatomy, original character, game character concept illustration, entire body including boots, centered, plain dark blue gray background, soft studio lighting, detailed fabric",
-      "seed": 7093701,
-      "width": 768,
-      "height": 1024
-    },
-    {
-      "file": "outfit-hazmat.png",
-      "prompt": "masterpiece, best quality, very aesthetic, rating:general, 1boy, adult man, solo, (human:1.3), (uncovered human face:1.5), (visible eyes nose and mouth:1.4), short black hair, brown eyes, looking at viewer, full body, standing, hazmat specialist, yellow protective jacket, yellow cargo pants, dark gloves, boots, clear face shield raised above forehead, respirator hanging below chin, compact oxygen backpack, practical industrial workwear, fully clothed, natural human anatomy, original character, game character concept illustration, entire body including boots, centered, plain dark blue gray background, soft studio lighting, detailed fabric",
-      "seed": 7093702,
-      "width": 768,
-      "height": 1024
-    },
-    {
-      "file": "outfit-orbital.png",
-      "prompt": "masterpiece, best quality, very aesthetic, rating:general, 1boy, adult man, solo, (human:1.3), (uncovered human face:1.5), (visible eyes nose and mouth:1.4), short black hair, brown eyes, looking at viewer, full body, standing, astronaut, (transparent glass helmet:1.2), (face visible through glass:1.4), white and pale blue spacesuit, gloves, boots, compact life support backpack, blue chest control panel, fully clothed, natural human anatomy, original character, game character concept illustration, entire body including boots, centered, plain dark blue gray background, soft studio lighting, detailed fabric",
-      "seed": 7093703,
-      "width": 768,
-      "height": 1024
-    },
-    {
-      "file": "outfit-retrobot.png",
-      "prompt": "masterpiece, best quality, very aesthetic, rating:general, 1boy, adult man, solo, (human:1.3), (uncovered human face:1.5), (visible eyes nose and mouth:1.4), short black hair, brown eyes, looking at viewer, full body, standing, human pilot, orange armored vest over dark gray fabric uniform, orange shoulder guards, cargo pants, boots, fingerless gloves, headset, goggles on forehead, uncovered head, green equipment lights, retro futuristic pilot clothing, fully clothed, natural human anatomy, original character, game character concept illustration, entire body including boots, centered, plain dark blue gray background, soft studio lighting, detailed fabric",
-      "seed": 7093704,
-      "width": 768,
-      "height": 1024
-    },
-    {
-      "file": "outfit-panels.png",
-      "prompt": "masterpiece, best quality, no humans, neutral light gray futuristic polymer armor material texture, tiny geometric panel seams, fine matte microtexture, subtle fabric weave, clean abstract technical surface, even soft lighting, flat orthographic material swatch, seamless full frame pattern, no perspective",
-      "seed": 7092800,
-      "width": 768,
-      "height": 768
-    },
-    {
-      "file": "operator-fabric.png",
-      "prompt": "masterpiece, best quality, no humans, seamless neutral medium gray ripstop military uniform fabric texture, fine woven textile fibers, small subtle square ripstop grid, realistic matte cotton nylon cloth surface, monochrome gray material swatch, full frame flat orthographic view, uniform diffuse studio lighting, no objects, no folds, no symbols",
-      "seed": 7094100,
-      "width": 768,
-      "height": 768
-    },
-    {
       "file": "operator-armor.png",
       "prompt": "masterpiece, best quality, no humans, seamless neutral medium gray ballistic vest cordura fabric texture, fine technical woven textile surface, subtle scuffed polymer microtexture, realistic tactical protective equipment material swatch, monochrome gray, flat orthographic full frame, uniform diffuse studio lighting, no objects, no symbols, no large panels",
       "seed": 7094101,
       "width": 768,
       "height": 768
-    },
-    {
-      "file": "operator-jacket.png",
-      "prompt": "masterpiece, best quality, no humans, front view tactical combat jacket chest panel fabric texture, neutral light gray military field jacket, cordura fabric, sewn cargo pockets, practical stitching, zipper in center, small webbing straps, natural cloth folds, matte woven textile, realistic game clothing diffuse texture, flat orthographic studio lighting, square full frame material, no head, no hands, no body, no text, no insignia",
-      "seed": 7094102,
-      "width": 768,
-      "height": 768,
-      "crop": [
-        210,
-        250,
-        560,
-        640
-      ]
     }
   ]
 }

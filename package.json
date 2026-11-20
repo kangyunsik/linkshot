@@ -21,6 +21,7 @@
     "online:engine": "node --env-file=online-server/.env server/online-engine.js",
     "test:online": "mvn -f online-server/pom.xml test",
     "assets:generate": "node scripts/generate-assets.mjs",
+    "assets:characters": "node scripts/render-characters.mjs",
     "assets:map-previews": "node scripts/create-team-map-previews.mjs"
   },
   "engines": { "node": ">=22" },

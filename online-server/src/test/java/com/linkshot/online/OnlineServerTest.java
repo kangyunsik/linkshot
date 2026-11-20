@@ -90,7 +90,16 @@ class OnlineServerTest {
         assertEquals(3000, accounts.profile(id).points()); assertTrue(accounts.profile(id).ownedWeapons().contains("m82"));
         assertEquals(200, client.request("POST", "/api/account/weapons/m82/purchase", null, true).statusCode()); assertEquals(3000, accounts.profile(id).points());
         assertEquals(400, client.request("POST", "/api/account/weapons/knife/purchase", null, true).statusCode());
-        assertEquals(200, client.request("POST", "/api/account/outfit", Map.of("outfitId", "runner", "purchase", true), true).statusCode()); assertEquals(2750, accounts.profile(id).points());
+        var runner = Map.of("outfitId", "runner", "purchase", true);
+        assertEquals(403, client.request("POST", "/api/account/outfit", runner, false).statusCode());
+        assertEquals(400, client.request("POST", "/api/account/outfit", runner, true).statusCode()); assertEquals(3000, accounts.profile(id).points());
+        db.update("UPDATE profiles SET points = 20000 WHERE account_id = ?", id);
+        assertEquals(200, client.request("POST", "/api/account/outfit", runner, true).statusCode()); assertEquals(0, accounts.profile(id).points());
+        for (String character : List.of("nari", "rhea", "jin")) {
+            var response = client.request("POST", "/api/account/character", Map.of("characterId", character), true);
+            assertEquals(200, response.statusCode()); assertEquals(character, json(response).get("characterId").asString());
+        }
+        assertEquals("runner", accounts.profile(id).outfitId()); assertEquals(0, accounts.profile(id).points());
         assertEquals(400, client.request("POST", "/api/account/character", Map.of("characterId", "admin", "points", 123), true).statusCode());
     }
     private JsonNode json(HttpResponse<String> response) { return JSON.readTree(response.body()); }

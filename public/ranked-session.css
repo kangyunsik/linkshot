@@ -29,12 +29,19 @@
 #online-registration-form input { width: 100%; min-width: 0; padding: 11px; border: 1px solid #47606d; border-radius: 3px; color: #e1eced; background: #0c1a24; }
 .ranked-results { --result-ink: #a8e6c7; border: 1px solid #77b3a355; background: linear-gradient(120deg,#193930,#102431); border-radius: 5px; padding: 17px 20px; margin: 18px 0; text-align: left; contain: layout paint; }
 .ranked-results[data-positive=false] { --result-ink: #f1aca1; background: linear-gradient(120deg,#382831,#172332); border-color: #b57b7b66; }
+.ranked-results[data-transition=placement] { --result-ink: #f1db9f; border-color: #d4b27388; background: linear-gradient(120deg,#36342d,#102431); }
 .ranked-results header,.ranked-results footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #90adb7; font-size: 10px; }
+.ranked-results-status { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; column-gap: 12px; row-gap: 3px; text-align: right; }
+#ranked-results-multiplier { border: 1px solid #adccba55; color: #c9e6d7; border-radius: 3px; padding: 2px 5px; font-size: 9px; white-space: nowrap; }
 .ranked-results header strong { color: var(--result-ink); letter-spacing: 2px; font-size: 12px; }
 .ranked-results-main { display: flex; align-items: center; gap: 20px; padding: 10px 0; }
-.ranked-results-main img { flex: none; width: 86px; height: 86px; }
-#ranked-results-delta { color: var(--result-ink); font: 700 40px var(--mono); font-variant-numeric: tabular-nums; }
+.ranked-results-mark { --mark-size: 86px; display: grid; place-items: center; position: relative; flex: none; width: var(--mark-size); height: var(--mark-size); isolation: isolate; }
+.ranked-results-mark img { grid-area: 1/1; width: 100%; height: 100%; object-fit: contain; }
+.ranked-results-mark i { position: absolute; inset: 9px; border: 1px solid var(--result-ink); border-radius: 50%; opacity: 0; box-shadow: inset 0 0 18px #c6dfc746, 0 0 17px #bddbc03b; z-index: -1; }
+#ranked-results-current { display: block; color: #e1eef1; font-weight: 700; font-size: 12px; }
+#ranked-results-delta { display: block; color: var(--result-ink); font: 700 40px/1.12 var(--mono); font-variant-numeric: tabular-nums; }
 #ranked-results-tiers { color: #c4d9df; font-size: 12px; margin: 5px 0 0; }
+#ranked-results-mmr { color: var(--result-ink); font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ranked-results-track { height: 5px; background: #0b1b27; overflow: hidden; border-radius: 3px; margin: 0 0 11px; }
 .ranked-results-track i { display: block; height: 100%; background: var(--result-ink); transform-origin: left; }
 .round-card:has(.ranked-results:not([hidden])) { max-height: calc(100svh - 24px); overflow-y: auto; padding-top: 22px; padding-bottom: 18px; }
@@ -42,10 +49,9 @@
 .round-card:has(.ranked-results:not([hidden])) .score-table td { padding-top: 6px; padding-bottom: 6px; }
 .round-card:has(.ranked-results:not([hidden])) .round-reward { padding: 10px; margin: 10px 0; }
 @media(max-width:740px) {
-  .profile-points > strong { font-size: clamp(9px,2.6vw,14px); white-space: nowrap; }
   .deployment-actions > .matchmaking-widget { gap: 2px; padding: 1px 3px; }
   .matchmaking-widget > button { padding: 2px 6px; font-size: 9px; }
   #matchmaking-detail strong { font-size: 9px; }#matchmaking-detail small { font-size: 7px; }
-  .ranked-results { padding: 12px; }.ranked-results-main { gap: 10px; }.ranked-results-main img { width: 64px; height: 64px; }#ranked-results-delta { font-size: 29px; }
+  .ranked-results { padding: 12px; }.ranked-results-main { gap: 10px; }.ranked-results-mark { --mark-size: 64px; }#ranked-results-delta { font-size: 29px; }
 }
 @media(max-width:740px) and (max-height:660px) { #matchmaking-detail small { display: none; } }

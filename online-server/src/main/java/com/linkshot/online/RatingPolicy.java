@@ -3,6 +3,7 @@ package com.linkshot.online;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Comparator;
 
 /** Server-owned individual and team competitive policies. Shop LP is never an input. */
 public final class RatingPolicy {
@@ -11,7 +12,15 @@ public final class RatingPolicy {
     public record Change(int ratingDelta, int outcome) {} // top half=1, boundary tie=0, bottom half=-1
     public record RankProgress(int index, int points, int placements, int games) {}
     public record Promotion(RankProgress progress, int pointDelta) {}
+    public record PlacementRun(int wins, long kills, long deaths, long previousPoints) {
+        public static final PlacementRun EMPTY = new PlacementRun(0, 0, 0, 0);
+        public PlacementRun include(boolean won, int kills, int deaths) {
+            return new PlacementRun(wins + (won ? 1 : 0), this.kills + kills, this.deaths + deaths, previousPoints);
+        }
+    }
     public static final int PLACEMENTS = 5;
+    public static final int ACCELERATED_GAMES = 20;
+    private static final int GOLD_V = 10;
     public static final List<String> TIERS = List.of("BRONZE", "SILVER", "GOLD", "PLATINUM", "DIAMOND");
 
     public static Map<String, Change> settle(boolean ranked, List<Player> players) {
@@ -42,6 +51,11 @@ public final class RatingPolicy {
         return score > 0 ? "blue" : score < 0 ? "red" : null;
     }
 
+    public static String winnerFfa(List<MatchService.Performance> roster) {
+        return roster.stream().filter(p -> !p.abandoned()).min(Comparator.comparingInt(MatchService.Performance::kills).reversed()
+            .thenComparingInt(MatchService.Performance::deaths).thenComparing(MatchService.Performance::id)).map(MatchService.Performance::id).orElse(null);
+    }
+
     public static Map<String, Change> settleTeams(List<Player> players, List<MatchService.Performance> roster) {
         String winner = winnerTeam(roster);
         Map<String, String> teams = new LinkedHashMap<>(); for (var p : roster) teams.put(p.id(), p.teamId());
@@ -65,16 +79,26 @@ public final class RatingPolicy {
         return kills != 0 ? kills : Integer.compare(a.deaths(), b.deaths());
     }
 
-    public static Promotion advance(RankProgress before, int rating, int outcome) {
+    public static int progressionMultiplier(RankProgress before) { return before.games() < ACCELERATED_GAMES ? 2 : 1; }
+
+    public static int boundedRating(int rating) { return Math.max(0, Math.min(10_000, rating)); }
+
+    public static Promotion advance(RankProgress before, int rating, int outcome, PlacementRun run) {
         int games = Math.min(1_000_000_000, before.games() + 1);
+        int multiplier = progressionMultiplier(before);
         if (before.placements() < PLACEMENTS) {
             int placements = before.placements() + 1;
-            // Placement starts no higher than Gold I. 1000 MMR maps to Silver V.
-            int index = placements == PLACEMENTS ? Math.max(0, Math.min(14, (rating - 600) / 80)) : 0;
-            return new Promotion(new RankProgress(index, 0, placements, games), 0);
+            // Before a tier exists, use a neutral +/-25 RP baseline. Store the
+            // signed deltas in receipts, then use their net at calibration.
+            int delta = 25 * outcome * multiplier;
+            if (placements < PLACEMENTS) return new Promotion(new RankProgress(0, 0, placements, games), delta);
+            boolean gold = run.wins() == PLACEMENTS && run.kills() >= 20 && run.kills() * 2 >= Math.max(1, run.deaths()) * 3;
+            long calibrated = (rating - 600L) * 100 / 80 + run.previousPoints() + delta;
+            int total = gold ? GOLD_V * 100 : (int) Math.max(0, Math.min(GOLD_V * 100 - 1, calibrated));
+            return new Promotion(new RankProgress(total / 100, total % 100, placements, games), delta);
         }
         int adjustment = Math.max(-10, Math.min(10, (rating - (600 + before.index() * 80)) / 80));
-        int delta = outcome > 0 ? 25 + adjustment : outcome < 0 ? -25 + adjustment : 0;
+        int delta = (outcome > 0 ? 25 + adjustment : outcome < 0 ? -25 + adjustment : 0) * multiplier;
         int total = Math.max(0, Math.min(2500, before.index() * 100 + before.points() + delta));
         int index = Math.min(24, total / 100), points = total - index * 100;
         return new Promotion(new RankProgress(index, points, PLACEMENTS, games), total - (before.index() * 100 + before.points()));

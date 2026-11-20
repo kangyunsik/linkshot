@@ -147,17 +147,37 @@ test('ranked AI assignments still require explicit permission from the authorita
 });
 
 test('rated AI uses the frozen mode rating for all five levels and ignores browser difficulty claims', async (t) => {
-  for (const [botRating, difficulty] of [[1099, 'beginner'], [1100, 'intermediate'], [1500, 'advanced'], [1899, 'advanced'], [1900, 'expert'], [2299, 'expert'], [2300, 'extreme']]) {
-    const f = await fixture(t, { humans: 1, bots: 3, rankedAiEnabled: true, botRating });
+  for (const [botRating, difficulty] of [[899, 'beginner'], [900, 'intermediate'], [1300, 'advanced'], [1699, 'advanced'], [1700, 'expert'], [2099, 'expert'], [2100, 'extreme']]) {
+    const f = await fixture(t, { gameType: 'ffa', mode: 'CASUAL', humans: 1, bots: 3, botRating });
     const socket = await f.join(f.players[0], { botDifficulty: 'beginner' }), match = f.app.matches.get(f.id);
     assert.equal(match.room.botDifficulty, difficulty);
     assert.equal(socket.joined.room.botDifficulty, difficulty);
+    assert.equal(match.plan.botRating, botRating);
+    const levels = ['beginner', 'intermediate', 'advanced', 'expert', 'extreme'];
+    for (const bot of socket.joined.players.filter((p) => p.isBot)) {
+      assert.ok(levels.includes(bot.botDifficulty));
+      assert.ok(Math.abs(levels.indexOf(bot.botDifficulty) - levels.indexOf(difficulty)) <= 1);
+    }
     f.players[0].casualRating = 100; assert.equal(match.room.botDifficulty, difficulty);
   }
 });
 
+test('the final unequal team roster receives two harder AI on its smaller human side and keeps the assignment across lives and reconnect', async (t) => {
+  const f = await fixture(t, { gameType: 'teams', humans: 3, bots: 3, rankedAiEnabled: true, botRating: 1300 });
+  const a = await f.join(f.players[0]); await f.join(f.players[1]); await f.join(f.players[2]);
+  const match = f.app.matches.get(f.id), bots = [...match.room.players.values()].filter(p => p.isBot);
+  assert.equal(match.room.botDifficulty, 'intermediate');
+  assert.equal(bots.filter(p => p.teamId === 'blue').length, 1);
+  assert.deepEqual(bots.filter(p => p.teamId === 'red').map(p => p.botDifficulty), ['advanced', 'advanced']);
+  const assigned = new Map(bots.map(bot => [bot.id, bot.botDifficulty]));
+  for (const bot of bots) match.room.spawn(bot);
+  await disconnect(a, match, f.players[0].id);
+  const restored = await f.join(f.players[0]);
+  assert.deepEqual(new Map(restored.joined.players.filter(p => p.isBot).map(bot => [bot.id, bot.botDifficulty])), assigned);
+});
+
 test('a single human can play a temporary ranked AI match without it ending immediately or trusting browser AI flags', async (t) => {
-  const f = await fixture(t, { humans: 1, bots: 3, rankedAiEnabled: true, botRating: 1700 }); const socket = await f.join(f.players[0], { weaponId: 'm82', bots: 7 }); const match = f.app.matches.get(f.id);
+  const f = await fixture(t, { humans: 1, bots: 3, rankedAiEnabled: true, botRating: 1600 }); const socket = await f.join(f.players[0], { weaponId: 'm82', bots: 7 }); const match = f.app.matches.get(f.id);
   f.app.tick(1 / 60); assert.equal(match.room.phase, 'active'); assert.equal(match.room.botDifficulty, 'advanced'); assert.equal(socket.joined.players.filter((player) => player.isBot).length, 3);
   const player = match.room.players.get(f.players[0].id), bots = [...match.room.players.values()].filter((entry) => entry.isBot); match.room.world = { ...match.room.world, width: 100, depth: 100, obstacles: [] };
   Object.assign(player, { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, protectedUntil: 0 }); bots.forEach((bot, index) => Object.assign(bot, { x: index ? 40 : 0, y: 0, z: index ? -40 : -1, hp: 1, protectedUntil: 0 }));

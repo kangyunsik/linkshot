@@ -85,8 +85,7 @@ public class AccountService {
     }
     @Transactional
     public Profile selectOutfit(String username, String outfitId, boolean purchase) {
-        Integer price = outfitId == null ? null : GameCatalog.OUTFITS.get(outfitId);
-        if (price == null) throw new IllegalArgumentException("외형을 확인해 주세요.");
+        int price = catalog.outfitPrice(outfitId);
         UUID id = credentials(username).id();
         db.queryForObject("SELECT points FROM profiles WHERE account_id = ? FOR UPDATE", Long.class, id);
         boolean owned = Boolean.TRUE.equals(db.queryForObject("SELECT EXISTS (SELECT 1 FROM owned_outfits WHERE account_id = ? AND outfit_id = ?)", Boolean.class, id, outfitId));
@@ -100,7 +99,7 @@ public class AccountService {
     }
     @Transactional
     public Profile selectCharacter(String username, String characterId) {
-        if (characterId == null || !List.of("male", "female").contains(characterId)) throw new IllegalArgumentException("캐릭터를 확인해 주세요.");
+        if (!catalog.character(characterId)) throw new IllegalArgumentException("캐릭터를 확인해 주세요.");
         UUID id = credentials(username).id();
         db.update("UPDATE accounts SET character_id = ? WHERE id = ?", characterId, id);
         return profile(id);

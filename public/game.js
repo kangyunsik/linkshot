@@ -32,13 +32,16 @@ import { isTeamGame, isObjectiveGame, gameTypeName } from '/shared/game-types.js
 import { RoundEffects } from './round-effects.js';
 import { rankBadgeNode, updateRankBadge } from './rank-badges.js';
 import { rankBadgeLabel, rankEmblem, normalizeRankBadge } from '/shared/ranks.js';
+import { getBotDifficulty } from '/shared/simulation.js';
+import { reloadProgress, reloadFraming } from './reload-time.js';
+import { applyViewmodelReload } from './viewmodel-reload.js';
 
 const $ = (id) => document.getElementById(id);
 const lerp = THREE.MathUtils.lerp;
 const clockText = (seconds) => `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`;
 
 export function renderScoreboard(element, players, selfId) {
-  const signature = JSON.stringify([selfId, players.map(p => [p.id, p.name, p.kills, p.deaths, p.abandoned, p.connected, p.teamId, p.isBot, p.rankBadge])]);
+  const signature = JSON.stringify([selfId, players.map(p => [p.id, p.name, p.kills, p.deaths, p.abandoned, p.connected, p.teamId, p.isBot, p.rankBadge, p.botDifficulty])]);
   if (element.dataset.score === signature) return;
   element.dataset.score = signature;
   const table = document.createElement('table'); table.className = 'score-table';
@@ -52,7 +55,7 @@ export function renderScoreboard(element, players, selfId) {
     const rankMark = rankBadgeNode(player.rankBadge); if (rankMark) name.prepend(rankMark);
     if (player.teamId) { const badge = document.createElement('span'); badge.className = 'team-badge'; badge.dataset.team = player.teamId; badge.textContent = TEAM_NAMES[player.teamId]; name.prepend(badge); }
     if (player.isBot || player.id === selfId) {
-      const badge = document.createElement('span'); badge.className = player.isBot ? 'bot-badge' : 'you-badge'; badge.textContent = player.isBot ? 'BOT' : 'YOU'; name.append(badge);
+      const badge = document.createElement('span'); badge.className = player.isBot ? 'bot-badge' : 'you-badge'; badge.textContent = player.isBot ? player.botDifficulty ? `BOT · ${getBotDifficulty(player.botDifficulty).label}` : 'BOT' : 'YOU'; name.append(badge);
     }
     if (player.abandoned || player.connected === false) { const badge = document.createElement('span'); badge.className = 'bot-badge'; badge.textContent = player.abandoned ? '탈주' : '재접속 대기'; name.append(badge); }
     row.insertCell().textContent = player.kills;
@@ -140,6 +143,8 @@ export class FPSGame {
     for (const model of this.weaponModels.values()) {
       visibility.push([model, model.visible], [model.userData.flash, model.userData.flash.visible]); model.visible = true; model.userData.flash.visible = true;
       const attachment = model.userData.suppressorMesh; if (attachment) { visibility.push([attachment, attachment.visible]); attachment.visible = true; }
+      const reload = model.userData.reload;
+      if (reload) for (const part of [reload.extras, ...(reload.rounds || [])]) { visibility.push([part,part.visible]); part.visible = true; }
     }
     for (const avatar of this.remote.values()) { const flash = avatar.weapon.userData.flash; visibility.push([flash, flash.visible]); flash.visible = true; }
     this.scene.add(warmup); this.graphicsPreparing = true;
@@ -324,13 +329,14 @@ export class FPSGame {
 
   activateWeapon(id, skinId = this.skinId, suppressor = false) {
     if (this.activeWeaponId === id && this.activeModel?.userData.skinId === skinId) { setModelSuppressor(this.activeModel, suppressor); return; }
+    applyViewmodelReload(this.activeModel, null, null);
     this.audio.stopReload?.();
     this.activeWeaponId = getWeapon(id).id;
     const previous = this.weaponModels.get(this.activeWeaponId);
     if (previous.userData.skinId !== skinId) {
       this.weapon.remove(previous);
       if (this.graphicsPreparing) this.retiredGraphics.push(() => disposeModel(previous)); else disposeModel(previous);
-      const replacement = this.models.create(id, skinId, true, this.outfitId, this.characterId, this.skinId);
+      const replacement = this.models.create(id, skinId, true, this.outfitId, this.characterId);
       applyViewmodelUniform(replacement, this.uniformTeam);
       replacement.traverse((object) => object.layers.set(VIEWMODEL_LAYER)); this.weapon.add(replacement); this.weaponModels.set(id, replacement);
     }
@@ -617,7 +623,7 @@ export class FPSGame {
       if (player.id === id) continue;
       present.add(player.id);
       const existing = this.remote.get(player.id);
-      if (existing && (existing.target?.teamId !== player.teamId || existing.group.userData.characterId !== getCharacter(player.characterId).id || existing.group.userData.outfitId !== getOutfit(player.outfitId).id || existing.group.userData.skinId !== getSkin(player.skinId).id)) {
+      if (existing && (existing.target?.teamId !== player.teamId || existing.group.userData.characterId !== getCharacter(player.characterId).id || existing.group.userData.outfitId !== getOutfit(player.outfitId).id)) {
         this.scene.remove(existing.group); this.disposeObject(existing.group, false); this.remote.delete(player.id);
       }
       if (!this.remote.has(player.id)) this.remote.set(player.id, this.makeAvatar(player));
@@ -627,7 +633,7 @@ export class FPSGame {
       if (avatar.weapon.userData.weaponId !== player.weaponId || avatar.weapon.userData.skinId !== (player.weaponSkinId || player.skinId)) {
         const previous = avatar.weapon; avatar.group.remove(previous);
         if (this.graphicsPreparing) this.retiredGraphics.push(() => disposeModel(previous)); else disposeModel(previous);
-        avatar.weapon = this.models.create(player.weaponId, player.weaponSkinId || player.skinId, false, player.outfitId, player.characterId, undefined, player.suppressor === true); avatar.group.add(avatar.weapon);
+        avatar.weapon = this.models.create(player.weaponId, player.weaponSkinId || player.skinId, false, player.outfitId, player.characterId, player.suppressor === true); avatar.group.add(avatar.weapon);
         avatar.weaponWall.setWeapon(avatar.weapon);
       }
       setModelSuppressor(avatar.weapon, player.suppressor === true);
@@ -682,7 +688,8 @@ export class FPSGame {
     $('hud-skin-name').textContent = `${getSkin(local.weaponSkinId || local.skinId).name}${local.suppressor ? ' · SUPPRESSED' : ''}`;
     $('hud-stance').hidden = !local.crouching && !local.walking || local.hp <= 0; $('hud-stance').textContent = local.walking ? 'SILENT WALK · 발소리 없음' : 'CROUCHED · LOW PROFILE';
     $('hud-map-name').textContent = this.world.name; $('scoreboard-map-name').textContent = this.world.name;
-    this.hud['reload-indicator'].querySelector('i').style.animationDuration = `${weapon.reloadSeconds}s`;
+    const reloadTrack = this.hud['reload-indicator'];
+    if (reloading) reloadTrack.style.setProperty('--reload-progress', `${(reloadProgress(local.reloadUntil, this.serverNow, weapon) ?? 1) * 100}%`);
     if (reloading && !this.hadReload) {
       const until = local.reloadUntil, life = local.spawnCount;
       this.audio.reload(weapon.id, Math.max(0, until - this.serverNow) / 1000, () => !this.disposed && this.local?.hp > 0 && this.local.spawnCount === life && this.local.reloadUntil === until && this.serverNow < until && this.room?.phase === 'active');
@@ -713,7 +720,7 @@ export class FPSGame {
     for (const [id, item] of this.groundItems) if (!present.has(id)) { this.scene.remove(item.group); this.disposeObject(item.group, false); this.groundItems.delete(id); }
     for (const drop of drops) {
       if (!this.groundItems.has(drop.id)) {
-        const group = new THREE.Group(), model = this.models.create(drop.weaponId, drop.skinId, false, 'field', 'male', drop.skinId, drop.suppressor === true); group.name = 'dropped-weapon'; group.userData.dropId = drop.id;
+        const group = new THREE.Group(), model = this.models.create(drop.weaponId, drop.skinId, false, 'field', 'male', drop.suppressor === true); group.name = 'dropped-weapon'; group.userData.dropId = drop.id;
         model.rotation.z = Math.PI / 2; model.updateMatrixWorld(true); model.position.y = .025 - new THREE.Box3().setFromObject(model).min.y; group.add(model);
         const marker = new THREE.Mesh(new THREE.TorusGeometry(.28, .008, 4, 24), new THREE.MeshBasicMaterial({ color: '#a4dcd6', transparent: true, opacity: .6, depthWrite: false }));
         marker.rotation.x = -Math.PI / 2; marker.position.y = .015; group.add(marker);
@@ -914,15 +921,14 @@ export class FPSGame {
       if (scoped) document.querySelector('.scope-lens>span').textContent = `${weapon.name} / PRECISION OPTICS`;
       const desiredFov = ads ? this.settings.fov * weapon.zoom : this.settings.fov;
       this.camera.fov = lerp(this.camera.fov, desiredFov, Math.min(1, dt * 12)); this.camera.updateProjectionMatrix();
-      const reloadRemaining = this.local.reloadUntil - this.serverNow;
-      const reloadTilt = reloadRemaining > 0 ? Math.sin(clamp(reloadRemaining / (weapon.reloadSeconds * 1000), 0, 1) * Math.PI) : 0;
+      const reload = this.local.hp > 0 && this.room.phase === 'active' && !switching ? reloadProgress(this.local.reloadUntil,this.serverNow,weapon) : null;
+      const reloadPose = reloadFraming(reload,weapon,reload != null && (this.reloadMotion ||= matchMedia('(prefers-reduced-motion: reduce)')).matches);
       this.switchAnimation = lerp(this.switchAnimation, 0, dt * 10);
       const hip = viewmodelHipOffset(weapon);
-      this.weapon.position.x = lerp(this.weapon.position.x, (ads ? 0 : hip.x) + bob * 0.005, dt * 14);
-      this.weapon.position.y = lerp(this.weapon.position.y, (ads ? -this.activeModel.userData.aimHeight : hip.y) - reloadTilt * 0.18 - this.switchAnimation * 0.25 + bob * 0.007, dt * 14);
-      this.weapon.position.z = lerp(this.weapon.position.z, (ads ? VIEWMODEL_ADS_Z : hip.z) + this.recoil * 0.035, dt * 17);
-      this.weapon.rotation.z = -reloadTilt * 0.65 + bob * 0.008;
-      this.weapon.rotation.x = -reloadTilt * 0.25;
+      this.weapon.position.x = lerp(this.weapon.position.x, (ads ? 0 : hip.x) + reloadPose.x + bob * 0.005, dt * 14);
+      this.weapon.position.y = lerp(this.weapon.position.y, (ads ? -this.activeModel.userData.aimHeight : hip.y) + reloadPose.y - this.switchAnimation * 0.25 + bob * 0.007, dt * 14);
+      this.weapon.position.z = lerp(this.weapon.position.z, (ads ? VIEWMODEL_ADS_Z : hip.z) + reloadPose.z + this.recoil * 0.035, dt * 17);
+      this.weapon.rotation.set(reloadPose.pitch,reloadPose.yaw,reloadPose.roll + bob * .008);
       if (weapon.melee) { const swing = Math.sin(clamp((this.swingUntil - now) / 360, 0, 1) * Math.PI); this.weapon.rotation.z -= swing * .9; this.weapon.rotation.x += swing * .5; this.weapon.position.x -= swing * .16; }
       const sightAligned = ads && Math.abs(this.weapon.position.x) < 0.003 && Math.abs(this.weapon.position.y + this.activeModel.userData.aimHeight) < 0.003;
       if (sightAligned) { this.weapon.position.x = 0; this.weapon.position.y = -this.activeModel.userData.aimHeight; }
@@ -940,10 +946,16 @@ export class FPSGame {
         if (weapon.burstCount) { this.localBurstLeft--; if (!this.localBurstLeft) this.localNextFire = now + weapon.burstPause * 1000; }
       }
       this.fireLatched = input.fire;
-      if (this.activeModel.userData.pump) this.activeModel.userData.pump.position.z = -0.43 + Math.sin(clamp((now - this.lastFire) / 600, 0, 1) * Math.PI) * 0.1;
-      if (this.activeModel.userData.pump && this.activeModel.userData.supportArm) this.activeModel.userData.supportArm.position.z = this.activeModel.userData.pump.position.z + .43;
-      if (this.activeModel.userData.slide) this.activeModel.userData.slide.position.z = this.recoil * 0.025;
-      if (this.activeModel.userData.breakAction) this.activeModel.userData.breakAction.rotation.x = -reloadTilt * .55;
+      applyViewmodelReload(this.activeModel,weapon,reload,this.local.ammo);
+      if (reload != null) this.hud['reload-indicator'].style.setProperty('--reload-progress', `${reload * 100}%`);
+      else {
+        const { pump, slide, supportArm } = this.activeModel.userData;
+        if (pump) {
+          pump.position.z = -.43 + Math.sin(clamp((now - this.lastFire) / 600,0,1) * Math.PI) * .1;
+          supportArm.position.z = pump.position.z + .43;
+        }
+        if (slide) slide.position.z = this.recoil * .025;
+      }
       this.recoil = lerp(this.recoil, 0, dt * 15);
       this.muzzleFlash.visible = now < this.muzzleUntil; this.muzzleLight.intensity = now < this.muzzleUntil ? this.local.suppressor ? .35 : 2 : 0;
       this.hud['crosshair'].style.opacity = this.local.hp <= 0 || ads ? '0' : '1';
