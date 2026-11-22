@@ -62,13 +62,14 @@ export function drawConservatory({ group, world, add, beam, foliage, sign, color
   for (const [pavilion, room] of world.footprint.entries()) {
     const half = room.w / 2, startZ = room.z - room.d / 2, bay = room.d / 8, peak = pavilion ? 19 : 23;
     for (let rib = 0; rib <= 8; rib++) {
-      const z = startZ + rib * bay;
+      // Mount the outer ribs just inside the wall trim, not on its end face.
+      const z = startZ + rib * bay + (rib === 0 ? .04 : rib === 8 ? -.04 : 0);
       const arch = [[room.x - half, 14, z], [room.x - half * .55, peak - 2.5, z], [room.x, peak, z], [room.x + half * .55, peak - 2.5, z], [room.x + half, 14, z]];
       for (let i = 1; i < arch.length; i++) { if (!pavilion && rib === 3 && (i === 2 || i === 3)) continue; beam('vault', arch[i - 1], arch[i], .22); }
       for (const side of [-1, 1]) add('rust', [.35, .65, .28], [room.x + side * half, 13.5, z]);
     }
     for (const side of [-1, 1]) {
-      for (const [x, height] of [[half, 14], [half * .55, peak - 2.5]]) beam('vault', [room.x + side * x, height, startZ], [room.x + side * x, height, startZ + room.d], .15);
+      for (const [x, height] of [[half, 14], [half * .55, peak - 2.5]]) beam('vault', [room.x + side * x, height, startZ + .04], [room.x + side * x, height, startZ + room.d - .04], .15);
       for (let pane = 0; pane < 8; pane++) {
         const z = startZ + (pane + .5) * bay, broken = !pavilion && Math.abs(z + 9) < 10 || (pane + pavilion + side + 8) % 7 === 0;
         const spans = [[[room.x + side * half, 14], [room.x + side * half * .55, peak - 2.5]], [[room.x + side * half * .55, peak - 2.5], [room.x, peak]]];
@@ -118,7 +119,7 @@ export function drawConservatory({ group, world, add, beam, foliage, sign, color
   for (const side of [-1, 1]) {
     sign(side < 0 ? 'FERN VALLEY' : 'ORCHID HOUSE', side < 0 ? '양치식물원 / A' : '난초 보존원 / B', [side * 9, .75, 14.55], 3.8, .6, 0, side < 0 ? '#b9d7a2' : '#e6b7ce');
     for (let x = -9; x <= 9; x += 3) {
-      add('terracotta', [.35, .3, .3], [x, 3.65, side * 1.7]);
+      add('terracotta', [.35, .3, .3], [x, 3.67, side * 1.7]);
       for (let leaf = 0; leaf < 4; leaf++) add('fern', [.4, .06, .12], [x + Math.sin(leaf * 2) * .15, 3.88, side * 1.75], new THREE.Quaternion().setFromEuler(new THREE.Euler(0, leaf * 1.6, -.2)), 'leaf');
     }
   }

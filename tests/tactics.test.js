@@ -55,18 +55,19 @@ test('low cover hides a crouching player while elevated sightlines can see over 
   assert.equal(traceShot(shooter, [shooter, target], 1000).victim, target);
 });
 
-test('weapons retain weight/ADS penalties; Shift halves normal speed and legacy sprint never boosts it', () => {
-  const walk = Object.fromEntries(WEAPONS.map((weapon) => [weapon.id, movementSpeed(player({ weaponId: weapon.id }), input({ forward: 1 }))]));
-  assert.ok(walk.pistol > walk.smg && walk.smg > walk.rifle && walk.rifle > walk.dmr && walk.dmr > walk.sniper && walk.sniper > walk.lmg);
+test('weapon weights remain distinct, Shift and ADS share half speed, and legacy sprint never boosts it', () => {
+  const run = Object.fromEntries(WEAPONS.map((weapon) => [weapon.id, movementSpeed(player({ weaponId: weapon.id }), input({ forward: 1 }))]));
+  assert.ok(run.pistol > run.smg && run.smg > run.rifle && run.rifle > run.dmr && run.dmr > run.sniper && run.sniper > run.lmg);
   for (const weapon of WEAPONS) {
     const p = player({ weaponId: weapon.id });
-    assert.equal(movementSpeed(p, input({ forward: 1, sprint: true })), walk[weapon.id]);
-    assert.equal(movementSpeed(p, input({ forward: 1, walk: true })), walk[weapon.id] / 2);
-    assert.ok(movementSpeed(p, input({ forward: 1, ads: true, walk: true })) < walk[weapon.id] / 2);
+    assert.equal(movementSpeed(p, input({ forward: 1, sprint: true })), run[weapon.id]);
+    assert.equal(movementSpeed(p, input({ forward: 1, walk: true })), run[weapon.id] / 2);
+    assert.equal(movementSpeed(p, input({ forward: 1, ads: true })), run[weapon.id] / 2);
+    assert.equal(movementSpeed(p, input({ forward: 1, ads: true, walk: true })), run[weapon.id] / 2);
     p.crouching = true;
     assert.equal(movementSpeed(p, input({ forward: 1, sprint: true })), RULES.crouchSpeed * weapon.walkMultiplier);
   }
-  assert.equal(movementSpeed(player({ weaponId: 'lmg' }), input({ weaponId: 'pistol', forward: 1 })), walk.lmg);
+  assert.equal(movementSpeed(player({ weaponId: 'lmg' }), input({ weaponId: 'pistol', forward: 1 })), run.lmg);
 });
 
 test('each arena has its own walkable firing platforms and twelve extra solid cover objects', () => {

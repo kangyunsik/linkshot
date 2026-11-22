@@ -36,6 +36,7 @@ export function drawThemedArena(scene, world, material) {
       ctx.fillText(text, w / 2, subtitle ? h * .42 : h * .53, w - 65);
       if (subtitle) { ctx.fillStyle = '#c3cabc'; ctx.font = '25px Arial, sans-serif'; ctx.fillText(subtitle, w / 2, h * .79, w - 60); }
     }, 1024, 256);
+    map.anisotropy = 8;
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ map }));
     mesh.position.set(...position); mesh.rotation.y = rotation; mesh.name = garden ? 'botanical-sign' : 'korean-market-sign'; mesh.userData.text = text; group.add(mesh);
   };
@@ -56,7 +57,8 @@ export function drawThemedArena(scene, world, material) {
     for (let i = 0; i <= 4; i++) { ctx.beginPath(); ctx.moveTo(i * w / 4, 0); ctx.lineTo(i * w / 4, h); ctx.moveTo(0, i * h / 4); ctx.lineTo(w, i * h / 4); ctx.stroke(); }
   });
   groundMap.wrapS = groundMap.wrapT = THREE.RepeatWrapping; groundMap.repeat.set(world.width / 8, world.depth / 8);
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(world.width + 20, world.depth + 20), material('theme-ground', garden ? '#c5b48e' : world.ground, { map: groundMap, roughness: garden ? .96 : .7, metalness: garden ? 0 : .12 }));
+  groundMap.anisotropy = 8;
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(world.width + 20, world.depth + 20), material('theme-ground', garden ? '#c5b48e' : world.ground, { map: groundMap, roughness: .98, metalness: .01 }));
   floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; group.add(floor);
 
   const fernBed = (box) => {
@@ -64,7 +66,7 @@ export function drawThemedArena(scene, world, material) {
     add('soil', [box.w - .2, .04, box.d - .2], [box.x, box.y + box.h + .01, box.z]);
     for (const side of [-1, 1]) {
       add('stone', [box.w + .08, .12, .14], [box.x, box.y + box.h - .03, box.z + side * box.d / 2]);
-      add('stone', [.14, .12, box.d], [box.x + side * box.w / 2, box.y + box.h - .03, box.z]);
+      add('stone', [.14, .12, box.d - .14], [box.x + side * box.w / 2, box.y + box.h - .03, box.z]);
     }
     for (let i = 0; i < 6; i++) {
       const x = box.x + ((i * 7) % 9 / 9 - .5) * (box.w - .9), z = box.z + ((i * 5) % 7 / 7 - .5) * (box.d - .9);
@@ -86,7 +88,7 @@ export function drawThemedArena(scene, world, material) {
     if (box.buildingId) continue;
     const { x, y, z, w, h, d, kind } = box, position = [x, y + h / 2, z];
     if (kind === 'closed-annex') {
-      add('annex', [w, h, d], position); add('trim', [w, .2, d], [x, y + h - .07, z]);
+      add('annex', [w, h - .17, d], [x, y + (h - .17) / 2, z]); add('trim', [w, .2, d], [x, y + h - .07, z]);
       for (const side of [-1, 1]) {
         for (let along = -w / 2 + 1.2; along < w / 2 - .8; along += 3) for (let level = 3; level < h - 1; level += 3) add('closed-window', [Math.min(1.5, w * .6), 1.5, .03], [x + along, y + level, z + side * (d / 2 + .02)]);
         for (let along = -d / 2 + 1.2; along < d / 2 - .8; along += 3) for (let level = 3; level < h - 1; level += 3) add('closed-window', [.03, 1.5, Math.min(1.5, d * .6)], [x + side * (w / 2 + .02), y + level, z + along]);
@@ -96,15 +98,18 @@ export function drawThemedArena(scene, world, material) {
       add('bark', [w, h, d], position);
       for (let i = 0; i < 8; i++) add('trim', [.09, h - .4, .045], [x - w / 2 + (i + .5) * w / 8, y + h / 2, z + d / 2 + .025]);
     } else if (kind === 'root' || kind === 'tree-bark') {
-      add('bark', [w, h, d], position); if (kind === 'root') add('leaf-dark', [w * .85, .035, d * .8], [x, y + h + .015, z]);
+      const barkHeight = kind === 'tree-bark' ? h - (box.id.endsWith('-x') ? .05 : .10) : h;
+      add('bark', [w, barkHeight, d], [x, y + barkHeight / 2, z]);
+      if (kind === 'root') add('leaf-dark', [w * .85, .035, d * .8], [x, y + h + .015, z]);
     } else if (kind === 'garden-shed') {
       add('trim', [w, h, d], position); add('metal', [w + .12, .14, d + .12], [x, y + h - .05, z]);
       for (let i = 0; i < 4; i++) add('wood', [w * .9, .13, .06], [x, y + .35 + i * (h - .5) / 4, z + d / 2 + .025]);
       sign('육묘실 / NURSERY', 'BOTANICAL MAINTENANCE', [x, y + h * .64, z + d / 2 + .07], Math.min(w - .3, 2.8), .45, 0, '#b5d0a1');
     } else if (kind === 'market-stall') {
-      add('wood', [w, h, d], position); add('metal', [w + .06, .07, d + .06], [x, y + h - .015, z]);
+      const front = box.front || (x < 0 ? 1 : -1);
+      add('wood', [w, h, d], position); add('metal', [w - .09, .07, d + .06], [x + front * .08, y + h - .015, z]);
       const menu = ['떡볶이', '김밥', '어묵', '만두', '호떡'][Number(box.id.split('-').at(-1)) % 5];
-      const front = box.front || (x < 0 ? 1 : -1), facing = front * Math.PI / 2, frontX = x + front * (w / 2 + .045);
+      const facing = front * Math.PI / 2, frontX = x + front * (w / 2 + .045);
       sign(menu, '밤빛시장 · 정성 가득', [frontX, .67, z], 2.6, .55, facing, box.color === 'orange' ? '#ffc699' : '#a0e2d6');
       for (let i = 0; i < 3; i++) {
         const trayX = x + front * .75, trayZ = z - 1.2 + i * 1.15;
@@ -115,7 +120,7 @@ export function drawThemedArena(scene, world, material) {
       const key = box.color === 'orange' ? 'red' : 'teal'; add(key, [w, h, d], position);
       for (let i = 0; i < 6; i++) {
         const stripeZ = z - d / 2 + (i + .5) * d / 6;
-        add('cream', [w, .018, d / 12], [x, y + h + .006, stripeZ]);
+        add('cream', [w - .08, .018, d / 12], [x, y + h + .006, stripeZ]);
       }
       add(key, [.06, .22, d], [x + (box.front || (x < 0 ? 1 : -1)) * w / 2, y - .06, z]);
     } else if (kind === 'market-tree') {

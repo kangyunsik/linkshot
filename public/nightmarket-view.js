@@ -14,12 +14,13 @@ export function drawNightMarket({ scene, group, world, add, beam, sign, color })
   sign('밤빛마당', '은행나무 쉼터 / 야시장 먹거리 광장', [13, .5, 16.53], 3.4, .6, 0, '#f2ce8e');
 
   const menus = ['한밤국밥', '밤빛분식', '달빛식당', '골목만두'];
-  for (const [index, building] of world.buildings.entries()) {
-    const z = building.z + building.d / 2 + .035, focusX = building.x > 10 ? 13 : -8, innerSide = building.x < focusX ? 1 : -1;
-    sign(menus[index % menus.length], '2층 식당 · 계단 이용', [building.x, 2.7, z], Math.min(6, building.w - .6), .5, 0, index % 2 ? '#9be8df' : '#ffd199');
-    sign(menus[index % menus.length], '밤빛시장 · 계단은 건물 앞쪽', [building.x + innerSide * (building.w / 2 + .035), 2.7, building.z], Math.min(6, building.d - .6), .5, innerSide * Math.PI / 2, index % 2 ? '#9be8df' : '#ffd199');
-    sign('식당 2F', 'DINING UPSTAIRS', [building.x + innerSide * (building.w / 2 + .035), 5.65, building.z], 3, .5, innerSide * Math.PI / 2, '#f1a6b6');
-    add(index % 2 ? 'cyan' : 'amber', [building.w - .5, .055, .08], [building.x, 3.08, z]);
+  for (const [index, building] of world.buildings.entries()) for (const [entry, door] of building.doors.entries()) {
+    const horizontal = door.axis === 'x', rotation = horizontal ? door.side > 0 ? 0 : Math.PI : door.side * Math.PI / 2;
+    const position = [door.x + (horizontal ? 0 : door.side * .045), door.top + .16, door.z + (horizontal ? door.side * .045 : 0)];
+    sign(menus[index] || '시장 관리실', entry === 0 ? '계단 이용 / UPSTAIRS' : '옆문 / SIDE ENTRY',
+      position, door.width + .45, .27, rotation, index % 2 ? '#9be8df' : '#ffd199');
+    add(index % 2 ? 'cyan' : 'amber', horizontal ? [door.width + .5, .047, .07] : [.07, .047, door.width + .5],
+      [position[0], position[1] + .16, position[2]]);
   }
   const entrances = [
     { text: '밤빛시장', sub: '분식골목 / STREET FOOD', p: [-8, 5, -29.7], rotation: 0 },

@@ -1,5 +1,4 @@
-// Original procedural boot/confirmation sounds. No downloads, speech service,
-// random gunshot variations or asynchronous timers are involved.
+// Original procedural effects: no downloads and no changes to gun recordings.
 function finish(samples) {
   let mean = 0; for (const value of samples) mean += value; mean /= samples.length;
   let peak = 0;
@@ -56,6 +55,57 @@ export function killSignal(sampleRate = 44100, chain = 1, headshot = false) {
     }
     if (headshot === true) value += Math.sin(2 * Math.PI * 2637.02 * t) * Math.min(1, t / 0.002) * Math.exp(-t / 0.045) * 0.13;
     samples[i] = value;
+  }
+  return finish(samples);
+}
+
+export function bulletPassSignal(sampleRate = 44100, variant = 0) {
+  const length = .098 + variant * .009, samples = new Float32Array(Math.round(sampleRate * length));
+  let seed = 1579 + variant * 2909, upper = 0, lower = 0, phase = 0;
+  const smoothing = 1 - Math.exp(-2 * Math.PI * 6200 / sampleRate);
+  const body = 1 - Math.exp(-2 * Math.PI * 1530 / sampleRate);
+  const crossing = .020 + variant * .0035;
+  for (let i = 0; i < samples.length; i++) {
+    const t = i / sampleRate;
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const noise = seed / 2147483648 - 1;
+    upper += (noise - upper) * smoothing;
+    lower += (upper - lower) * body;
+    const air = t - crossing;
+    const rush = air < 0 ? Math.exp(air / .011) : Math.exp(-air / (.016 + variant * .002));
+    const transient = (air - .001) / .0042, snap = Math.exp(-transient * transient);
+    // A narrow bright air transient opens into a falling, breathy tail.
+    // There is no second gunshot and the weak pitch is masked by the rush.
+    phase += 2 * Math.PI * (790 + (2760 + variant * 160) * Math.exp(-t / .024)) / sampleRate;
+    samples[i] = (upper - lower) * (rush * .65 + snap * .54)
+      + lower * rush * .13 + Math.sin(phase) * rush * (.031 + .013 * lower);
+  }
+  return finish(samples);
+}
+
+export function incomingImpactSignal(sampleRate = 44100, headshot = false, variant = 0) {
+  const samples = new Float32Array(Math.round(sampleRate * (headshot ? .119 : .144)));
+  let seed = 9029 + 3851 * variant, low = 0, mid = 0, upper = 0;
+  const filter = hz => 1 - Math.exp(-2 * Math.PI * hz / sampleRate);
+  const lowAlpha = filter(210), midAlpha = filter(940), upperAlpha = filter(headshot ? 3450 : 2130);
+  const modes = headshot ? [[192, .22, .009], [369, .15, .0068], [731, .09, .004]]
+    : [[116, .42, .018], [204, .19, .013], [358, .082, .007]];
+  for (let i = 0; i < samples.length; i++) {
+    const t = i / sampleRate;
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const noise = seed / 2147483648 - 1;
+    upper += (noise - upper) * upperAlpha;
+    mid += (upper - mid) * midAlpha;
+    low += (mid - low) * lowAlpha;
+    const contact = .0021 + variant * .00042;
+    const cloth = t - (.013 + variant * .0017);
+    // One soft, weighted contact plus a brief fabric/grain decay, not a
+    // feedback beep, long hiss, or exaggerated second impact.
+    let value = (upper - mid) * (.26 * Math.exp(-t / contact) + (headshot ? .13 : .065) * Math.exp(-t / .009));
+    value += (mid - low) * (.44 * Math.exp(-t / .016) + (cloth > 0 ? .105 * (1 - Math.exp(-cloth / .004)) * Math.exp(-cloth / .014) : 0));
+    value += low * .68 * Math.exp(-t / .023);
+    for (const [hz, gain, decay] of modes) value += Math.sin(2 * Math.PI * hz * (1 - variant * .014) * t) * gain * Math.exp(-t / decay);
+    samples[i] = value * Math.min(1, t / .0012);
   }
   return finish(samples);
 }

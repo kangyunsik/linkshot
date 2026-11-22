@@ -10,7 +10,7 @@ export function addSpawnZones(world, rules) {
   const bodyBox = (p) => ({ minX: p.x - radius, maxX: p.x + radius, minZ: p.z - radius, maxZ: p.z + radius, minY: p.y || 0, maxY: (p.y || 0) + height });
   const inside = (p) => Math.abs(p.x) < world.width / 2 - radius - 0.15 && Math.abs(p.z) < world.depth / 2 - radius - 0.15;
   const free = (p) => inside(p) && !colliders.some((b) => intersects(bodyBox(p), b));
-  const supported = (p) => p.y === 0 || colliders.some((b) => Math.abs(b.maxY - p.y) < EPS && p.x - radius < b.maxX && p.x + radius > b.minX && p.z - radius < b.maxZ && p.z + radius > b.minZ);
+  const supported = (p) => (p.y === 0 && !world.underground) || colliders.some((b) => Math.abs(b.maxY - p.y) < EPS && p.x - radius < b.maxX && p.x + radius > b.minX && p.z - radius < b.maxZ && p.z + radius > b.minZ);
   const samples = (a, b) => Array.from({ length: 17 }, (_, i) => ({ x: a.x + (b.x - a.x) * i / 16, y: a.y + (b.y - a.y) * i / 16, z: a.z + (b.z - a.z) * i / 16 }));
   const pathClear = (a, b) => samples(a, b).every((p) => free(p) && supported(p));
   const directions = [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7071, 0.7071], [-0.7071, 0.7071], [0.7071, -0.7071], [-0.7071, -0.7071]];
@@ -21,7 +21,12 @@ export function addSpawnZones(world, rules) {
     return exit ? [exit] : null;
   };
   const scenery = (box) => { obstacles.push(box); colliders.push(boxBounds(box)); };
-  const reserved = [...world.buildings, ...(world.walkways || [])].flatMap((building) => building.route.flatMap((point, i, route) => i ? samples(route[i - 1], point) : [point]));
+  const routes = [
+    ...world.buildings.flatMap(b => [...b.stairs.flatMap(s => s.flights), ...b.doors.map(d => [d.outside, d.inside])]),
+    ...[...(world.walkways || []), ...(world.roofBridges || [])].map(link => link.route),
+    ...(world.underground?.entrances || []).map(entry => [entry.top, entry.bottom]),
+  ];
+  const reserved = routes.flatMap(route => route.flatMap((point, i) => i ? samples(route[i - 1], point) : [point]));
 
   // A few full-size freight stacks/utility installations break exposed outer
   // lanes as part of the map, not as structures centred on a spawn point.
@@ -66,7 +71,7 @@ export function addSpawnZones(world, rules) {
 
   const candidates = [], seen = new Set();
   for (const box of obstacles) {
-    if (box.kind === 'wall' || (box.y || 0) > EPS || box.h < 1.9) continue;
+    if (box.kind === 'wall' || Math.abs(box.y || 0) > EPS || box.h < 1.9) continue;
     for (const axis of ['x', 'z']) for (const side of [-1, 1]) for (const fraction of [-0.3, 0, 0.3]) {
       const point = axis === 'x' ? { x: box.x + side * (box.w / 2 + radius + 0.5), y: 0, z: box.z + box.d * fraction } : { x: box.x + box.w * fraction, y: 0, z: box.z + side * (box.d / 2 + radius + 0.5) };
       const key = `${point.x.toFixed(2)},${point.z.toFixed(2)}`;
@@ -87,13 +92,23 @@ export function addSpawnZones(world, rules) {
   }
 
   for (const building of world.buildings) {
-    const y = building.height, equipment = { id: `${building.id}-roof-hvac`, x: building.x + building.w / 2 - 1.2, y, z: building.z - 0.4, w: 1.3, d: 2.2, h: 2.05, kind: 'equipment', scenery: true };
-    if (!colliders.some((b) => intersects(boxBounds(equipment), b)) && !reserved.some((p) => intersects(boxBounds(equipment), bodyBox(p)))) scenery(equipment);
-    for (let floor = 1; floor <= building.storeys; floor++) for (const side of [-1, 1]) {
-      const roof = floor === building.storeys, point = { x: building.x + building.w / 2 - (roof ? 1.2 : 0.85), y: floor * 3, z: building.z + side * (building.d / 2 - 0.85) };
-      const inside = { x: building.x + building.w / 2 - 2.4, y: point.y, z: point.z };
-      const exitPath = [inside, { x: inside.x, y: point.y, z: building.z + building.d / 2 - 0.8 }];
-      add(point, exitPath, roof ? [equipment.id] : world.obstacles.filter((b) => b.buildingId === building.id && b.kind === 'building-wall').map((b) => b.id), floor + 1, roof);
+    const y = building.height;
+    const equipment = [{ x: building.x + building.w / 2 - 1.2, z: building.z - .4 }, ...building.floorGuides]
+      .filter(point => building.plates.some(plate => Math.abs(point.x - plate.x) + .66 < plate.w / 2 && Math.abs(point.z - plate.z) + 1.11 < plate.d / 2))
+      .map(point => ({ ...point, id: `${building.id}-roof-hvac`, y, w: 1.3, d: 2.2, h: 2.05, kind: 'equipment', scenery: true }))
+      .find(box => !colliders.some(b => intersects(boxBounds(box), b)) && !reserved.some(p => intersects(boxBounds(box), bodyBox(p))));
+    if (equipment) scenery(equipment);
+    for (let floor = 1; floor <= building.storeys; floor++) {
+      const roof = floor === building.storeys, y = floor * building.height / building.storeys;
+      const cover = world.obstacles.filter(b => b.buildingId === building.id && b.y === y && b.kind === (roof ? 'building-rail' : 'building-wall')).map(b => b.id);
+      const preferred = [-1, 1].flatMap(side => [-1, 1].map(edge => ({ x: building.x + edge * (building.w / 2 - 1.1), z: building.z + side * (building.d / 2 - .92) })));
+      const spots = [];
+      for (const point of [...preferred, ...building.floorGuides].map(p => ({ ...p, y }))) {
+        if (spots.some(p => Math.hypot(p.x - point.x, p.z - point.z) < 1.75) || !free(point) || !supported(point)) continue;
+        const exit = exitFor(point);
+        if (add(point, exit, roof && equipment ? [equipment.id, ...cover] : cover, floor + 1, roof)) spots.push(point);
+        if (spots.length === 2) break;
+      }
     }
   }
   return Object.freeze({ ...world, obstacles, spawns, spawnZones });

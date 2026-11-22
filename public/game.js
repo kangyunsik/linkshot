@@ -6,6 +6,7 @@ import { EMPTY_INPUT, clamp, angleDelta } from '/shared/movement.js';
 import { drawTacticalMap } from './map.js';
 import { WeaponModels, disposeModel, setModelSuppressor } from './weapon-model.js';
 import { gunshotRange } from './gunshot-mix.js';
+import { incomingBulletPass, incomingImpactPan } from './incoming-audio.js';
 import { createOperator, poseOperator } from './operator-model.js';
 import { getOutfit, getCharacter } from '/shared/outfits.js';
 import { reconcileMovement, advancePredictedMovement } from './prediction.js';
@@ -13,6 +14,7 @@ import { SnapshotOrder } from './snapshot-order.js';
 import { LookInput } from './look-input.js';
 import { applyViewmodelUniform } from './team-uniform.js';
 import { drawBuildings } from './building-view.js';
+import { drawBasements, isBasementSolid } from './basement-view.js';
 import { CombatEffects } from './combat-effects.js';
 import { AimRecoil } from './aim-recoil.js';
 import { ShotFeedback } from './shot-feedback.js';
@@ -27,6 +29,7 @@ import { AvatarPoseSchedule, FrameStats, qualityPreset } from './performance.js'
 import { batchStaticBoxes } from './static-scenery.js';
 import { WeaponWallGuard } from './weapon-wall.js';
 import { drawTeamArena } from './team-arena.js';
+import { drawSetback, setbackMaterials } from './arena-profile-view.js';
 import { ObjectiveView, updateObjectiveHud } from './objective-view.js';
 import { isTeamGame, isObjectiveGame, gameTypeName } from '/shared/game-types.js';
 import { RoundEffects } from './round-effects.js';
@@ -73,7 +76,7 @@ function canvasTexture(width, height, paint) {
 }
 
 function signTexture(title, subtitle, orange = false) {
-  return canvasTexture(1024, 256, (ctx, w, h) => {
+  const texture = canvasTexture(1024, 256, (ctx, w, h) => {
     ctx.fillStyle = '#1b2c33'; ctx.fillRect(0, 0, w, h);
     ctx.fillStyle = orange ? '#eb8053' : '#aac9c9'; ctx.fillRect(0, 0, 9, h);
     ctx.font = 'bold 104px Arial'; ctx.fillText(title, 50, 145);
@@ -81,6 +84,8 @@ function signTexture(title, subtitle, orange = false) {
     ctx.strokeStyle = '#476068'; ctx.strokeRect(20, 20, w - 40, h - 40);
     ctx.fillStyle = '#de7b51'; for (let i = 0; i < 5; i++) ctx.fillRect(w - 80 - i * 12, h - 56, 5, 16);
   });
+  texture.anisotropy = 8;
+  return texture;
 }
 
 export class FPSGame {
@@ -103,7 +108,8 @@ export class FPSGame {
     this.damageDirections = [];
     this.groundItems = new Map(); this.droppedWeapons = []; this.equipmentActionSeq = 0;
     this.firePressedUntil = 0;
-    this.hud = Object.fromEntries(['hud-health', 'hud-ammo', 'hud-timer', 'hud-kd', 'health-fill', 'respawn-overlay', 'respawn-count', 'crosshair', 'reload-indicator', 'reload-hint', 'protection-hint', 'damage-vignette', 'hitmarker', 'kill-confirmation', 'hud-fps'].map((id) => [id, $(id)]));
+    this.hud = Object.fromEntries(['hud-health', 'hud-ammo', 'hud-timer', 'hud-kd', 'health-fill', 'respawn-overlay', 'respawn-count', 'crosshair', 'ads-reticle', 'reload-indicator', 'reload-hint', 'protection-hint', 'damage-vignette', 'hitmarker', 'kill-confirmation', 'hud-fps'].map((id) => [id, $(id)]));
+    this.scopeDot = document.querySelector('.scope-lens>i');
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setClearColor('#192e3b'); this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.18;
@@ -207,27 +213,46 @@ export class FPSGame {
       ctx.fillStyle = '#87939511'; for (let i = 0; i < 10; i++) ctx.fillRect(0, i * 50, w, 1);
     });
     concrete.wrapS = concrete.wrapT = THREE.RepeatWrapping; concrete.repeat.set(world.width / 4, world.depth / 4);
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(world.width + 24, world.depth + 24), this.material('floor', world.ground, { map: concrete, metalness: 0.1 }));
-    floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; this.scene.add(floor);
+    concrete.anisotropy = this.panelTexture.anisotropy;
+    if (world.underground) {
+      drawBasements(this.scene, world, this.material.bind(this), concrete);
+      const access = new THREE.MeshBasicMaterial({ map: signTexture('B1', 'BASEMENT ACCESS', true), polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+      for (const entry of world.underground.entrances) {
+        const mark = new THREE.Mesh(new THREE.PlaneGeometry(1.46, .47), access);
+        mark.rotation.x = -Math.PI / 2;
+        mark.rotateZ(entry.axis === 'x' ? entry.dir * Math.PI / 2 : entry.dir > 0 ? Math.PI : 0);
+        mark.position.set(entry.top.x, .012, entry.top.z); this.scene.add(mark);
+      }
+    } else {
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(world.width + 24, world.depth + 24), this.material('floor', world.ground, { map: concrete, roughness: .98, metalness: .01 }));
+      floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; this.scene.add(floor);
+    }
     const dark = this.material('dark', world.theme === 'snow' ? '#728c99' : '#263c46'), edge = this.material('edge', world.theme === 'snow' ? '#6e8794' : '#213038'), orange = this.material('orange', world.accent);
     const slate = this.material('slate', world.theme === 'snow' ? '#bdced3' : world.theme === 'desert' ? '#ae9278' : '#4c646e'), wall = this.material('wall', world.wall);
     const stripe = this.material('stripe', '#df9860', { roughness: 0.85, metalness: 0.05 });
     const glow = this.material('glow', '#7ad6d4', { emissive: '#70ced0', emissiveIntensity: 1.4 });
     const orangeGlow = this.material('orange-glow', '#ff9e5c', { emissive: '#ff6a2e', emissiveIntensity: 2 });
+    const annex = world.arenaProfile ? setbackMaterials(world, this.material.bind(this)) : null;
+    const placeSetback = this.box.bind(this);
     for (const data of world.obstacles) {
-      if (data.buildingId) continue;
-      const group = new THREE.Group(); group.position.set(data.x, data.y, data.z); this.scene.add(group);
+      if (data.buildingId || isBasementSolid(data)) continue;
+      const group = new THREE.Group(); group.name = data.id; group.position.set(data.x, data.y, data.z); this.scene.add(group);
+      if (data.kind === 'arena-setback') {
+        drawSetback(placeSetback, group, data, annex, world.theme);
+        continue;
+      }
       const baseMaterial = data.kind === 'wall' ? wall : data.color === 'orange' ? orange : slate;
-      this.box(group, [data.w, data.h, data.d], [0, data.h / 2, 0], data.kind === 'reactor' ? this.material('reactor', '#6e8282', { map: this.panelTexture }) : baseMaterial);
+      const bodyHeight = data.h - (data.kind === 'crate' ? .16 : data.kind === 'equipment' ? .08 : 0);
+      this.box(group, [data.w, bodyHeight, data.d], [0, bodyHeight / 2, 0], data.kind === 'reactor' ? this.material('reactor', '#6e8282', { map: this.panelTexture }) : baseMaterial);
       if (data.kind === 'container') {
         for (let x = -data.w / 2 + 0.3; x < data.w / 2; x += 0.62) for (const side of [-1, 1]) this.box(group, [0.065, data.h - 0.25, 0.07], [x, data.h / 2, side * (data.d / 2 + 0.025)], baseMaterial);
         for (const y of [0.1, data.h - 0.1]) this.box(group, [data.w + 0.06, 0.14, data.d + 0.05], [0, y, 0], edge);
-        for (const x of [-data.w / 2, data.w / 2]) this.box(group, [0.14, data.h, data.d + 0.06], [x, data.h / 2, 0], edge);
+        for (const x of [-data.w / 2, data.w / 2]) this.box(group, [0.14, data.h - .10, data.d + 0.06], [x, data.h / 2, 0], edge);
         this.box(group, [0.65, 0.16, 0.025], [data.w / 2 - 1, 1.7, data.d / 2 + 0.045], stripe, false);
         const sign = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(1.8, data.w - 0.4), 0.45), new THREE.MeshBasicMaterial({ map: signTexture(data.color === 'orange' ? '07 / CARGO' : world.title, 'RESTRICTED ACCESS', true) }));
         sign.position.set(-data.w / 2 + 1.5, 1.85, data.d / 2 + 0.05); group.add(sign);
       } else if (data.kind === 'crate') {
-        for (const x of [-1, 1]) for (const z of [-1, 1]) this.box(group, [0.12, data.h, 0.12], [x * (data.w / 2 - 0.02), data.h / 2, z * (data.d / 2 - 0.02)], edge);
+        for (const x of [-1, 1]) for (const z of [-1, 1]) this.box(group, [0.12, bodyHeight - .04, 0.12], [x * (data.w / 2 - 0.02), bodyHeight / 2, z * (data.d / 2 - 0.02)], edge);
         this.box(group, [data.w + 0.05, 0.13, data.d + 0.05], [0, data.h - 0.08, 0], dark);
         this.box(group, [data.w - 0.3, 0.13, 0.035], [0, 0.28, data.d / 2 + 0.03], stripe, false);
         for (const x of [-0.3, 0.3]) this.box(group, [0.14, data.h - 0.4, 0.04], [x * data.w, data.h / 2, data.d / 2 + 0.03], edge);
@@ -239,14 +264,14 @@ export class FPSGame {
       } else if (data.kind === 'step' || data.kind === 'platform') {
         this.box(group, [data.w + 0.03, 0.06, 0.09], [0, data.h + 0.015, -data.d / 2 + 0.05], stripe, false);
         if (data.kind === 'platform') {
-          for (const x of [-1, 1]) this.box(group, [0.09, 0.035, data.d], [x * (data.w / 2 - 0.1), data.h + 0.015, 0], glow, false);
+          for (const x of [-1, 1]) this.box(group, [0.09, 0.020, data.d], [x * (data.w / 2 - 0.1), data.h + 0.020, 0], glow, false);
           const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.35), new THREE.MeshBasicMaterial({ map: signTexture('HIGH GROUND', 'WALK UP / SPACE TO JUMP', true) })); sign.position.set(0, 0.8, data.d / 2 + 0.025); group.add(sign);
         }
       } else if (data.kind === 'wall') {
         this.box(group, [data.w + 0.08, 0.18, data.d + 0.08], [0, data.h - 0.1, 0], edge);
         this.box(group, [data.w + 0.025, 0.08, data.d + 0.025], [0, 1, 0], slate, false);
-        if (data.w > data.d) for (let x = -halfW + 3; x < halfW; x += 6.5) this.box(group, [0.24, data.h + 0.5, data.d + 0.15], [x, data.h / 2, 0], edge);
-        else for (let z = -halfD + 3; z < halfD; z += 6.5) this.box(group, [data.w + 0.15, data.h + 0.5, 0.24], [0, data.h / 2, z], edge);
+        if (data.w > data.d) for (let x = -data.w / 2 + 2; x < data.w / 2 - 1; x += 6.5) this.box(group, [0.24, data.h + 0.5, data.d + 0.15], [x, data.h / 2, 0], edge);
+        else for (let z = -data.d / 2 + 2; z < data.d / 2 - 1; z += 6.5) this.box(group, [data.w + 0.15, data.h + 0.5, 0.24], [0, data.h / 2, z], edge);
       } else if (data.kind === 'building') {
         this.box(group, [data.w + 0.15, 0.18, data.d + 0.15], [0, data.h - 0.08, 0], dark);
         for (const side of [-1, 1]) {
@@ -272,25 +297,58 @@ export class FPSGame {
 
     drawBuildings(this.scene, world, this.material.bind(this));
     // Painted floor guides and hazard markings are decorative, never hidden collision.
-    const paint = new THREE.MeshBasicMaterial({ color: '#e4ab74', transparent: true, opacity: 0.45, depthWrite: false });
-    const floorStripe = (x, z, w, d, material = paint) => { const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, d), material); mesh.rotation.x = -Math.PI / 2; mesh.position.set(x, 0.008, z); this.scene.add(mesh); };
-    for (const x of [-halfW + 2.5, halfW - 2.5]) for (let z = -halfD + 4; z <= halfD - 4; z += 3) floorStripe(x, z, 0.07, 1.4);
-    for (const z of [-halfD + 2.5, halfD - 2.5]) for (let x = -halfW + 4; x <= halfW - 4; x += 3) floorStripe(x, z, 1.4, 0.07);
-    for (const side of [-1, 1]) { floorStripe(side * 3.7, 0, 0.12, 8); floorStripe(0, side * 3.7, 7.5, 0.12); }
-    for (let i = -3; i <= 3; i++) for (const side of [-1, 1]) { const mark = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 1.0), paint); mark.rotation.x = -Math.PI / 2; mark.rotation.z = -0.5; mark.position.set(i * 0.75, 0.012, side * 4.5); this.scene.add(mark); }
+    const paint = new THREE.MeshBasicMaterial({ color: '#e4ab74', transparent: true, opacity: 0.45, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    const floorStripe = (x, z, w, d, material = paint) => {
+      if (world.underground?.holes.some(hole => Math.abs(hole.x - x) < (hole.w + w) / 2 && Math.abs(hole.z - z) < (hole.d + d) / 2)) return;
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, d), material); mesh.rotation.x = -Math.PI / 2; mesh.position.set(x, 0.008, z); this.scene.add(mesh);
+    };
+    if (world.arenaProfile) {
+      for (const box of world.obstacles) {
+        if (box.kind !== 'arena-setback' || !box.arenaFace) continue;
+        const vertical = ['west', 'east'].includes(box.arenaFace), sign = ['west', 'north'].includes(box.arenaFace) ? 1 : -1;
+        const span = vertical ? box.d : box.w, depth = vertical ? box.w : box.d;
+        for (let at = -span / 2 + .9; at < span / 2 - .4; at += 2.2) {
+          const across = sign * (depth / 2 + .44);
+          if (vertical) floorStripe(box.x + across, box.z + at, .075, 1.06);
+          else floorStripe(box.x + at, box.z + across, 1.06, .075);
+        }
+      }
+      const crossing = world.crossing;
+      for (const lane of crossing?.lanes || []) for (let along = lane.start + 1; along < lane.end; along += 2.4) {
+        if (crossing.axis === 'z') floorStripe(lane.center, along, .086, 1.1);
+        else floorStripe(along, lane.center, 1.1, .086);
+      }
+    } else {
+      for (const x of [-halfW + 2.5, halfW - 2.5]) for (let z = -halfD + 4; z <= halfD - 4; z += 3) floorStripe(x, z, 0.07, 1.4);
+      for (const z of [-halfD + 2.5, halfD - 2.5]) for (let x = -halfW + 4; x <= halfW - 4; x += 3) floorStripe(x, z, 1.4, 0.07);
+    }
+    if (!world.crossing) {
+      for (const side of [-1, 1]) { floorStripe(side * 3.7, 0, 0.12, 8); floorStripe(0, side * 3.7, 7.5, 0.12); }
+      for (let i = -3; i <= 3; i++) for (const side of [-1, 1]) { const mark = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 1.0), paint); mark.rotation.x = -Math.PI / 2; mark.rotation.z = -0.5; mark.position.set(i * 0.75, 0.012, side * 4.5); this.scene.add(mark); }
+    }
     this.lamps = [];
     if (world.theme === 'rail') for (const x of [-7, 7]) {
-      for (const side of [-1, 1]) this.box(this.scene, [0.075, 0.045, world.depth - 8], [x + side * 0.85, 0.026, 0], slate, false);
-      for (let z = -halfD + 5; z < halfD - 4; z += 1.6) floorStripe(x, z, 2.4, 0.16);
+      const sections = world.crossing ? [[-halfD + 4, -7.8], [11.5, halfD - 4]] : [[-halfD + 4, halfD - 4]];
+      for (const [from, to] of sections) {
+        for (const side of [-1, 1]) this.box(this.scene, [0.075, 0.045, to - from], [x + side * 0.85, 0.026, (from + to) / 2], slate, false);
+        for (let z = from + 1; z < to; z += 1.6) floorStripe(x, z, 2.4, 0.16);
+      }
     }
-    if (world.theme === 'city' || world.theme === 'desert') for (let x = -halfW + 6; x < halfW - 5; x += 5) floorStripe(x, 0, 2, 0.09);
-    for (const z of [-halfD + 0.1, halfD - 0.1]) {
-      const sign = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(12, world.width * 0.35), 3), new THREE.MeshBasicMaterial({ map: signTexture(world.name, 'LOCAL OPERATIONS   —   NO UNAUTHORIZED ENTRY', true) }));
-      sign.position.set(-world.width * 0.12, 4.5, z); if (z > 0) sign.rotation.y = Math.PI; this.scene.add(sign);
-      const art = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 3), this.material('art-panel', '#a7b6bd', { map: this.panelTexture }));
-      art.position.set(world.width * 0.32, 4.5, z); if (z > 0) art.rotation.y = Math.PI; this.scene.add(art);
+    if (!world.crossing && (world.theme === 'city' || world.theme === 'desert')) for (let x = -halfW + 6; x < halfW - 5; x += 5) floorStripe(x, 0, 2, 0.09);
+    for (const side of ['north', 'south']) {
+      const direction = side === 'north' ? -1 : 1, z = direction * (halfD - .1);
+      const span = world.arenaProfile ? world.obstacles.filter(box => box.id.startsWith(`${side}-`) && box.kind === 'wall').reduce((best, box) => !best || box.w > best.w ? box : best, null) : null;
+      const signWidth = Math.min(12, world.width * .35, span ? span.w * .64 : Infinity), signX = span ? span.x : -world.width * .12, artX = world.width * .32;
+      const sign = new THREE.Mesh(new THREE.PlaneGeometry(signWidth, 3), new THREE.MeshBasicMaterial({ map: signTexture(world.name, 'LOCAL OPERATIONS   —   NO UNAUTHORIZED ENTRY', true) }));
+      sign.name = `arena-sign-${side}`; sign.position.set(signX, 4.5, z); if (z > 0) sign.rotation.y = Math.PI; this.scene.add(sign);
+      // Some irregular edge spans put the title exactly over the decorative
+      // plate. It isn't a second sign; only draw it when the faces don't meet.
+      if (Math.abs(signX - artX) > (signWidth + 4.6) / 2 + .05) {
+        const art = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 3), this.material('art-panel', '#a7b6bd', { map: this.panelTexture }));
+        art.name = `arena-art-${side}`; art.position.set(artX, 4.5, z); if (z > 0) art.rotation.y = Math.PI; this.scene.add(art);
+      }
       for (const x of [-world.width * 0.38, world.width * 0.14, world.width * 0.43]) {
-        this.box(this.scene, [0.7, 0.12, 0.2], [x, 5.8, z], orangeGlow, false);
+        this.box(this.scene, [0.7, 0.12, 0.2], [x, 5.8, z - direction * .035], orangeGlow, false);
         const lamp = new THREE.PointLight('#ffb67a', 3, 8, 2); lamp.position.set(x, 5.5, z > 0 ? z - 0.6 : z + 0.6); this.scene.add(lamp); this.lamps.push(lamp);
       }
     }
@@ -465,6 +523,12 @@ export class FPSGame {
       if (event.target.matches('input, select, textarea') || document.querySelector('dialog[open]')) return;
       if (event.code === 'KeyE' && !event.repeat && (this.preparing || this.local?.hp <= 0)) { event.preventDefault(); this.loadoutOpen ? this.closeLoadout() : this.openLoadout(); return; }
       if (event.code === 'Escape' && this.loadoutOpen) { event.preventDefault(); this.closeLoadout(); return; }
+      if (event.code === 'Escape' && !event.repeat && this.room?.phase === 'active' && !this.preparing && this.local?.hp <= 0) {
+        event.preventDefault();
+        if (this.locked) document.exitPointerLock();
+        else { this.clearInput(); this.onMenu(true); }
+        return;
+      }
       if (this.loadoutOpen) {
         const item = WEAPONS.find((weapon) => weapon.slot <= 10 && (`Digit${weapon.slot % 10}` === event.code || `Numpad${weapon.slot % 10}` === event.code));
         if (item && !event.repeat) { event.preventDefault(); this.selectWeapon(item.id); }
@@ -489,7 +553,9 @@ export class FPSGame {
       this.lookInput.transition(performance.now());
       if (!this.locked) this.clearInput();
       if (this.locked) { this.controlEngaged = true; $('combat-focus-hint').hidden = true; $('combat-focus-menu').hidden = true; }
-      if (this.room?.phase === 'active' && !this.loadoutOpen && this.local?.hp > 0 && (this.locked || this.controlEngaged)) this.onMenu(!this.locked);
+      // Escape is sometimes consumed by the browser to release pointer lock.
+      // Treat that release as a menu request even on the respawn screen.
+      if (this.room?.phase === 'active' && !this.loadoutOpen && this.local && (this.locked || this.controlEngaged)) this.onMenu(!this.locked);
     }, options);
     window.addEventListener('blur', () => { this.clearInput(); if (this.locked) document.exitPointerLock(); }, options);
     document.addEventListener('visibilitychange', () => { if (document.hidden) { this.clearInput(); if (this.locked) document.exitPointerLock(); } }, options);
@@ -590,7 +656,6 @@ export class FPSGame {
     if (this.local?.hp > 0 && local.hp <= 0) {
       this.deathAt = performance.now(); this.clearInput(); this.recoil = 0; this.muzzleUntil = 0;
       this.aimRecoil.reset(this.aimRecoil.aimPitch); this.muzzleFlash.visible = false; this.muzzleLight.intensity = 0;
-      $('pause-overlay').hidden = true;
     }
     if (this.feedbackRound !== data.room.roundId) { this.feedbackRound = data.room.roundId; this.shotFeedback.reset(); this.seenKills.clear(); this.clearKillFeedback(); this.bulletMarks.clear(); }
     if (!this.predicted || respawned) {
@@ -764,6 +829,10 @@ export class FPSGame {
           this.flashHitmarker(false, true);
         }
       } else if (this.predicted) {
+        if (this.local?.hp > 0 && this.room?.phase === 'active' && this.audio.bulletPass) {
+          const pass = incomingBulletPass(event, this.predicted, this.yaw, this.selfId, this.world);
+          if (pass) this.audio.bulletPass(pass);
+        }
         const dx = event.origin.x - this.predicted.x, dz = event.origin.z - this.predicted.z, distance = Math.hypot(dx, dz);
         if (distance < gunshotRange(event.suppressor)) {
           const pan = clamp((dx * Math.cos(this.yaw) - dz * Math.sin(this.yaw)) / Math.max(distance, 0.1), -1, 1);
@@ -779,7 +848,8 @@ export class FPSGame {
       }
     }
     if (event.type === 'damage' && event.id === this.selfId) {
-      this.audio.hurt(); this.hud['damage-vignette'].classList.add('visible'); this.damageUntil = performance.now() + 180;
+      if (event.damage > 0) this.audio.hurt?.({ damage: event.damage, headshot: event.headshot, pan: incomingImpactPan(this.predicted, event.origin, this.yaw) });
+      this.hud['damage-vignette'].classList.add('visible'); this.damageUntil = performance.now() + 180;
       this.recordDamageDirection(event);
       if (this.predicted) this.combat.blood({ x: this.predicted.x, y: this.predicted.y + 0.8, z: this.predicted.z }, event.origin, this.predicted.y, 0.5);
     }
@@ -787,7 +857,10 @@ export class FPSGame {
       if (event.killId && this.seenKills.has(event.killId)) return;
       if (event.killId) { this.seenKills.add(event.killId); if (this.seenKills.size > 512) this.seenKills.delete(this.seenKills.values().next().value); }
       const victim = this.players.find((player) => player.id === event.victimId), rendered = this.remote.get(event.victimId);
-      if (victim) this.combat.death(rendered ? { ...victim, x: rendered.group.position.x, y: rendered.group.position.y, z: rendered.group.position.z, yaw: rendered.group.rotation.y } : victim);
+      if (victim) {
+        this.combat.death(victim, rendered, this.players.find((player) => player.id === event.killerId));
+        if (rendered && victim.hp <= 0) rendered.group.visible = false;
+      }
       const entry = document.createElement('div'); entry.className = `feed-item${event.killerId === this.selfId ? ' mine' : ''}`;
       for (const [className, text] of [['killer', event.killer], ['feed-icon', `${getWeapon(event.weaponId).name} ${event.headshot ? '⌖' : '›'}`], ['victim', event.victim]]) {
         const span = document.createElement('span'); span.className = className; span.textContent = text;
@@ -913,7 +986,7 @@ export class FPSGame {
       // Recoil recovers toward mouse aim; the composed pitch is also sent to
       // the server, so recovery never creates a camera-only aiming offset.
       this.camera.position.set(this.predicted.x, this.predicted.y + playerPose(this.predicted).eyeHeight, this.predicted.z);
-      this.audio.setEnvironment?.((this.world.buildings || []).some((building) => Math.abs(this.predicted.x - building.x) < building.w / 2 && Math.abs(this.predicted.z - building.z) < building.d / 2 && this.predicted.y < building.height - 0.1));
+      this.audio.setEnvironment?.(this.predicted.y < -.28 || (this.world.buildings || []).some((building) => Math.abs(this.predicted.x - building.x) < building.w / 2 && Math.abs(this.predicted.z - building.z) < building.d / 2 && this.predicted.y < building.height - 0.1));
       if (this.local.hp <= 0) this.camera.position.y = this.predicted.y + lerp(playerPose(this.predicted).eyeHeight, 0.45, Math.min(1, (now - (this.deathAt || now)) / 700));
       this.camera.rotation.set(this.pitch, this.yaw, 0);
       const weapon = getWeapon(this.local.weaponId), switching = this.local.switchUntil > this.serverNow || this.requestedWeaponId !== this.local.weaponId;
@@ -934,8 +1007,8 @@ export class FPSGame {
       if (sightAligned) { this.weapon.position.x = 0; this.weapon.position.y = -this.activeModel.userData.aimHeight; }
       this.sightAligned = sightAligned;
       if (this.activeModel.userData.reticle) this.activeModel.userData.reticle.visible = !ads;
-      $('ads-reticle').hidden = !ads || scoped || this.local.hp <= 0;
-      $('ads-reticle').style.backgroundColor = getSkin(this.local.skinId).accent;
+      this.hud['ads-reticle'].hidden = !ads || scoped;
+      this.hud['ads-reticle'].style.backgroundColor = getSkin(this.local.skinId).accent;
       this.weapon.visible = (this.graphicsPreparing || this.local.hp > 0 && ['active', 'waiting', 'countdown'].includes(this.room.phase)) && !scoped;
       if (now > this.firePressedUntil) this.localFirePending = false;
       const trigger = input.fire || this.localFirePending;
@@ -960,10 +1033,22 @@ export class FPSGame {
       this.muzzleFlash.visible = now < this.muzzleUntil; this.muzzleLight.intensity = now < this.muzzleUntil ? this.local.suppressor ? .35 : 2 : 0;
       this.hud['crosshair'].style.opacity = this.local.hp <= 0 || ads ? '0' : '1';
       const spread = shotSpread(weapon, ads, this.predicted);
-      // Scaling the translated container moved its center by up to 42px.
-      // Only the four arms spread; both hip-fire and ADS centers stay fixed.
-      this.hud['crosshair'].style.scale = '1';
-      this.hud['crosshair'].style.setProperty('--crosshair-gap', `${Math.min(26, spread * 170 + this.recoil * 2.5 + (weapon.type === 'SHOTGUN' ? 5 : 0))}px`);
+      const rifle = weapon.type === 'ASSAULT' || weapon.type === 'DMR' || weapon.type === 'SNIPER';
+      if (rifle || ads) {
+        // Project the same cone used by the simulation through the live FOV,
+        // in CSS pixels. Widen the outer marks, never move the aim dot.
+        const radius = Math.tan(spread) * this.renderHeight * .5 * this.camera.projectionMatrix.elements[5];
+        if (ads) {
+          const dot = scoped ? this.scopeDot : this.hud['ads-reticle'];
+          dot.setAttribute('data-dispersion', '');
+          dot.style.setProperty('--spread-diameter', `${(2 * Math.min(27, 2.4 + radius)).toFixed(2)}px`);
+        } else {
+          // At zero gap the inner edges are 9px from the center (28px box, 5px marks).
+          this.hud['crosshair'].style.setProperty('--crosshair-gap', `${(clamp(2.4 + radius, 3, 35) - 9).toFixed(2)}px`);
+        }
+      } else {
+        this.hud['crosshair'].style.setProperty('--crosshair-gap', `${Math.min(26, spread * 170 + this.recoil * 2.5 + (weapon.type === 'SHOTGUN' ? 5 : 0))}px`);
+      }
       this.hud['crosshair'].dataset.accuracy = !this.predicted.grounded ? 'airborne' : this.predicted.crouching ? 'crouched' : walking ? 'walking' : this.predicted.moveSpeed > 0.2 ? 'moving' : 'steady';
       this.hud['protection-hint'].hidden = this.local.hp <= 0 || this.local.protectedUntil < this.serverNow;
       if (this.local.hp <= 0) this.hud['respawn-count'].textContent = Math.max(1, Math.ceil((this.local.respawnAt - this.serverNow) / 1000));
@@ -1064,6 +1149,7 @@ export class FPSGame {
     this.disposed = true; this.abort.abort(); cancelAnimationFrame(this.frameId);
     this.hitmarkerAnimation?.cancel();
     this.audio.stopReload?.();
+    this.audio.stopIncoming?.();
     if (this.locked) document.exitPointerLock();
     // Let the destination UI paint before releasing thousands of GPU objects.
     const retired = this.graphicsPreparing ? this.graphicsPromise.catch(() => {}) : Promise.resolve();

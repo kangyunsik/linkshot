@@ -3,7 +3,10 @@ import { addSpawnZones } from './spawns.js';
 import { TEAM_WORLDS } from './team-worlds.js';
 import { surfaceBounds, surfaceRay, surfaceNormal } from './terrain.js';
 import { createRayIndex, indexedRayDistance } from './ray-index.js';
-export const NETWORK_PROTOCOL = 23;
+import { applyArenaProfile } from './arena-profiles.js';
+import { addBasements, reserveBasements } from './basements.js';
+// Clients predict movement from the same static map as the server.
+export const NETWORK_PROTOCOL = 29;
 export const BULLET_MARK_RULES = Object.freeze({ lifetimeMs: 60_000, fadeMs: 6000, maxMarks: 6144, historyLimit: 2048, cellScale: 40 });
 
 export const RULES = Object.freeze({
@@ -50,7 +53,7 @@ function block(id, x, z, w, d, h, kind = 'container', color = 'slate') {
 const FOUNDRY = Object.freeze({
   id: 'foundry', name: 'FOUNDRY 07', title: 'FOUNDRY', label: '파운드리', width: 56, depth: 46,
   tag: '근접 교전', theme: 'industrial', image: 'foundry-hero.png',
-  description: '중앙 반응로와 컨테이너를 둘러싼 짧고 빠른 교전. 엄폐물을 활용해 측면을 노리세요.',
+  description: '중앙 반응로를 둘러싼 근접 전장. 양옆 작업동이 여러 번 안쪽으로 꺾이며 컨테이너 뒤 측면 통로로 이어집니다.',
   sky: '#213947', ground: '#929997', wall: '#40525a', accent: '#b55d39', light: '#ffe2b9',
   obstacles: [
     block('north', 0, -23.5, 57, 1, 7, 'wall'),
@@ -104,21 +107,22 @@ function arena(config, obstacles) {
 const longrail = arena({
   id: 'longrail', name: 'LONGRAIL 12', title: 'LONGRAIL', label: '롱레일', width: 42, depth: 112,
   tag: '장거리 · 세로형', theme: 'rail', image: 'longrail-hero.png',
-  description: '112m 길이의 화물 철도. 두 개의 선로와 끊어진 화차 사이로 긴 시야와 우회로가 교차합니다.',
+  description: '112m 화물 철도. 양쪽 역 구내는 넓지만, 남북을 잇는 중앙은 두 작업동 사이 정비 골목 하나로 모입니다.',
   sky: '#283b51', ground: '#848a92', wall: '#41516b', accent: '#a06c40', light: '#ffdfc2',
 }, [
   ...[-34, -12, 12, 34].map((z, i) => block(`train-west-${i}`, -7, z, 4, 13, 3.2, 'container', i % 2 ? 'slate' : 'orange')),
-  ...[-25, 0, 25].map((z, i) => block(`train-east-${i}`, 7, z, 4, 14, 3.2, 'container', i % 2 ? 'orange' : 'slate')),
+  ...[-25, 25].map((z, i) => block(`train-east-${i}`, 7, z, 4, 14, 3.2, 'container', i % 2 ? 'orange' : 'slate')),
   ...[-42, -20, 20, 42].flatMap((z, i) => [block(`platform-w-${i}`, -14, z, 4, 3, 1.25, 'crate'), block(`platform-e-${i}`, 14, -z, 3, 3, 1.5, 'crate')]),
 ]);
 
 const drydock = arena({
   id: 'drydock', name: 'DRYDOCK 03', title: 'DRYDOCK', label: '드라이독', width: 96, depth: 72,
   tag: '대형 · 개방형', theme: 'harbor', image: 'drydock-hero.png',
-  description: '96 × 72m의 넓은 항만 야드. 중앙 창고, 화물 적재장과 넓은 외곽 동선을 활용하세요.',
+  description: '넓은 항만 야드. 세 방향에서 드나드는 대형 창고와 북서쪽 하역동 사이에는 지상 길과 화물 지하 통로가 있습니다.',
   sky: '#44616b', ground: '#929d9d', wall: '#506870', accent: '#ac6949', light: '#ffedce',
 }, [
-  block('warehouse', 0, 0, 14, 12, 5.2, 'building'),
+  block('warehouse', 0, 0, 17, 14, 5.2, 'building'),
+  { ...block('operations-tower-0', -14.7, -10.6, 8.5, 8.8, 6, 'building'), storeys: 3 },
   ...[-30, -15, 15, 30].flatMap((x, i) => [block(`cargo-n-${i}`, x, -18, 9, 4, 3.2, 'container', i % 2 ? 'slate' : 'orange'), block(`cargo-s-${i}`, -x, 18, 7, 4, 3.2, 'container', i % 2 ? 'orange' : 'slate')]),
   ...[-33, -20, 20, 33].flatMap((x, i) => [block(`cover-n-${i}`, x, -5, 3, 3, 1.6, 'crate'), block(`cover-s-${i}`, -x, 6, 3, 4, 1.5, 'crate')]),
   block('dock-west', -32, 0, 4, 9, 2.6, 'container'), block('dock-east', 32, 0, 4, 9, 2.6, 'container'),
@@ -127,23 +131,25 @@ const drydock = arena({
 const blocknine = arena({
   id: 'blocknine', name: 'BLOCK NINE', title: 'BLOCK NINE', label: '블록 나인', width: 76, depth: 68,
   tag: '시가전 · 다중 동선', theme: 'city', image: 'blocknine-hero.png',
-  description: '건물과 골목이 엇갈리는 폐쇄 구역. 중앙 교차로의 장거리 교전과 좁은 골목의 근접전이 공존합니다.',
+  description: '엇갈린 시가지. 중앙 상가 양옆의 두 골목과 북서쪽 옥상 연결교가 다른 높이의 우회로를 만듭니다.',
   sky: '#252a42', ground: '#78818c', wall: '#47465c', accent: '#775e99', light: '#ded9ff',
 }, [
-  ...[-20, 20].flatMap((x, i) => [-17, 17].map((z, j) => block(`building-${i}-${j}`, x, z, 10, 11, 6.5, 'building'))),
-  block('center-west', -10, 0, 7, 8, 4.2, 'building'), block('center-east', 11, 0, 8, 8, 4.2, 'building'),
+  block('building-0-0', -20, -17, 11, 11, 6.5, 'building'), block('building-0-1', -20, 17, 12, 9, 6.5, 'building'),
+  block('building-1-0', 20, -17, 9.5, 11.5, 6.5, 'building'), block('building-1-1', 20, 17, 11, 10, 6.5, 'building'),
+  block('center-west', -10, -12, 7, 7, 4.2, 'building'), block('center-east', 9.3, 14, 8, 7, 4.2, 'building'),
   block('crossing-north', 0, -20, 3, 5, 1.4, 'crate', 'orange'), block('crossing-south', 0, 20, 3, 5, 1.4, 'crate', 'orange'),
-  ...[-29, 29].flatMap((x, i) => [block(`street-cover-n-${i}`, x, -4, 2, 3, 1.4, 'crate'), block(`street-cover-s-${i}`, x, 7, 2, 3, 1.4, 'crate')]),
+  ...[-29, 29].flatMap((x, i) => [block(`street-cover-n-${i}`, x, -9.5, 2, 3, 1.4, 'crate'), block(`street-cover-s-${i}`, x, 14, 2, 3, 1.4, 'crate')]),
 ]);
 
 const whiteout = arena({
   id: 'whiteout', name: 'WHITEOUT 06', title: 'WHITEOUT', label: '화이트아웃', width: 88, depth: 64,
   tag: '설원 · 중장거리', theme: 'snow', image: 'whiteout-hero.png',
-  description: '차가운 설원 연구기지. 흰색 방호벽과 연구동 사이의 넓은 사선에 주의하세요.',
+  description: '동쪽 연구동과 정비동은 옥상 다리로 이어집니다. 동서 구역을 오갈 때는 눈벽 아래의 연구 통로 또는 좁은 정비 우회로를 쓰세요.',
   sky: '#9eb8c7', ground: '#e5eeeb', wall: '#899fa9', accent: '#4f839a', light: '#edf9ff',
 }, [
-  block('lab-west', -15, -12, 12, 7, 4.5, 'building'), block('lab-east', 15, 12, 12, 7, 4.5, 'building'),
-  block('ice-core', 0, 0, 5, 5, 3.7, 'reactor'),
+  block('lab-west', -15, -12, 12.8, 8.8, 4.5, 'building'), block('lab-east', 14.5, 13, 16, 12, 4.5, 'building'),
+  { ...block('operations-tower-1', 31, 11, 8.8, 9.1, 4.5, 'building'), storeys: 2 },
+  block('ice-core', -6.2, 0, 5, 5, 3.7, 'reactor'),
   ...[-28, -12, 12, 28].flatMap((x, i) => [block(`ice-cover-n-${i}`, x, -23, 5, 2, 1.5, 'crate'), block(`ice-cover-s-${i}`, -x, 23, 5, 2, 1.5, 'crate')]),
   block('supply-west', -29, 5, 4, 7, 2.6, 'container'), block('supply-east', 29, -5, 4, 7, 2.6, 'container'),
   block('snow-cover-ne', 13, -8, 3, 3, 1.4, 'crate'), block('snow-cover-sw', -13, 8, 3, 3, 1.4, 'crate'),
@@ -152,7 +158,7 @@ const whiteout = arena({
 const redline = arena({
   id: 'redline', name: 'REDLINE 19', title: 'REDLINE', label: '레드라인', width: 128, depth: 44,
   tag: '초장거리 · 가로형', theme: 'desert', image: 'redline-hero.png',
-  description: '128m를 가로지르는 붉은 사막 수송로. 낮은 중앙 엄폐와 양쪽 우회 통로가 저격수의 위치를 흔듭니다.',
+  description: '128m 붉은 사막 수송로. 북쪽 직선 사선과 절벽 턱을 돌아가는 남쪽 정비로 중 하나를 선택할 수 있습니다.',
   sky: '#b59a80', ground: '#c6aa83', wall: '#9a7358', accent: '#a64b31', light: '#ffe6bd',
 }, [
   ...[-42, -21, 21, 42].map((x, i) => block(`depot-${i}`, x, i % 2 ? -8 : 8, 10, 6, 3.5, 'building')),
@@ -189,12 +195,12 @@ const overgrowth = arena({
 const nightmarket = arena({
   id: 'nightmarket', name: 'NIGHT MARKET', title: 'NIGHT MARKET', label: '한국 야시장', width: 76, depth: 64,
   tag: '야시장 · 골목전', theme: 'market', image: 'nightmarket-hero.png',
-  description: '한글 네온과 천막 아래의 밤빛시장. 노점 사이 짧은 골목과 긴 중앙 시장길, 계단으로 연결된 2층 식당을 오가며 교전하세요.',
+  description: '한글 네온과 천막 아래의 밤빛시장. 노점 골목과 중앙 시장길, 식당 옥상을 잇는 지붕 있는 다리를 오가며 교전하세요.',
   sky: '#293449', ground: '#727780', wall: '#847a75', accent: '#ad5047', light: '#ffddad',
   footprint: [{ x: -8, z: -1, w: 26, d: 58 }, { x: 14, z: 11, w: 40, d: 32 }, { x: -26, z: -14, w: 22, d: 26 }],
   reservedAreas: [{ x: -8, z: -9, w: 7.5, d: 34 }, { x: 4, z: 12, w: 14, d: 5 }],
 }, [
-  ...[[-29, -18], [-12, 21], [25, 2], [26, 21]].map(([x, z], i) => ({ ...block(`restaurant-${i}`, x, z, 10, 9, 6, 'building'), storeys: 2 })),
+  ...[[-29, -18, 9, 9], [-12, 21, 10, 8], [25, 2, 12, 9], [26, 21, 10, 9]].map(([x, z, w, d], i) => ({ ...block(`restaurant-${i}`, x, z, w, d, 6, 'building'), storeys: 2 })),
   ...[[-15.5, -18, 1], [-.5, -18, -1], [-15.5, -8, 1], [-.5, -8, -1], [-15.5, 2, 1], [-.5, 2, -1], [8, 7, 1], [20, 11, -1], [8, 21, 1], [0, 16, 1]].flatMap(([x, z, front], i) => [
     { ...block(`food-stall-${i}`, x, z, 3.4, 4.6, 1.15, 'market-stall', i % 2 ? 'slate' : 'orange'), front },
     block(`stall-back-${i}`, x - front * 1.65, z, .16, 4.6, 2.55, 'market-back'),
@@ -246,8 +252,9 @@ function addTacticalFeatures(base) {
   return Object.freeze({ ...base, obstacles, platforms, extraCover });
 }
 
-export const WORLD = addSpawnZones(expandBuildings(addTacticalFeatures(FOUNDRY)), RULES);
-export const MATCHMAKING_MAPS = Object.freeze([WORLD, ...[longrail, drydock, blocknine, whiteout, redline, overgrowth, nightmarket].map((map) => addSpawnZones(expandBuildings(addTacticalFeatures(map)), RULES))]);
+const prepareArena = (map) => addSpawnZones(addBasements(expandBuildings(addTacticalFeatures(reserveBasements(applyArenaProfile(map))))), RULES);
+export const WORLD = prepareArena(FOUNDRY);
+export const MATCHMAKING_MAPS = Object.freeze([WORLD, ...[longrail, drydock, blocknine, whiteout, redline, overgrowth, nightmarket].map(prepareArena)]);
 export const MAPS = Object.freeze([...MATCHMAKING_MAPS, ...TEAM_WORLDS]);
 export const getMap = (id) => MAPS.find((map) => map.id === id) || WORLD;
 
@@ -344,7 +351,7 @@ export function wallDistance(origin, direction, maxDistance = 200, world = WORLD
 // spread, range/falloff or spawn protection; floor misses only shorten VFX.
 export function impactSurface(origin, direction, distance, box, world = WORLD) {
   const point = { x: origin.x + direction.x * distance, y: origin.y + direction.y * distance, z: origin.z + direction.z * distance };
-  if (direction.y < -1e-9) {
+  if (!world.underground && direction.y < -1e-9) {
     const floor = -origin.y / direction.y;
     const x = origin.x + direction.x * floor, z = origin.z + direction.z * floor;
     if (floor > .0001 && floor <= distance && Math.abs(x) <= world.width / 2 && Math.abs(z) <= world.depth / 2) return { point: { x, y: 0, z }, normal: { x: 0, y: 1, z: 0 }, id: 'ground', kind: 'ground', bounds: { minX: -world.width / 2, maxX: world.width / 2, minY: 0, maxY: 0, minZ: -world.depth / 2, maxZ: world.depth / 2 } };

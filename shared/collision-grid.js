@@ -13,7 +13,7 @@ export function collisionData(world) {
   for (const box of boxes) for (let x = Math.floor(box.minX / 4); x <= Math.floor(box.maxX / 4); x++) for (let z = Math.floor(box.minZ / 4); z <= Math.floor(box.maxZ / 4); z++) {
     const key = `${x},${z}`; if (!buckets.has(key)) buckets.set(key, []); buckets.get(key).push(box);
   }
-  data = { source: world.obstacles, count: world.obstacles.length, boxes, buckets, queries: new Map() }; cache.set(world, data); return data;
+  data = { source: world.obstacles, count: world.obstacles.length, groundLevel: world.underground?.floor ?? 0, boxes, buckets, queries: new Map() }; cache.set(world, data); return data;
 }
 
 export function nearbyColliders(data, a, b = a, radius = 0) {

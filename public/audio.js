@@ -1,7 +1,8 @@
 import { WEAPONS, getWeapon } from '/shared/catalog.js';
 import { NETWORK_PROTOCOL } from '/shared/world.js';
-import { footstepSignal, killSignal } from './sound-design.js';
+import { footstepSignal, killSignal, bulletPassSignal, incomingImpactSignal } from './sound-design.js';
 import { gunshotMix } from './gunshot-mix.js';
+import { BULLET_PASS_RADIUS } from './incoming-audio.js';
 
 const SOUND_REVISION = 4;
 
@@ -13,6 +14,8 @@ export class GameAudio {
     this.samples = new Map(); this.voices = new Set();
     this.stepVoices = new Set(); this.killSamples = new Map(); this.killVoice = null;
     this.reloadSamples = new Map(); this.reloadVoice = null;
+    this.incomingVoices = { pass: new Set(), impact: new Set() };
+    this.incomingIndex = { pass: 0, impact: 0 };
     this.bytes = Promise.allSettled(WEAPONS.flatMap((weapon) => [1].map(async (variant) => {
       const response = await fetch(`/assets/sounds/${weapon.id}-${variant}.wav?v=${NETWORK_PROTOCOL}-${SOUND_REVISION}`, { signal: AbortSignal.timeout(12000) });
       if (!response.ok) throw new Error('Sound sample unavailable');
@@ -43,6 +46,9 @@ export class GameAudio {
         const data = this.noise.getChannelData(0);
         for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
         this.stepSamples = [0, 1].map((foot) => this.buffer(footstepSignal(this.context.sampleRate, foot)));
+        const variants = [0, 1, 2], rate = this.context.sampleRate;
+        this.passSamples = variants.map(variant => this.buffer(bulletPassSignal(rate, variant)));
+        this.impactSamples = [false, true].map(headshot => variants.map(variant => this.buffer(incomingImpactSignal(rate, headshot, variant))));
       }
       await this.context.resume();
       this.updateVolume();
@@ -151,7 +157,41 @@ export class GameAudio {
     source.start(0, offset); return voice;
   }
   hit(head = false) { this.tone(head ? 1800 : 1150, 0.07, 0.12, 'sine', head ? 2500 : 1450); }
-  hurt() { this.burst(0.16, 0.1, 320); }
+  incomingCue(kind, samples, volume, pan, endPan = pan) {
+    if (!this.context || this.context.state !== 'running' || this.muted || this.settings.volume <= 0 || !samples?.length || volume <= .001) return null;
+    const c = this.context, now = c.currentTime, voices = this.incomingVoices[kind];
+    const source = c.createBufferSource(), gain = c.createGain(), panner = c.createStereoPanner();
+    source.buffer = samples[this.incomingIndex[kind]++ % samples.length]; source.playbackRate.value = 1;
+    gain.gain.value = volume;
+    panner.pan.setValueAtTime(Math.max(-1, Math.min(1, pan)), now);
+    if (endPan !== pan) panner.pan.linearRampToValueAtTime(Math.max(-1, Math.min(1, endPan)), now + source.buffer.duration * .5);
+    source.connect(gain).connect(panner).connect(this.master);
+    if (voices.size >= (kind === 'pass' ? 3 : 4)) {
+      const oldest = voices.values().next().value;
+      oldest.gain.gain.setTargetAtTime(0, now, .003);
+      oldest.source.stop(now + .012); voices.delete(oldest);
+    }
+    const voice = { source, gain, panner }; voices.add(voice);
+    source.onended = () => { voices.delete(voice); source.disconnect(); gain.disconnect(); panner.disconnect(); };
+    source.start(now); return voice;
+  }
+  stopIncoming() {
+    for (const voices of Object.values(this.incomingVoices)) {
+      for (const { source, panner } of voices) {
+        panner.disconnect();
+        if (this.context.state !== 'closed') source.stop();
+      }
+      voices.clear();
+    }
+  }
+  bulletPass({ distance, pan = 0, endPan = pan }) {
+    if (!Number.isFinite(distance) || distance < 0 || distance >= BULLET_PASS_RADIUS) return null;
+    return this.incomingCue('pass', this.passSamples, .54 * (1 - distance / BULLET_PASS_RADIUS) ** .85, pan, endPan);
+  }
+  hurt({ damage = 35, headshot = false, pan = 0 } = {}) {
+    const weight = Math.max(0, Math.min(1, damage / 105));
+    return this.incomingCue('impact', this.impactSamples?.[headshot ? 1 : 0], .43 + .30 * weight, pan);
+  }
   kill(chain = 1, headshot = false) {
     if (!this.context || this.context.state !== 'running' || this.muted || this.settings.volume <= 0) return null;
     const rank = Math.max(1, Math.min(8, Math.floor(Number(chain) || 1))), key = `${rank}/${headshot === true}`, c = this.context;

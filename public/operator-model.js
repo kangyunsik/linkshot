@@ -1,6 +1,6 @@
 import * as THREE from '/vendor/three.module.js';
 import { WeaponModels, disposeModel } from './weapon-model.js';
-export { createOperator, poseOperator } from './rigged-operator.js';
+export { createOperator, poseOperator, captureOperatorFall, poseFallingOperator } from './rigged-operator.js';
 import { createOperator } from './rigged-operator.js';
 
 function contactShadow() {

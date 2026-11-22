@@ -6,6 +6,7 @@ import { horizontalOverlap, topHeight } from './terrain.js';
 const grids = new WeakMap(), GRID = .5;
 const DIRECTIONS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+const openShaft = (r) => ({ minX: r.x - r.w / 2 + .12, maxX: r.x + r.w / 2 - .12, minZ: r.z - r.d / 2 + .12, maxZ: r.z + r.d / 2 - .12 });
 
 // AI planning uses the player's full footprint, not a head-height sight ray.
 function segmentHit(a, b, box) {
@@ -21,11 +22,12 @@ function segmentHit(a, b, box) {
   }
   return near < 1 - 1e-6 ? near : null;
 }
-function supported(point, data) {
+function supported(point, data, stepHeight = RULES.stepHeight) {
   if ((point.y || 0) <= 2.2) return true; // Ordinary low-cover drops are safe; roofs need a route.
-  return nearby(data, point).some((box) => point.x > box.minX + .05 && point.x < box.maxX - .05 && point.z > box.minZ + .05 && point.z < box.maxZ - .05 && box.maxY <= point.y + RULES.stepHeight && box.maxY >= point.y - .55);
+  const drop = stepHeight ? .55 : .05;
+  return nearby(data, point).some((box) => point.x > box.minX + .05 && point.x < box.maxX - .05 && point.z > box.minZ + .05 && point.z < box.maxZ - .05 && box.maxY <= point.y + stepHeight + 1e-5 && box.maxY >= point.y - drop);
 }
-export function canTraverse(from, to, world, height = RULES.playerHeight, checkSupport = true) {
+export function canTraverse(from, to, world, height = RULES.playerHeight, checkSupport = true, stepHeight = RULES.stepHeight) {
   const data = dataFor(world), y = from.y || 0;
   if (Math.abs(to.x) > world.width / 2 - PADDING || Math.abs(to.z) > world.depth / 2 - PADDING) return false;
   if (world.terrain) {
@@ -41,8 +43,9 @@ export function canTraverse(from, to, world, height = RULES.playerHeight, checkS
     }
     return true;
   }
+  if (checkSupport && Math.abs(y) < .08 && world.underground?.holes.some(hole => segmentHit(from, to, openShaft(hole)) !== null)) return false;
   for (const box of nearby(data, from, to)) {
-    if (box.maxY <= y + RULES.stepHeight + 1e-5 || box.minY >= y + height - 1e-5) continue;
+    if (box.maxY <= y + stepHeight + 1e-5 || box.minY >= y + height - 1e-5) continue;
     // A valid spawn/slide can begin inside the extra steering margin. Let it
     // leave that margin, without ever allowing a sweep through the real body box.
     if (from.x > box.minX && from.x < box.maxX && from.z > box.minZ && from.z < box.maxZ && segmentHit(from, to, box.physical) === null) continue;
@@ -50,7 +53,7 @@ export function canTraverse(from, to, world, height = RULES.playerHeight, checkS
   }
   if (checkSupport && y > 2.2) {
     const steps = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.z - from.z) / .45));
-    for (let i = 1; i <= steps; i++) if (!supported({ x: from.x + (to.x - from.x) * i / steps, z: from.z + (to.z - from.z) * i / steps, y }, data)) return false;
+    for (let i = 1; i <= steps; i++) if (!supported({ x: from.x + (to.x - from.x) * i / steps, z: from.z + (to.z - from.z) * i / steps, y }, data, stepHeight)) return false;
   }
   return true;
 }
@@ -70,7 +73,8 @@ function gridFor(world) {
       if (floor === null) continue;
       point.y = floor; floors[i] = floor; cells[i] = bodyClear(point, data, RULES.crouchHeight) ? 1 : 0; continue;
     }
-    const blocked = nearby(data, point).some((box) => box.maxY > RULES.stepHeight && box.minY < RULES.crouchHeight && point.x > box.minX && point.x < box.maxX && point.z > box.minZ && point.z < box.maxZ);
+    const blocked = world.underground?.holes.some(hole => horizontalOverlap(point, openShaft(hole))) ||
+      nearby(data, point).some((box) => box.maxY > RULES.stepHeight && box.minY < RULES.crouchHeight && point.x > box.minX && point.x < box.maxX && point.z > box.minZ && point.z < box.maxZ);
     cells[i] = blocked ? 0 : 1;
   }
   const grid = { width, height, minX, minZ, cells, floors, layers, cellCount, checked: new Uint32Array(size), links: new Uint32Array(size), visited: new Uint32Array(size), parents: new Int32Array(size), queue: new Int32Array(size), costs: new Uint32Array(size), estimates: new Uint32Array(size), heapPositions: new Int32Array(size), serial: 0 };
@@ -202,16 +206,17 @@ export function steerBot(bot, input, world, now) {
     Object.assign(brain.progress, { x: bot.x, z: bot.z, at: now });
     if (brain.progress.stuck >= 2) { brain.recoverUntil = now + 600; brain.progress.stuck = 0; if (!bot.stairRouteKey) { bot.nextPathAt = 0; bot.botPath = []; } }
   }
-  if (canTraverse(bot, ahead, world, input.crouch ? RULES.crouchHeight : RULES.playerHeight) && !(brain.recoverUntil > now)) return input;
-  if (canTraverse(bot, ahead, world, RULES.crouchHeight)) { input.crouch = true; return input; }
+  const checkSupport = bot.stairRouteKey !== 'basement-route';
+  if (canTraverse(bot, ahead, world, input.crouch ? RULES.crouchHeight : RULES.playerHeight, checkSupport) && !(brain.recoverUntil > now)) return input;
+  if (canTraverse(bot, ahead, world, RULES.crouchHeight, checkSupport)) { input.crouch = true; return input; }
   if (now >= (brain.nextJumpAt || 0) && canHop(bot, ahead, world)) { input.jump = true; input.crouch = false; brain.nextJumpAt = now + 1800; return input; }
   const side = brain.strafeSide || 1, angles = brain.recoverUntil > now ? [side * Math.PI / 2, -side * Math.PI / 2, Math.PI] : [side * .5, -side * .5, side, -side, side * Math.PI / 2, -side * Math.PI / 2, Math.PI];
   for (const angle of angles) {
     const x = dx * Math.cos(angle) - dz * Math.sin(angle), z = dx * Math.sin(angle) + dz * Math.cos(angle), next = { x: bot.x + x * reach, z: bot.z + z * reach, y: bot.y };
-    if (!canTraverse(bot, next, world, input.crouch ? RULES.crouchHeight : RULES.playerHeight)) {
+    if (!canTraverse(bot, next, world, input.crouch ? RULES.crouchHeight : RULES.playerHeight, checkSupport)) {
       // Recovery and side steps need the same low-ceiling stance as forward
       // movement, including when the body is already forced to stay crouched.
-      if (!canTraverse(bot, next, world, RULES.crouchHeight)) continue;
+      if (!canTraverse(bot, next, world, RULES.crouchHeight, checkSupport)) continue;
       input.crouch = true;
     }
     input.forward = (-x * sine - z * cosine) * amount; input.strafe = (x * cosine - z * sine) * amount; return input;

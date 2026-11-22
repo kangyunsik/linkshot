@@ -35,7 +35,7 @@ function localMaterial(material, models, character) {
 function poseScratch() {
   const scratch = {};
   for (const key of ['position', 'scale', 'up', 'axis', 'translation', 'foot', 'pole', 'target', 'a', 'b', 'c', 'direction', 'bend', 'elbow', 'origin', 'from', 'to']) scratch[key] = new THREE.Vector3();
-  for (const key of ['groupRotation', 'world', 'parent', 'rotation']) scratch[key] = new THREE.Quaternion();
+  for (const key of ['groupRotation', 'world', 'parent', 'rotation', 'floorRotation']) scratch[key] = new THREE.Quaternion();
   scratch.inverse = new THREE.Matrix4(); scratch.groupInverse = new THREE.Matrix4();
   return scratch;
 }
@@ -72,7 +72,7 @@ function twoBone(upper, lower, end, target, pole, scratch) {
   pointBone(upper, lower, elbow, scratch); pointBone(lower, end, target, scratch);
 }
 
-export function createOperator(player, models, { wardrobe = false } = {}) {
+export function createOperator(player, models, { wardrobe = false, armed = !wardrobe } = {}) {
   const character = getCharacter(player.characterId), female = character.rig === 'female', { bodyMesh } = OPERATOR_RIGS[character.rig];
   const { body, hair: standardHair, scale, bottom } = assets.get(character.rig);
   const outfit = getOutfit(player.outfitId), finish = getSkin(player.skinId);
@@ -105,7 +105,7 @@ export function createOperator(player, models, { wardrobe = false } = {}) {
   const bones = {}; visual.traverse((bone) => { if (bone.isBone) bones[bone.name] = bone; });
   dressOperator(visual.getObjectByName(bodyMesh), outfit, character, palette, team, models);
   bones.Head.attach(hair);
-  const weapon = wardrobe ? null : models.create(player.weaponId || 'rifle', player.weaponSkinId || player.skinId || 'standard', false, outfit.id, character.id, player.suppressor === true);
+  const weapon = armed ? models.create(player.weaponId || 'rifle', player.weaponSkinId || player.skinId || 'standard', false, outfit.id, character.id, player.suppressor === true) : null;
   if (weapon) group.add(weapon);
   const rest = Object.values(bones).map((bone) => ({ bone, position: bone.position.clone(), quaternion: bone.quaternion.clone() }));
   const feet = ['l', 'r'].map((side) => group.worldToLocal(bones[`foot_${side}`].getWorldPosition(new THREE.Vector3())));
@@ -117,12 +117,17 @@ export function createOperator(player, models, { wardrobe = false } = {}) {
   poseOperator(operator, 0); return operator;
 }
 
-export function poseOperator(operator, crouch, stride = 0) {
-  const { group, bones, weapon, poseScratch: scratch } = operator;
+function resetPose(operator) {
+  const { group, poseScratch: scratch } = operator;
   for (const rest of operator.rest) { rest.bone.position.copy(rest.position); rest.bone.quaternion.copy(rest.quaternion); }
   group.updateWorldMatrix(true, false);
   group.updateMatrixWorld(true);
   group.matrixWorld.decompose(scratch.position, scratch.groupRotation, scratch.scale); scratch.groupInverse.copy(group.matrixWorld).invert();
+}
+
+export function poseOperator(operator, crouch, stride = 0) {
+  const { group, bones, weapon, poseScratch: scratch } = operator;
+  resetPose(operator);
   const up = scratch.up.set(0, 1, 0).applyQuaternion(scratch.groupRotation), axis = scratch.axis.set(1, 0, 0).applyQuaternion(scratch.groupRotation);
   translateWorld(bones.pelvis, scratch.target.copy(up).multiplyScalar(-crouch * 0.43), scratch);
   turnWorld(bones.spine_01, scratch.rotation.setFromAxisAngle(axis, -0.85 * crouch), scratch);
@@ -157,4 +162,90 @@ export function poseOperator(operator, crouch, stride = 0) {
     }
   }
   weapon?.updateMatrixWorld(true);
+}
+
+export function captureOperatorFall(operator, sourceAvatar, crouch) {
+  const { group, bones, poseScratch: scratch } = operator;
+  group.position.set(0, 0, 0);
+  if (sourceAvatar?.bones) {
+    for (const { bone } of operator.rest) {
+      const source = sourceAvatar.bones[bone.name];
+      if (source) { bone.position.copy(source.position); bone.quaternion.copy(source.quaternion); }
+    }
+  } else poseOperator(operator, crouch);
+  group.updateWorldMatrix(true, true);
+  operator.fallPose ||= operator.rest.map(() => ({ position: new THREE.Vector3(), quaternion: new THREE.Quaternion() }));
+  for (const [i, { bone }] of operator.rest.entries()) {
+    const initial = operator.fallPose[i]; initial.position.copy(bone.position); initial.quaternion.copy(bone.quaternion);
+  }
+  operator.fallHip ||= new THREE.Vector3();
+  return operator.fallHip.copy(group.worldToLocal(scratch.position.setFromMatrixPosition(bones.pelvis.matrixWorld)));
+}
+
+const fingers = ['index', 'middle', 'ring', 'pinky'];
+const vertical = new THREE.Vector3(0, 1, 0);
+export function poseFallingOperator(operator, frame, side, constrained, floor, yaw) {
+  const { group, bones, fallHip: hip, poseScratch: scratch } = operator;
+  resetPose(operator);
+  const { flinch, knee, reach, loose, settle, blend } = frame;
+  // Pin the pelvis to the animated root. Limbs move around it independently,
+  // from the previous combat frame through recoil, collapse, and rest.
+  const up = scratch.up.set(0, 1, 0).applyQuaternion(scratch.groupRotation);
+  const axis = scratch.axis.set(1, 0, 0).applyQuaternion(scratch.groupRotation);
+  const world = group.matrixWorld;
+  const pelvis = scratch.position.setFromMatrixPosition(bones.pelvis.matrixWorld);
+  translateWorld(bones.pelvis, scratch.target.copy(hip).applyMatrix4(world).sub(pelvis), scratch);
+  turnWorld(bones.spine_01, scratch.rotation.setFromAxisAngle(axis, .25 * flinch - .23 * knee + .052 * settle), scratch);
+  turnWorld(bones.spine_03, scratch.rotation.setFromAxisAngle(up, side * (.20 * flinch + .10 * settle)), scratch);
+  turnWorld(bones.Head, scratch.rotation.setFromAxisAngle(axis, .22 * flinch + .095 * settle), scratch);
+  turnWorld(bones.Head, scratch.rotation.setFromAxisAngle(up, -side * .19 * settle), scratch);
+
+  for (const [i, limb] of ['l', 'r'].entries()) {
+    const sign = i ? 1 : -1, lead = sign === side, lift = lead ? .16 : .06;
+    const foot = scratch.foot.copy(operator.feet[i]);
+    foot.x = hip.x + sign * (.12 + .05 * settle);
+    foot.y = hip.y - .84 + .23 * knee + lift * settle + (constrained ? .35 * settle : 0);
+    foot.z = hip.z + .025 + (lead ? -.18 : -.07) * knee + (lead ? .056 : .067) * settle;
+    foot.applyMatrix4(world);
+    // Keep the soles planted for the first knee buckle, then let the feet
+    // peel off as the character loses balance. Airborne falls skip this hold.
+    const hold = floor == null ? 0 : frame.footHold * (lead ? .84 : 1);
+    if (hold) foot.y = THREE.MathUtils.lerp(foot.y, floor + operator.feet[i].y, hold);
+    twoBone(bones[`thigh_${limb}`], bones[`calf_${limb}`], bones[`foot_${limb}`], foot,
+      scratch.pole.set(hip.x + sign * .19, hip.y - .38, hip.z - .56).applyMatrix4(world), scratch);
+    const orientation = scratch.rotation.copy(scratch.groupRotation).multiply(operator.footRotations[i]);
+    if (hold) orientation.slerp(scratch.floorRotation.setFromAxisAngle(vertical, yaw).multiply(operator.footRotations[i]), hold);
+    setWorldRotation(bones[`foot_${limb}`], orientation, scratch);
+    turnWorld(bones[`foot_${limb}`], scratch.rotation.setFromAxisAngle(up, -sign * (.15 * settle + .11 * knee)), scratch);
+
+    const hand = bones[`hand_${limb}`], elbow = bones[`lowerarm_${limb}`], middle = bones[`middle_01_${limb}`];
+    const wrist = scratch.target.set(hip.x + sign * (.26 + .25 * reach - (lead ? .005 : .10) * settle),
+      hip.y + .28 + (lead ? .15 : -.035) * reach - (lead ? .27 : .18) * settle,
+      hip.z - .27 + .24 * reach + (lead ? .115 : .095) * settle);
+    if (constrained) { wrist.x -= sign * .11 * settle; wrist.y -= .20 * settle; wrist.z -= .08 * settle; }
+    twoBone(bones[`upperarm_${limb}`], elbow, hand, wrist.applyMatrix4(world),
+      scratch.pole.set(hip.x + sign * .50, hip.y + .14, hip.z + .12).applyMatrix4(world), scratch);
+    // Give the empty wrist its own loose follow-through. It no longer uses
+    // the equipped weapon as an IK target or forces the aiming rotation.
+    const next = scratch.target.setFromMatrixPosition(hand.matrixWorld);
+    const direction = scratch.elbow.setFromMatrixPosition(elbow.matrixWorld);
+    direction.negate().add(next).normalize();
+    next.addScaledVector(direction, .13).addScaledVector(up, -.025 * settle);
+    next.y -= .047 * settle;
+    pointBone(hand, middle, next, scratch);
+    turnWorld(hand, scratch.rotation.setFromAxisAngle(direction, sign * (.52 * reach - .16 * settle)), scratch);
+    for (const [finger, digit] of fingers.entries()) {
+      bones[`${digit}_01_${limb}`].rotateZ((finger - 1.45) * sign * .07 * loose * (1 - .66 * settle));
+      for (let joint = 1; joint <= 3; joint++) {
+        bones[`${digit}_0${joint}_${limb}`].rotateX(.06 * loose + (joint === 2 ? .27 : .14) * settle);
+      }
+    }
+    bones[`thumb_02_${limb}`].rotateX(-.13 * loose + .22 * settle);
+  }
+  if (blend < 1) for (const [i, { bone }] of operator.rest.entries()) {
+    const initial = operator.fallPose[i];
+    bone.position.lerp(initial.position, 1 - blend);
+    bone.quaternion.slerp(initial.quaternion, 1 - blend);
+  }
+  group.updateMatrixWorld(true);
 }

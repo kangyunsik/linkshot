@@ -27,10 +27,10 @@ function collidersFor(world) {
 // All contacts share the full horizontal footprint; a smaller landing radius lets
 // feet sink into ledges that the side solver then treats as an overlapping wall.
 export function supportHeight(player, world = WORLD, maxDrop = 0.02) {
-  let floor = player.y >= -CONTACT_EPSILON && player.y <= maxDrop + CONTACT_EPSILON ? 0 : null;
+  let floor = !world.underground && player.y >= -CONTACT_EPSILON && player.y <= maxDrop + CONTACT_EPSILON ? 0 : null;
   for (const b of collidersFor(world)) {
     const top = topHeight(b, player);
-    if (overlaps(player, b) && top <= player.y + CONTACT_EPSILON && player.y - top <= maxDrop + CONTACT_EPSILON) floor = Math.max(floor ?? 0, top);
+    if (overlaps(player, b) && top <= player.y + CONTACT_EPSILON && player.y - top <= maxDrop + CONTACT_EPSILON) floor = Math.max(floor ?? -Infinity, top);
   }
   return floor;
 }
@@ -54,9 +54,9 @@ export function canStand(player, world = WORLD) {
 
 function baseMovementSpeed(player, input) {
   const weapon = getWeapon(player.weaponId || input.weaponId);
-  const amount = player.crouchAmount ?? (player.crouching ? 1 : 0), standing = input.walk === true ? RULES.walkSpeed : RULES.runSpeed;
-  const base = standing + (RULES.crouchSpeed - standing) * amount;
-  return base * weapon.walkMultiplier * (input.ads ? weapon.adsMoveMultiplier : 1);
+  const amount = player.crouchAmount ?? (player.crouching ? 1 : 0);
+  const pace = input.walk === true || (input.ads === true && !weapon.melee) ? RULES.walkSpeed : RULES.runSpeed;
+  return (pace + (RULES.crouchSpeed - pace) * amount) * weapon.walkMultiplier;
 }
 
 export const hitSlowMultiplier = (player, now = Date.now()) => player.hitSlowUntil > now ? RULES.hitSlowMultiplier : 1;
@@ -143,7 +143,7 @@ export function movePlayer(player, input, dt, world = WORLD, now = Date.now()) {
       }
       if (ceiling !== Infinity) { player.y = ceiling - height; player.vy = 0; }
     } else {
-      let floor = 0;
+      let floor = world.underground ? -Infinity : 0;
       for (const b of colliders) {
         const top = topHeight(b, player);
         if (overlaps(player, b) && previousY >= top - CONTACT_EPSILON && player.y <= top) floor = Math.max(floor, top);

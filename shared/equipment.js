@@ -21,7 +21,7 @@ export function nearestDroppedWeapon(player, drops, world, now) {
 export function settleDroppedWeapon(drop, dt, world) {
   if (drop.grounded) return;
   const previous = drop.y; drop.y += drop.vy * dt - 9.8 * dt * dt / 2; drop.vy -= 9.8 * dt;
-  let floor = 0;
+  let floor = world.underground ? -Infinity : 0;
   for (const obstacle of world.obstacles) {
     const b = bounds(obstacle);
     const top = topHeight(b, drop);

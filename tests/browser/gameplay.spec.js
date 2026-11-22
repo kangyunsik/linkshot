@@ -60,6 +60,30 @@ test('E opens a death-only chooser and the selected gun is equipped after respaw
   } finally { await dispose(page); }
 });
 
+test('Escape opens the menu while dead, locked or not, without delaying the respawn', async ({ page }) => {
+  await fixture(page);
+  try {
+    const life = await page.evaluate(() => {
+      const { game, room, player } = window.__rules, now = Date.now();
+      Object.assign(player, { hp: 0, diedAt: now, respawnAt: now + 12000 });
+      game.applySnapshot(room.snapshot()); return { spawn: player.spawnCount, deadline: player.respawnAt };
+    });
+    await expect(page.locator('#respawn-overlay')).toBeVisible();
+    await page.keyboard.press('Escape'); await expect(page.locator('#pause-overlay')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.pointerLockElement === null)).toBe(true);
+    await page.evaluate(() => { document.getElementById('pause-overlay').hidden = true; });
+    await page.keyboard.press('Escape'); await expect(page.locator('#pause-overlay')).toBeVisible();
+    expect(await page.evaluate(() => window.__rules.player.respawnAt)).toBe(life.deadline);
+    await page.evaluate(() => {
+      const { game, room, player } = window.__rules;
+      player.respawnAt = Date.now() - 1; room.tick(1 / 60); game.applySnapshot(room.snapshot());
+    });
+    await expect(page.locator('#respawn-overlay')).toBeHidden(); await expect(page.locator('#pause-overlay')).toBeVisible();
+    expect(await page.evaluate(() => window.__rules.player.spawnCount)).toBe(life.spawn + 1);
+    await page.locator('#resume-button').click(); await expect(page.locator('#pause-overlay')).toBeHidden();
+  } finally { await dispose(page); }
+});
+
 test('each gun repeats one identical recorded sound with fixed pitch and bounded voices', async ({ page }) => {
   await page.goto('/'); await expect(page.getByText('LAN SERVER ONLINE')).toBeVisible();
   const result = await page.evaluate(async () => {
@@ -178,21 +202,103 @@ test('hip-fire and ADS centers stay pixel-perfect during jumps, recoil, zoom and
   } finally { await dispose(page); }
 });
 
-test('blood is visual-only and death leaves an animated, bounded, temporary corpse', async ({ page }) => {
+test('rifle spread marks widen by weapon and firing state, Shift tightens them, and ADS shows a centered nonzero guide', async ({ page }) => {
   await fixture(page);
   try {
-    await page.evaluate(() => {
-      const { game, room } = window.__rules, victim = room.players.get('other');
-      victim.hp = 0; victim.respawnAt = Date.now() + 15000;
-      game.applySnapshot(room.snapshot()); game.combat.blood({ x: victim.x, y: 1.2, z: victim.z }, { x: 24, y: 1.6, z: 10 }, 0);
-      game.handleEvent({ type: 'kill', killer: 'VIEWER', victim: 'OPERATOR', killerId: 'viewer', victimId: 'other', weaponId: 'rifle', headshot: false });
+    const values = await page.evaluate(async () => {
+      const { getWeapon } = await import('/shared/catalog.js');
+      const { game, room, player, timer } = window.__rules;
+      clearInterval(timer); cancelAnimationFrame(game.frameId);
+      game.world = room.world = { ...room.world, obstacles: [] };
+      let clock = performance.now() + 50;
+      const measure = (id, ads = false, walk = false, heat = 0, moving = false) => {
+        const weapon = getWeapon(id);
+        Object.assign(player, { x: 24, y: 0, z: 10, grounded: true, moveSpeed: 0, weaponId: id, reloadUntil: 0, switchUntil: 0, shotHeat: heat });
+        game.predicted = null; game.applySnapshot(room.snapshot());
+        game.keys.clear(); if (walk) game.keys.add('ShiftLeft'); if (moving) game.keys.add('KeyW');
+        game.ads = ads; game.camera.fov = game.settings.fov * (ads ? weapon.zoom : 1);
+        game.previousFrame = clock - 1000 / 60; game.animate(clock); clock += 33; cancelAnimationFrame(game.frameId);
+        const dot = document.querySelector(weapon.type === 'SNIPER' ? '.scope-lens>i' : '#ads-reticle');
+        const r = dot.getBoundingClientRect(), center = Math.hypot(r.x + r.width / 2 - innerWidth / 2, r.y + r.height / 2 - innerHeight / 2);
+        return { gap: parseFloat(document.getElementById('crosshair').style.getPropertyValue('--crosshair-gap')),
+          ring: parseFloat(getComputedStyle(dot, '::after').width), center };
+      };
+      return { m4: measure('m4a1'), ak: measure('ak47'), walk: measure('m4a1', false, true),
+        run: measure('m4a1', false, false, 0, true), walkMoving: measure('m4a1', false, true, 0, true),
+        m4Ads: measure('m4a1', true), akAds: measure('ak47', true), hot: measure('ak47', true, false, .9),
+        scope: measure('sniper', true), heavyScope: measure('m82', true) };
+    });
+    expect(values.ak.gap).toBeGreaterThan(values.m4.gap + 4);
+    expect(values.walk.gap).toBeLessThan(values.m4.gap - 1);
+    expect(values.run.gap - values.m4.gap).toBeGreaterThan(2.5);
+    expect(values.run.gap - values.m4.gap).toBeLessThan(4);
+    expect(values.walkMoving.gap).toBeLessThan(values.run.gap);
+    expect(values.akAds.ring).toBeGreaterThan(values.m4Ads.ring + 3);
+    expect(values.hot.ring).toBeGreaterThan(values.akAds.ring + 8);
+    expect(values.scope.ring).toBeGreaterThan(6); expect(values.heavyScope.ring).toBeGreaterThan(values.scope.ring);
+    for (const profile of [values.m4Ads, values.akAds, values.scope, values.heavyScope]) expect(profile.center).toBeLessThan(.01);
+  } finally { await dispose(page); }
+});
+
+test('a lethal shot leaves a temporary unarmed falling body and one independently dropped weapon', async ({ page }) => {
+  await fixture(page);
+  try {
+    await page.evaluate(async () => {
+      const { getWeapon } = await import('/shared/catalog.js');
+      const { game, room, player } = window.__rules, victim = room.players.get('other'), origin = { x: 24, y: 1.6, z: 10 };
+      Object.assign(victim, { x: 24.45, y: 0, z: 6.8, yaw: Math.PI });
+      game.remote.get(victim.id).group.position.set(victim.x, victim.y, victim.z);
+      room.applyDamage(player, victim, 100, false, origin, getWeapon('rifle'), Date.now());
+      game.applySnapshot(room.snapshot());
+      game.combat.blood({ x: victim.x, y: 1.2, z: victim.z }, origin, 0);
     });
     expect(await page.evaluate(() => window.__rules.game.combat.bursts.length)).toBe(1);
     await expect.poll(() => page.evaluate(() => window.__rules.game.combat.corpses[0]?.settled)).toBe(true);
-    expect(await page.evaluate(() => window.__rules.game.combat.corpses.length)).toBe(1);
+    const result = await page.evaluate(() => {
+      const { game, room } = window.__rules, corpse = game.combat.corpses[0];
+      return { count: game.combat.corpses.length, armed: !!corpse.operator.weapon, dropped: room.droppedWeapons.size,
+        hidden: !game.remote.get('other').group.visible, falling: corpse.pivot.rotation.x > 0, kills: room.players.get('viewer').kills };
+    });
+    expect(result).toEqual({ count: 1, armed: false, dropped: 1, hidden: true, falling: true, kills: 1 });
     await page.screenshot({ path: 'artifacts/death-and-corpse.png' });
     expect(await page.evaluate(() => { const { game } = window.__rules; game.combat.update(performance.now() + 11000, 0.016); return game.combat.corpses.length + game.combat.bursts.length + game.combat.stains.length; })).toBe(0);
     await expect(page.locator('#damage-direction-caption')).toBeHidden();
+  } finally { await dispose(page); }
+});
+
+test('nearby bullets play once and actual hits use a separate incoming cue, including lethal hits', async ({ page }) => {
+  await fixture(page);
+  try {
+    const cues = await page.evaluate(() => {
+      const { game, room, player, timer, sounds } = window.__rules, passes = [], impacts = [];
+      clearInterval(timer); cancelAnimationFrame(game.frameId);
+      let confirmations = 0; game.audio.hit = () => confirmations++;
+      game.audio.bulletPass = cue => passes.push(cue); game.audio.hurt = cue => impacts.push(cue);
+      const open = { ...room.world, width: 200, depth: 200, obstacles: [] }, shooter = room.players.get('other');
+      room.random = () => 0;
+      Object.assign(player, { x: 24, y: 0, z: 10, yaw: 0, protectedUntil: 0 }); game.predicted = null;
+      Object.assign(shooter, { x: 24.66, y: 0, z: 13, yaw: 0, pitch: 0, weaponId: 'shotgun', ammo: 8, grounded: true, moveSpeed: 0 });
+      const shoot = (world = open) => {
+        game.world = room.world = world; shooter.shotHeat = 0;
+        room.shoot(shooter, Date.now(), true);
+        const state = room.snapshot(); game.applySnapshot(state);
+        return state.events.find(event => event.type === 'shot');
+      };
+      const miss = shoot(); game.handleEvent(miss);
+      shoot({ ...open, obstacles: [{ id: 'test-cover', x: 25, y: 0, z: 12, w: 3, h: 3, d: .5 }] });
+      const heardReports = sounds.length;
+      Object.assign(shooter, { x: 24.75, z: 62, weaponId: 'sniper' }); shoot();
+      const distantReport = sounds.length !== heardReports;
+      Object.assign(shooter, { x: 24, z: 13, weaponId: 'rifle', pitch: -.18 }); shoot();
+      Object.assign(shooter, { x: 24.25, weaponId: 'shotgun', pitch: 0 }); player.hp = 20;
+      const lethal = shoot();
+      game.handleEvent({ ...miss, shotId: 'after-death' });
+      return { passes, impacts, confirmations, distantReport, hp: game.local.hp, mixed: lethal.rays.some(ray => !ray.hit) && lethal.rays.some(ray => ray.hit === player.id) };
+    });
+    expect(cues.passes).toHaveLength(2); expect(cues.distantReport).toBe(false);
+    expect(cues.passes[0].distance).toBeLessThan(.7); expect(cues.passes[0].pan).toBeGreaterThan(.6);
+    expect(cues.hp).toBe(0); expect(cues.mixed).toBe(true); expect(cues.confirmations).toBe(0);
+    expect(cues.impacts).toEqual([expect.objectContaining({ headshot: false }), expect.objectContaining({ headshot: true })]);
   } finally { await dispose(page); }
 });
 
@@ -345,7 +451,7 @@ for (const reducedMotion of ['no-preference', 'reduce']) test(`the redesigned SV
 test('corpse fading reuses prepared shader programs and shared character buffers are released only by their owner', async ({ page }) => {
   await fixture(page);
   try {
-    const result = await page.evaluate(() => {
+    const result = await page.evaluate(async () => {
       const { game, timer } = window.__rules; clearInterval(timer); cancelAnimationFrame(game.frameId);
       const avatar = game.remote.get('other'), body = avatar.group.getObjectByName('SuperHero_Male'), geometry = body.geometry; let disposals = 0;
       geometry.addEventListener('dispose', () => { disposals++; }); game.combat.death(avatar.target);
@@ -355,7 +461,7 @@ test('corpse fading reuses prepared shader programs and shared character buffers
       game.combat.update(corpse.born + 1000, .016); game.renderer.render(game.scene, game.camera); const programs = game.renderer.info.programs.length;
       game.combat.update(corpse.born + 9000, .016); game.renderer.render(game.scene, game.camera); const afterFade = game.renderer.info.programs.length;
       const fading = [...materials].some((material) => material.opacity < .8); game.combat.clear(); const afterClear = disposals;
-      game.dispose(); return { ready: game.graphicsReady, shared, transparentAtBirth, programs, afterFade, fading, afterClear, finalDisposals: disposals };
+      await game.dispose(); return { ready: game.graphicsReady, shared, transparentAtBirth, programs, afterFade, fading, afterClear, finalDisposals: disposals };
     });
     expect(result.ready && result.shared && result.transparentAtBirth && result.fading).toBe(true); expect(result.afterFade).toBe(result.programs); expect(result.afterClear).toBe(0); expect(result.finalDisposals).toBe(1);
   } finally { await dispose(page); }

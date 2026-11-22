@@ -1,13 +1,18 @@
 import * as THREE from '/vendor/three.module.js';
-import { createOperator, poseOperator } from './operator-model.js';
+import { createOperator, captureOperatorFall, poseFallingOperator } from './operator-model.js';
 import { disposeModel } from './weapon-model.js';
-import { bounds } from '/shared/world.js';
 import { EQUIPMENT } from '/shared/catalog.js';
 import { WeaponWallGuard } from './weapon-wall.js';
-import { topHeight, horizontalOverlap } from '/shared/terrain.js';
+import { collisionData } from '/shared/collision-grid.js';
+import { fallFloor, operatorFallFrame, planOperatorFall } from './operator-fall.js';
 
-const corpseKey = (player) => `${player.characterId}/${player.outfitId}/${player.skinId}/${player.teamId || ''}/${player.weaponId}/${player.weaponSkinId || player.skinId}/${player.suppressor === true}`;
+const corpseKey = (player) => `${player.characterId}/${player.outfitId}/${player.teamId || ''}`;
 const CORPSE_LIMIT = 8;
+const contacts = [
+  ['pelvis', .135], ['spine_03', .14], ['Head', .105, .095],
+  ['calf_l', .072], ['calf_r', .072], ['foot_l', .082], ['foot_r', .082],
+  ['lowerarm_l', .054], ['lowerarm_r', .054], ['hand_l', .038], ['hand_r', .038],
+];
 
 export class CombatEffects {
   constructor(scene, models, world) { this.scene = scene; this.models = models; this.world = world; this.bursts = []; this.stains = []; this.corpses = []; this.corpsePool = []; this.warmupCorpses = []; }
@@ -16,7 +21,7 @@ export class CombatEffects {
     if (this.warmup) return this.warmup;
     const group = new THREE.Group(), seen = new Set(); group.position.set(10000, 0, 10000);
     const enemies = this.world.gameTypes?.includes('defense') ? ['male', 'female'].map((characterId) => ({ characterId, outfitId: 'field', skinId: 'standard', weaponId: 'rifle', weaponSkinId: 'standard', teamId: 'red' })) : [];
-    for (const player of enemies) { const operator = createOperator(player, this.models); operator.weapon.visible = false; group.add(operator.group); }
+    for (const player of enemies) group.add(createOperator(player, this.models, { armed: false }).group);
     for (const player of [...players, ...enemies]) {
       const key = corpseKey(player); if (seen.has(key)) continue; seen.add(key);
       const corpse = this.createCorpse(player); group.add(corpse.pivot); this.warmupCorpses.push(corpse);
@@ -43,11 +48,12 @@ export class CombatEffects {
   }
 
   createCorpse(player) {
-    const operator = createOperator(player, this.models), pivot = new THREE.Group(); pivot.name = 'corpse'; pivot.rotation.order = 'YXZ';
-    operator.weapon.visible = false; this.corpseMaterials(operator.group); pivot.add(operator.group);
+    const operator = createOperator(player, this.models, { armed: false }), pivot = new THREE.Group(); pivot.name = 'corpse'; pivot.rotation.order = 'YXZ';
+    this.corpseMaterials(operator.group); pivot.add(operator.group);
     const materials = new Set();
     pivot.traverse((object) => { if (object.isMesh) for (const material of Array.isArray(object.material) ? object.material : [object.material]) materials.add(material); });
-    return { key: corpseKey(player), operator, pivot, materials: [...materials].map((material) => ({ material, opacity: material.opacity })) };
+    return { key: corpseKey(player), operator, pivot, contacts: contacts.map(([name, radius, along]) => [operator.bones[name], radius, along]),
+      contact: new THREE.Vector3(), bodyUp: new THREE.Vector3(), materials: [...materials].map((material) => ({ material, opacity: material.opacity })) };
   }
 
   retireCorpse(corpse) {
@@ -62,9 +68,7 @@ export class CombatEffects {
   }
 
   floor(x, z, ceiling) {
-    let floor = 0;
-    for (const box of this.world.obstacles) { const b = bounds(box), point = { x, z }, top = topHeight(b, point); if (horizontalOverlap(point, b) && top <= ceiling + .05) floor = Math.max(floor, top); }
-    return floor;
+    return fallFloor(collisionData(this.world), { x, z }, ceiling);
   }
 
   blood(point, origin, floor = 0, strength = 1) {
@@ -89,16 +93,47 @@ export class CombatEffects {
     while (this.stains.length > 24) this.remove(this.stains.shift().object);
   }
 
-  death(player) {
+  death(player, avatar, attacker) {
     const key = corpseKey(player), index = this.corpsePool.findIndex((corpse) => corpse.key === key);
     const corpse = index < 0 ? this.createCorpse(player) : this.corpsePool.splice(index, 1)[0], { operator, pivot } = corpse;
     for (const { material, opacity } of corpse.materials) material.opacity = opacity;
-    pivot.rotation.set(0, player.yaw, 0); pivot.position.set(player.x, player.y, player.z); this.scene.add(pivot); poseOperator(operator, 0);
-    const sign = Math.random() < 0.65 ? 1 : -1, x = player.x + Math.sin(player.yaw) * sign * 0.75, z = player.z + Math.cos(player.yaw) * sign * 0.75;
-    const floor = this.floor(x, z, player.y);
-    Object.assign(corpse, { born: performance.now(), startY: player.y, floor, sign, roll: (Math.random() - 0.5) * 0.12, settled: false }); this.corpses.push(corpse);
-    this.stain(x, floor, z, 0.3);
+    const start = avatar ? { x: avatar.group.position.x, y: avatar.group.position.y, z: avatar.group.position.z, yaw: avatar.group.rotation.y } : player;
+    pivot.position.set(0, 0, 0); pivot.rotation.set(0, 0, 0);
+    const hip = captureOperatorFall(operator, avatar, player.crouchAmount ?? Number(!!player.crouching));
+    const plan = planOperatorFall(this.world, start, attacker), sin = Math.sin(start.yaw), cos = Math.cos(start.yaw);
+    Object.assign(corpse, { born: performance.now(), startX: start.x + cos * hip.x + sin * hip.z, startY: start.y + hip.y,
+      startZ: start.z - sin * hip.x + cos * hip.z, yaw: start.yaw, plan, onGround: start.y - plan.startFloor < .15, settled: false });
+    operator.group.position.copy(hip).negate();
+    pivot.rotation.y = start.yaw; pivot.position.set(corpse.startX, corpse.startY, corpse.startZ);
+    this.scene.add(pivot); pivot.updateMatrixWorld(true);
+    this.corpses.push(corpse);
+    const yaw = start.yaw + plan.turn;
+    this.stain(start.x + Math.sin(yaw) * plan.travel, plan.floor, start.z + Math.cos(yaw) * plan.travel, 0.3);
     while (this.corpses.length > CORPSE_LIMIT) this.retireCorpse(this.corpses.shift());
+  }
+
+  updateCorpse(corpse, age) {
+    const { pivot, plan, operator, contact, bodyUp } = corpse;
+    const frame = operatorFallFrame(age, plan), yaw = corpse.yaw + frame.twist, constrained = plan.tilt < 1.22;
+    pivot.rotation.set(frame.pitch, yaw, frame.roll);
+    pivot.position.set(corpse.startX + Math.sin(yaw) * frame.motion,
+      THREE.MathUtils.lerp(corpse.startY, plan.floor + (constrained ? .24 : .153), frame.descend) + frame.bounce,
+      corpse.startZ + Math.cos(yaw) * frame.motion);
+    poseFallingOperator(operator, frame, plan.side, constrained, corpse.onGround ? plan.startFloor : null, yaw);
+    // A few body contacts keep shoulders, head and limbs above the local
+    // platform or ramp. No per-vertex hit tests or live physics are involved.
+    if (frame.descend > .20) {
+      bodyUp.set(0, 1, 0).applyQuaternion(pivot.quaternion);
+      let lift = 0;
+      for (const [bone, radius, along] of corpse.contacts) {
+        contact.setFromMatrixPosition(bone.matrixWorld);
+        if (along) contact.addScaledVector(bodyUp, along);
+        lift = Math.max(lift, fallFloor(plan.data, contact, plan.ceiling) + radius - contact.y);
+      }
+      pivot.position.y += lift * Math.min(1, (frame.descend - .20) * 3.3);
+      pivot.updateMatrixWorld(true);
+    }
+    corpse.settled = frame.done;
   }
 
   update(now, dt) {
@@ -114,14 +149,9 @@ export class CombatEffects {
       if (age > 9000) { this.remove(stain.object); this.stains.splice(i, 1); } else stain.object.material.opacity = 0.42 * Math.min(1, (9000 - age) / 1500);
     }
     for (let i = this.corpses.length - 1; i >= 0; i--) {
-      const corpse = this.corpses[i], age = now - corpse.born, t = Math.min(1, age / 950), ease = t * t * (3 - 2 * t);
+      const corpse = this.corpses[i], age = now - corpse.born;
       if (age > 10000) { this.retireCorpse(corpse); this.corpses.splice(i, 1); continue; }
-      if (t < 1 || !corpse.settled) {
-        corpse.pivot.rotation.x = corpse.sign * Math.PI / 2 * ease; corpse.pivot.rotation.z = corpse.roll * ease;
-        corpse.pivot.position.y = THREE.MathUtils.lerp(corpse.startY, corpse.floor + 0.30, ease);
-        poseOperator(corpse.operator, Math.sin(t * Math.PI) * 0.55);
-        if (t === 1) corpse.settled = true;
-      }
+      if (!corpse.settled) this.updateCorpse(corpse, age);
       if (age > 8500) for (const { material, opacity } of corpse.materials) material.opacity = opacity * (10000 - age) / 1500;
     }
   }

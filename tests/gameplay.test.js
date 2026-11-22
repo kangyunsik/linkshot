@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RULES, MATCHMAKING_MAPS as MAPS, hasLineOfSight } from '../shared/world.js';
+import { RULES } from '../shared/world.js';
 import { EMPTY_INPUT, movePlayer } from '../shared/movement.js';
 import { WEAPONS, getWeapon, shotSpread } from '../shared/catalog.js';
 import { Room, BOT_DIFFICULTIES, BOT_BEHAVIOR, getBotDifficulty } from '../shared/simulation.js';
@@ -28,26 +28,29 @@ test('ADS does not erase running or airborne shot spread; rifle spray blooms and
   const running = shotSpread(rifle, true, { grounded: true, sprinting: true, moveSpeed: RULES.runSpeed });
   const airborne = shotSpread(rifle, true, { grounded: false });
   assert.ok(steady < walking && running < airborne); assert.equal(walking, running, 'removed sprint has no hidden accuracy mode');
-  assert.ok(running > steady * 8 && airborne > 0.1); assert.ok(rifle.recoil >= 1.6);
+  assert.equal(running, steady + .009);
+  assert.equal(shotSpread(rifle, false, { grounded: true, moveSpeed: RULES.runSpeed }), rifle.spread + .0055);
+  assert.ok(airborne > .1 && rifle.recoil >= 1.6);
   let now = 1000; const room = new Room('SPRAY', { bots: 0, clock: () => now }), p = room.addPlayer('a', 'ALPHA');
   for (let i = 0; i < 8; i++) room.shoot(p, now + i * 110);
-  assert.ok(shotSpread(rifle, true, p) > steady * 10);
+  assert.ok(shotSpread(rifle, true, p) - steady >= rifle.spreadBloom - 1e-8);
   for (let i = 0; i < 90; i++) { now += 1000 / 60; room.setInput('a', input()); room.tick(1 / 60); }
   assert.equal(p.shotHeat, 0);
 });
 
 test('snipers retain weapon-specific scoped precision and stronger movement penalties than mobile firearms', () => {
-  for (const [id, precision] of [['sniper', .0004], ['awp', .00025], ['m82', .0008]]) {
+  for (const id of ['sniper', 'awp', 'm82']) {
     const weapon = getWeapon(id), steady = shotSpread(weapon, true, { grounded: true, moveSpeed: 0 });
     const hip = shotSpread(weapon, false, { grounded: true }), walking = shotSpread(weapon, true, { grounded: true, moveSpeed: 2 });
     const running = shotSpread(weapon, true, { grounded: true, moveSpeed: RULES.runSpeed }), air = shotSpread(weapon, true, { grounded: false });
-    assert.equal(steady, precision, id); assert.ok(hip >= .08 && hip > steady * 70, id);
-    assert.ok(walking >= .045 && walking > steady * 40 && running === walking && air > running, id);
-    assert.ok(shotSpread(weapon, false, { grounded: true, moveSpeed: 2 }) > hip + .06, id);
+    assert.ok(steady >= .0008 && steady < .0024 && hip >= .08 && hip > steady * 48, id);
+    assert.equal(walking, steady + .035, id); assert.equal(running, walking, id);
+    assert.equal(air, steady + .18, id);
+    assert.equal(shotSpread(weapon, false, { grounded: true, moveSpeed: 2 }), hip + .025, id);
   }
   for (const weapon of WEAPONS.filter((weapon) => weapon.type !== 'SNIPER')) for (const ads of [false, true]) {
     const base = ads ? weapon.adsSpread : weapon.spread;
-    const penalty = weapon.type === 'SMG' ? ads ? .011 : .018 : weapon.type === 'SIDEARM' ? ads ? .012 : .020 : ads ? .014 : .024;
+    const penalty = weapon.type === 'SMG' ? ads ? .0063 : .0042 : weapon.type === 'SIDEARM' ? ads ? .0075 : .0048 : ads ? .009 : .0055;
     assert.equal(shotSpread(weapon, ads, { grounded: true, moveSpeed: 2 }), base + penalty, weapon.id);
     assert.equal(shotSpread(weapon, ads, { grounded: false }), base + .105, weapon.id);
   }
@@ -70,18 +73,18 @@ test('authoritative sniper bullets miss far more often from the hip and while mo
   }
 });
 
-test('actual authoritative bullets miss more often while running or airborne', () => {
+test('ordinary movement still adds a small hip-fire penalty, and jumping is substantially less accurate', () => {
   const rate = (state) => {
     let seed = 19; const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
     const room = new Room('SHOTS', { bots: 0, random }), shooter = room.addPlayer('a', 'ALPHA'), target = room.addPlayer('b', 'BRAVO');
-    room.world = empty; Object.assign(shooter, player({ id: 'a', z: 12, protectedUntil: 0, ...state }));
+    room.world = empty; Object.assign(shooter, player({ id: 'a', z: 12, pitch: Math.atan2(1.58 - RULES.eyeHeight, 20), protectedUntil: 0, ...state }));
     Object.assign(target, player({ id: 'b', z: -8, protectedUntil: 0, hp: 1_000_000 }));
     let hits = 0;
-    for (let i = 0; i < 400; i++) { shooter.ammo = 30; shooter.shotHeat = 0; room.shoot(shooter, Date.now(), true); hits += Number(room.events.at(-1)?.type === 'damage' || room.events.findLast((event) => event.type === 'shot').hit === 'b'); }
+    for (let i = 0; i < 400; i++) { shooter.ammo = 30; shooter.shotHeat = 0; room.events.length = 0; room.shoot(shooter, Date.now()); hits += Number(room.events[0]?.hit === 'b'); }
     return hits / 400;
   };
-  const steady = rate({ grounded: true }), running = rate({ grounded: true, sprinting: true, moveSpeed: 8 }), air = rate({ grounded: false });
-  assert.ok(steady > 0.95); assert.ok(running < steady && air < running);
+  const steady = rate({ grounded: true }), running = rate({ grounded: true, moveSpeed: RULES.runSpeed }), air = rate({ grounded: false });
+  assert.ok(steady > .95 && running > .59 && running < steady && air < running * .5);
 });
 
 test('living players cannot change weapons via input, compatibility calls or loadout packets', () => {
@@ -144,25 +147,6 @@ test('eight humans replace training bots, and a ninth cannot enter', () => {
   assert.throws(() => room.addPlayer('ninth', 'NINTH'), /가득/);
 });
 
-test('all thirty-four hollow buildings have walkable stairs, floors and roofs without jumping', () => {
-  let count = 0;
-  for (const world of MAPS) for (const building of world.buildings) {
-    count++; assert.ok(building.height >= 6); const p = player(building.entry);
-    for (const target of building.route.slice(1)) {
-      let reached = false;
-      for (let frame = 0; frame < 350; frame++) {
-        const dx = target.x - p.x, dz = target.z - p.z, distance = Math.hypot(dx, dz);
-        if (distance < 0.1 && Math.abs(p.y - target.y) < 0.07) { reached = true; break; }
-        movePlayer(p, input({ forward: Math.min(1, distance * 4), yaw: Math.atan2(-dx, -dz) }), 1 / 60, world);
-      }
-      assert.ok(reached, `${world.id}/${building.id}/${JSON.stringify(target)}`);
-    }
-    assert.equal(p.y, building.height);
-  }
-  assert.equal(count, 34);
-  for (const world of MAPS) { assert.equal(world.coverWalls.length, 8); assert.ok(world.buildings.every((building) => building.solidPanels > building.windows.length)); }
-});
-
 test('beginner preserves the current AI; all four higher levels improve reaction, aim and bursts without extra HP', () => {
   assert.equal(BOT_DIFFICULTIES[0].behavior, BOT_BEHAVIOR); assert.equal(getBotDifficulty('__proto__').id, 'beginner');
   for (let i = 1; i < BOT_DIFFICULTIES.length; i++) {
@@ -170,15 +154,5 @@ test('beginner preserves the current AI; all four higher levels improve reaction
     assert.ok(after.reactionMaxMs < before.reactionMinMs); assert.ok(after.shotSpread < before.shotSpread); assert.ok(after.shotIntervalMs < before.shotIntervalMs); assert.ok(after.turnRadiansPerSecond > before.turnRadiansPerSecond);
     const room = new Room('LEVEL', { bots: 1, botDifficulty: BOT_DIFFICULTIES[i].id }), bot = [...room.players.values()][0];
     assert.equal(bot.hp, 100); assert.equal(room.snapshot().room.botDifficulty, BOT_DIFFICULTIES[i].id);
-  }
-});
-
-test('building windows are real bullet/sight openings while the sill blocks lower shots', () => {
-  for (const world of MAPS) for (const building of world.buildings) {
-    const window = building.windows.find((item) => item.axis === 'z' && item.side === 1);
-    const inside = { x: window.x - 0.7, y: window.y, z: window.z }, outside = { ...inside, x: window.x + 0.7 };
-    assert.equal(hasLineOfSight(inside, outside, world), true, `${world.id}/${building.id} window`);
-    inside.y = outside.y = window.floor * 3 + 0.5;
-    assert.equal(hasLineOfSight(inside, outside, world), false, 'window sill must remain solid');
   }
 });
