@@ -85,6 +85,7 @@
             <p id="mode-description" class="mode-description"></p>
             <div class="deployment-actions">
             <button id="deployment-settings-button" class="secondary-button compact-settings-button">교전 설정 · 맵 / AI / 규칙</button>
+            <button id="range-start-button" class="secondary-button compact-settings-button" hidden>자유 사격장</button>
             <button id="online-loadout-button" class="secondary-button compact-settings-button" hidden>출격 무기 선택</button>
             <button id="create-button" class="primary-button deploy-button"><span>LAN 방 만들기</span><svg><use href="#i-arrow"/></svg></button>
             <section id="matchmaking-widget" class="matchmaking-widget primary-button deploy-button" aria-label="현재 매칭 상태" hidden><button id="matchmaking-detail" type="button"><strong id="matchmaking-status"></strong><small id="matchmaking-detail-text"></small></button><button id="matchmaking-accept" type="button" hidden>수락</button><button id="matchmaking-cancel" type="button">취소</button></section>
@@ -126,6 +127,12 @@
         <div id="objective-health" role="progressbar" aria-label="방어 코어 내구도" aria-valuemin="0" aria-valuemax="1000" aria-valuenow="1000" hidden><i id="objective-health-fill"></i></div>
       </section>
       <section id="tutorial-hud" class="tutorial-hud" aria-label="튜토리얼 목표" hidden><header><span>FIELD TRAINING</span><strong id="tutorial-progress"></strong></header><h2 id="tutorial-title"></h2><p id="tutorial-description"></p><ul id="tutorial-goals"></ul><strong id="tutorial-action-hint" hidden></strong><small>초록 고리: 이동/표적 위치 · Esc: 다시 시작 / 건너뛰기</small></section>
+      <section id="range-hud" class="range-hud" aria-label="자유 사격장 탄착 기록" hidden>
+        <header><strong>탄착 기록</strong><span id="range-distance-label"></span></header>
+        <dl><div><dt>사격</dt><dd id="range-shots">0</dd></div><div><dt>명중</dt><dd id="range-hits">0</dd></div><div><dt>명중률</dt><dd id="range-accuracy">—</dd></div></dl>
+        <canvas id="range-plot" width="240" height="184" aria-label="표적 위치에서 본 탄착 분포"></canvas>
+        <small>초록: 명중 · 주황: 빗나감</small><small>ESC · 총기 및 거리 변경</small><small id="range-outside"></small>
+      </section>
       <div class="combat-awards" aria-live="polite" aria-atomic="true">
         <div id="kill-announcement" class="kill-announcement" hidden><span class="kill-rays" aria-hidden="true"></span><span id="kill-chain-count" class="kill-chain-count">×1</span><strong id="kill-chain-label">KILL</strong><small id="kill-chain-detail"></small><div id="kill-rank-badge" class="kill-rank-badge" hidden></div></div>
         <div id="mastery-feedback" class="mastery-feedback" hidden><div><span id="mastery-weapon"></span><strong id="mastery-level">Lv.0</strong></div><div id="mastery-track" class="mastery-track" role="progressbar" aria-valuemin="0" aria-valuemax="50" aria-valuenow="0"><i id="mastery-fill"></i></div><small id="mastery-count">0 / 50 KILLS → Lv.1</small></div>

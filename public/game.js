@@ -23,6 +23,8 @@ import { FootstepTracker, footstepMix } from './footsteps.js';
 import { drawThemedArena } from './themed-arena.js';
 import { VIEWMODEL_LAYER, compileViewmodelPrograms, renderViewmodelFrame, normalizeWeaponHand, VIEWMODEL_HIP_OFFSET, VIEWMODEL_ADS_Z, viewmodelHipOffset } from './viewmodel-renderer.js';
 import { updateTutorialView } from './tutorial-view.js';
+import { updateRangeView } from './range-view.js';
+import { deathLookSource, planDeathLook, sampleDeathLook } from './death-look.js';
 import { BulletMarks } from './bullet-marks.js';
 import { TEAM_COLORS, TEAM_NAMES, sameTeam } from '/shared/teams.js';
 import { AvatarPoseSchedule, FrameStats, qualityPreset } from './performance.js';
@@ -36,6 +38,7 @@ import { RoundEffects } from './round-effects.js';
 import { rankBadgeNode, updateRankBadge } from './rank-badges.js';
 import { rankBadgeLabel, rankEmblem, normalizeRankBadge } from '/shared/ranks.js';
 import { getBotDifficulty } from '/shared/simulation.js';
+import { RANGE_DISTANCES, rangeLine } from '/shared/range-world.js';
 import { reloadProgress, reloadFraming } from './reload-time.js';
 import { applyViewmodelReload } from './viewmodel-reload.js';
 
@@ -302,6 +305,14 @@ export class FPSGame {
       if (world.underground?.holes.some(hole => Math.abs(hole.x - x) < (hole.w + w) / 2 && Math.abs(hole.z - z) < (hole.d + d) / 2)) return;
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, d), material); mesh.rotation.x = -Math.PI / 2; mesh.position.set(x, 0.008, z); this.scene.add(mesh);
     };
+    if (world.id === 'shooting-range') for (const distance of RANGE_DISTANCES) {
+      const { z } = rangeLine(distance);
+      floorStripe(0, z, 5, .055);
+      const mark = new THREE.Mesh(new THREE.PlaneGeometry(1.5, .45), new THREE.MeshBasicMaterial({
+        map: signTexture(`${distance}M`, 'FIRING LINE', true), polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+      }));
+      mark.rotation.x = -Math.PI / 2; mark.position.set(1.8, .012, z + .32); this.scene.add(mark);
+    }
     if (world.arenaProfile) {
       for (const box of world.obstacles) {
         if (box.kind !== 'arena-setback' || !box.arenaFace) continue;
@@ -488,7 +499,7 @@ export class FPSGame {
     const options = { signal: this.abort.signal };
     window.addEventListener('resize', () => { this.lookInput.transition(performance.now()); this.resize(); }, options);
     document.addEventListener('mousemove', (event) => {
-      if (!this.locked) return;
+      if (!this.locked || this.deathLook) return;
       const delta = this.lookInput.delta(event, innerWidth, innerHeight, performance.now()); if (!delta) return;
       const sensitivity = this.settings.sensitivity * 0.0020 * (this.ads ? getWeapon(this.activeWeaponId).type === 'SNIPER' ? Math.max(0.25, getWeapon(this.activeWeaponId).zoom) : 0.67 : 1);
       this.yaw -= delta.x * sensitivity;
@@ -647,6 +658,7 @@ export class FPSGame {
     this.online = data.online;
     this.tutorial = data.tutorial;
     updateTutorialView(data.tutorial);
+    if (data.room.mode === 'range' && this.range?.revision !== data.range?.revision) { this.range = data.range; updateRangeView(this.range); }
     if (this.trainingMarker) { const marker = data.tutorial?.marker; this.trainingMarker.visible = !!marker; if (marker) this.trainingMarker.position.set(marker.x, marker.y + .04, marker.z); }
     this.serverOffset = data.serverTime - Date.now();
     const local = data.players.find((p) => p.id === id);
@@ -654,11 +666,16 @@ export class FPSGame {
     const respawned = !this.local || this.local.spawnCount !== local.spawnCount || changedRound;
     const equipmentChanged = this.local && (this.local.equipmentSeq !== local.equipmentSeq || this.local.weaponId !== local.weaponId || this.local.suppressor !== local.suppressor);
     if (this.local?.hp > 0 && local.hp <= 0) {
-      this.deathAt = performance.now(); this.clearInput(); this.recoil = 0; this.muzzleUntil = 0;
+      this.deathAt = performance.now();
+      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        this.deathLook = planDeathLook(local, this.yaw, this.pitch, deathLookSource(local, data.events, data.players), this.deathAt);
+      }
+      this.clearInput(); this.recoil = 0; this.muzzleUntil = 0;
       this.aimRecoil.reset(this.aimRecoil.aimPitch); this.muzzleFlash.visible = false; this.muzzleLight.intensity = 0;
     }
     if (this.feedbackRound !== data.room.roundId) { this.feedbackRound = data.room.roundId; this.shotFeedback.reset(); this.seenKills.clear(); this.clearKillFeedback(); this.bulletMarks.clear(); }
     if (!this.predicted || respawned) {
+      this.deathLook = null; this.deathAt = null;
       this.closeLoadout(false);
       if (this.local && this.local.hp <= 0 && local.hp > 0) this.onMenu(!this.locked);
       this.predicted = { ...local, jumpHeld: false }; this.yaw = local.yaw; this.pitch = local.pitch; this.recoil = 0;
@@ -702,6 +719,7 @@ export class FPSGame {
         avatar.weaponWall.setWeapon(avatar.weapon);
       }
       setModelSuppressor(avatar.weapon, player.suppressor === true);
+      if (data.room.mode === 'range') avatar.weapon.visible = false;
     }
     for (const [remoteId, avatar] of this.remote) if (!present.has(remoteId)) { this.scene.remove(avatar.group); this.disposeObject(avatar.group, false); this.remote.delete(remoteId); }
     this.syncDroppedWeapons(data.droppedWeapons || []); this.updateHud();
@@ -733,16 +751,16 @@ export class FPSGame {
     this.hud['hud-ammo'].textContent = weapon.melee ? '—' : local.ammo.toString().padStart(2, '0');
     $('hud-ammo-reserve').textContent = weapon.melee ? 'MELEE' : '/ ∞';
     this.hud['hud-ammo'].style.color = lowAmmo ? '#ff876a' : '';
-    const training = this.room.mode === 'tutorial';
+    const range = this.room.mode === 'range', training = this.room.mode === 'tutorial' || range;
     const waiting = ['waiting', 'countdown'].includes(this.room.phase), teams = isTeamGame(this.room.gameType), objective = isObjectiveGame(this.room.gameType), defense = this.room.gameType === 'defense';
-    this.hud['hud-timer'].textContent = training ? 'TRAINING' : waiting ? 'WAITING' : clockText(this.room.timeLeft); this.hud['hud-timer'].style.fontSize = training || waiting ? '22px' : '';
+    this.hud['hud-timer'].textContent = range ? 'FREE RANGE' : training ? 'TRAINING' : waiting ? 'WAITING' : clockText(this.room.timeLeft); this.hud['hud-timer'].style.fontSize = training || waiting ? '22px' : '';
     document.querySelector('.match-clock>span').textContent = training ? 'LOCAL LESSONS' : gameTypeName(this.room.gameType); document.querySelector('.hud-location small').hidden = training; document.querySelector('.hud-location small').textContent = defense ? '수비팀 · 협동' : teams ? TEAM_NAMES[local.teamId] : 'FREE-FOR-ALL';
     $('team-score-hud').hidden = !teams || defense; $('team-score-hud').setAttribute('aria-label', objective ? '팀 거점 점수' : '팀 누적 킬'); $('team-score-blue').textContent = this.room.teamScores?.blue || 0; $('team-score-red').textContent = this.room.teamScores?.red || 0; $('hud-team-label').textContent = teams ? `${TEAM_NAMES[local.teamId]} · ${this.room.gameType === 'hardpoint' ? `${this.room.scoreLimit}점 목표` : `${this.room.fragLimit}킬 목표`}` : ''; $('custom-progress-note').hidden = this.room.mode !== 'custom' && !objective;
     $('custom-progress-note').textContent = `${objective ? gameTypeName(this.room.gameType) : '사용자 대전'} · 경쟁 점수·전적·숙련도·LP 미반영`;
     document.querySelector('.combat-awards').style.top = this.room.gameType === 'hardpoint' ? '315px' : objective ? '245px' : teams ? '175px' : '';
-    $('hud-frag-limit').textContent = training ? `${this.tutorial?.total || 7} STEPS · NO RATING / LP` : waiting ? `HUMANS ${this.online?.connected || 0}/${this.online?.expected || 0}` : defense ? `DEFEND ${this.room.waves} WAVES` : this.room.gameType === 'hardpoint' ? `FIRST TO ${this.room.scoreLimit} POINTS` : `FIRST TO ${this.room.fragLimit}`;
+    $('hud-frag-limit').textContent = range ? '고정 표적 · 전적 / LP 미반영' : training ? `${this.tutorial?.total || 7} STEPS · NO RATING / LP` : waiting ? `HUMANS ${this.online?.connected || 0}/${this.online?.expected || 0}` : defense ? `DEFEND ${this.room.waves} WAVES` : this.room.gameType === 'hardpoint' ? `FIRST TO ${this.room.scoreLimit} POINTS` : `FIRST TO ${this.room.fragLimit}`;
     updateObjectiveHud(this.room);
-    this.hud['hud-timer'].style.color = this.room.timeLeft < 30 ? '#ff876a' : '';
+    this.hud['hud-timer'].style.color = !training && this.room.timeLeft < 30 ? '#ff876a' : '';
     this.hud['hud-kd'].textContent = `${local.kills} K  /  ${local.deaths} D`;
     updateRankBadge($('hud-self-rank'), local.rankBadge, false);
     const reloading = local.hp > 0 && this.room.phase === 'active' && local.reloadUntil > this.serverNow;
@@ -844,7 +862,7 @@ export class FPSGame {
       for (const ray of event.rays || [{ end: event.end, hit: event.hit }]) {
         if (!event.melee) this.tracer(origin, ray.end, event.id === this.selfId, !ray.hit && !ray.protectedTarget && !ray.friendlyTarget);
         if (!event.melee && ray.surface) this.bulletMarks.add(ray.surface, event.origin, performance.now() - Math.max(0, this.serverNow - ray.surface.at));
-        if (ray.hit && ray.hit !== this.selfId) this.combat.blood(ray.end, event.origin, this.players.find((player) => player.id === ray.hit)?.y || 0);
+        if (ray.hit && ray.hit !== this.selfId && this.room?.mode !== 'range') this.combat.blood(ray.end, event.origin, this.players.find((player) => player.id === ray.hit)?.y || 0);
       }
     }
     if (event.type === 'damage' && event.id === this.selfId) {
@@ -938,7 +956,7 @@ export class FPSGame {
   updateDamageDirections(now) {
     const directions = ['front', 'front-right', 'right', 'rear-right', 'rear', 'rear-left', 'left', 'front-left'];
     for (let i = this.damageDirections.length - 1; i >= 0; i--) {
-      const marker = this.damageDirections[i], angle = damageBearing(this.predicted, marker.source, this.yaw);
+      const marker = this.damageDirections[i], angle = damageBearing(this.predicted, marker.source, this.deathLook ? this.camera.rotation.y : this.yaw);
       if (now >= marker.expires || angle === null) { marker.element.remove(); this.damageDirections.splice(i, 1); continue; }
       const sector = (Math.round(angle / (Math.PI / 4)) + 8) % 8;
       marker.sector = sector; marker.element.dataset.direction = directions[sector];
@@ -987,8 +1005,9 @@ export class FPSGame {
       // the server, so recovery never creates a camera-only aiming offset.
       this.camera.position.set(this.predicted.x, this.predicted.y + playerPose(this.predicted).eyeHeight, this.predicted.z);
       this.audio.setEnvironment?.(this.predicted.y < -.28 || (this.world.buildings || []).some((building) => Math.abs(this.predicted.x - building.x) < building.w / 2 && Math.abs(this.predicted.z - building.z) < building.d / 2 && this.predicted.y < building.height - 0.1));
-      if (this.local.hp <= 0) this.camera.position.y = this.predicted.y + lerp(playerPose(this.predicted).eyeHeight, 0.45, Math.min(1, (now - (this.deathAt || now)) / 700));
-      this.camera.rotation.set(this.pitch, this.yaw, 0);
+      if (this.local.hp <= 0) this.camera.position.y = this.predicted.y + lerp(playerPose(this.predicted).eyeHeight, 0.45, clamp((now - (this.deathAt ?? now)) / 700, 0, 1));
+      const fallenView = this.local.hp <= 0 && this.deathLook ? sampleDeathLook(this.deathLook, now) : null;
+      this.camera.rotation.set(fallenView?.pitch ?? this.pitch, fallenView?.yaw ?? this.yaw, 0);
       const weapon = getWeapon(this.local.weaponId), switching = this.local.switchUntil > this.serverNow || this.requestedWeaponId !== this.local.weaponId;
       const scoped = ads && weapon.type === 'SNIPER'; $('scope-overlay').hidden = !scoped;
       if (scoped) document.querySelector('.scope-lens>span').textContent = `${weapon.name} / PRECISION OPTICS`;
@@ -1160,6 +1179,7 @@ export class FPSGame {
     this.clearDamageDirections();
     this.clearKillFeedback();
     updateTutorialView(null);
+    if (this.range) updateRangeView(null);
     this.remote.clear(); this.groundItems.clear(); this.effects.length = 0; $('equipment-hint').hidden = true;
     this.rankImages?.clear();
     this.closeLoadout(false);

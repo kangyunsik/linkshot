@@ -108,7 +108,9 @@ test('navigation produces a path around solid cover rather than through it', () 
 test('bots navigate, fire and score in a free-for-all match with humans and other bots', () => {
   let now = 1000, seed = 7;
   const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
-  const room = new Room('BOT22', { bots: 3, clock: () => now, random });
+  const room = new Room('BOT22', { bots: 0, clock: () => now, random });
+  // Bot IDs also seed navigation, so keep them fixed alongside the RNG.
+  for (const [i, name] of ['GHOST', 'RIVET', 'ECHO'].entries()) room.addPlayer(`bot-${i}`, name, true);
   room.addPlayer('human', 'OPERATOR');
   const origins = new Map([...room.players.values()].map((p) => [p.id, { x: p.x, z: p.z }]));
   for (let i = 0; i < 45 * 60; i++) { now += 1000 / 60; room.tick(1 / 60); }

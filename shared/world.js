@@ -6,7 +6,7 @@ import { createRayIndex, indexedRayDistance } from './ray-index.js';
 import { applyArenaProfile } from './arena-profiles.js';
 import { addBasements, reserveBasements } from './basements.js';
 // Clients predict movement from the same static map as the server.
-export const NETWORK_PROTOCOL = 29;
+export const NETWORK_PROTOCOL = 30;
 export const BULLET_MARK_RULES = Object.freeze({ lifetimeMs: 60_000, fadeMs: 6000, maxMarks: 6144, historyLimit: 2048, cellScale: 40 });
 
 export const RULES = Object.freeze({

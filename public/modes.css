@@ -18,6 +18,17 @@
 .tutorial-hud > small { color: #8aa99a; font-size: 9px; }
 #tutorial-action-hint { display: block; color: #d2ffe8; font-size: 12px; margin: 9px 0; }
 .tutorial-actions { display: grid; gap: 8px; margin-top: 12px; }
+.range-hud { position: absolute; right: 26px; top: 26px; width: 228px; padding: 12px; background: #10242bec; border: 1px solid #6e92975e; border-radius: 4px; color: #dcece8; }
+.range-hud header, .range-hud dl { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.range-hud header span, .range-hud dt, .range-hud small { color: #a3bdbd; font-size: 10px; }
+.range-hud dl { margin: 10px 0; }
+.range-hud dd { margin: 3px 0 0; font: 16px var(--mono); }
+.range-hud canvas { display: block; width: 100%; background: #0d1e25; margin-bottom: 8px; }
+.range-hud small { display: block; line-height: 1.5; }
+.range-setup { display: grid; grid-template-columns: 2fr 1fr; gap: 7px; margin-top: 12px; text-align: left; }
+.range-setup label { display: grid; gap: 4px; color: #b7cccc; font-size: 10px; min-width: 0; }
+.range-setup select { width: 100%; min-width: 0; padding: 7px; background: #112631; color: #daece8; border: 1px solid #426371; border-radius: 3px; }
+.range-setup button { grid-column: 1 / -1; justify-content: center; }
 .online-account-panel { padding: 13px; border: 1px solid #516e7b; border-radius: 3px; margin-bottom: 17px; font-size: 11px; line-height: 1.8; }
 .online-account-panel > strong { font: 9px var(--mono); color: #add9ca; }
 .online-account-panel label { display: block; color: #c0d1d8; margin: 8px 0 4px; }

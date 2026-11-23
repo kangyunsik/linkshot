@@ -86,22 +86,23 @@ export function damageAtDistance(weapon, distance, headshot = false) {
   return (headshot ? weapon.headDamage : weapon.damage) * (1 - falloff * (1 - weapon.minDamage));
 }
 
-// Shift and ADS use the same focused cone, not a center-locked shot. Repeated
-// shots add each rifle's own heat penalty on top of movement and stance.
+// Shift shares the focused cone only while walking upright on the ground.
+// ADS still works independently of stance and never locks bullets to center.
 export function shotSpread(weapon, ads = false, state = {}) {
-  const focused = ads || (state.grounded !== false && state.walking === true);
-  const base = focused ? weapon.adsSpread : weapon.spread;
+  const airborne = state.grounded === false;
   const moving = (state.moveSpeed || 0) > 0.2;
+  const crouch = airborne ? 0 : Number.isFinite(state.crouchAmount) ? Math.max(0, Math.min(1, state.crouchAmount)) : state.crouching === true ? 1 : 0;
+  const focused = ads || (!airborne && moving && state.walking === true && state.crouching !== true && crouch === 0);
+  const base = focused ? weapon.adsSpread : weapon.spread;
   // Ordinary ground movement adds only a small spread on top of each hip-fire profile.
   const movingSpread = weapon.type === 'SMG' ? focused ? 0.0063 : 0.0042 : weapon.type === 'SIDEARM' ? focused ? 0.0075 : 0.0048 : focused ? 0.009 : 0.0055;
   const movement = weapon.type === 'SNIPER'
-    ? state.grounded === false ? 0.18 : moving ? focused ? 0.035 : 0.025 : 0
-    : state.grounded === false ? 0.105 : moving ? movingSpread : 0;
+    ? airborne ? 0.18 : moving ? focused ? 0.035 : 0.025 : 0
+    : airborne ? 0.105 : moving ? movingSpread : 0;
   const bloom = Math.min(1, Math.max(0, state.shotHeat || 0)) * (weapon.spreadBloom ?? 0.012);
-  const crouch = state.grounded === false ? 0 : Number.isFinite(state.crouchAmount) ? Math.max(0, Math.min(1, state.crouchAmount)) : state.crouching === true ? 1 : 0;
   // Both authoritative shots and the crosshair use the real, blended stance.
   // Airborne accuracy can never be improved by sending a crouch key.
-  return (base + movement + bloom) * (1 - crouch * 0.3);
+  return (base + movement + bloom) * (1 - crouch * 0.3) * 0.85;
 }
 
 export function shotAngles(weapon, ads = false, random = Math.random, state = {}) {

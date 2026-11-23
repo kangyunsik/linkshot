@@ -28,12 +28,12 @@ test('ADS does not erase running or airborne shot spread; rifle spray blooms and
   const running = shotSpread(rifle, true, { grounded: true, sprinting: true, moveSpeed: RULES.runSpeed });
   const airborne = shotSpread(rifle, true, { grounded: false });
   assert.ok(steady < walking && running < airborne); assert.equal(walking, running, 'removed sprint has no hidden accuracy mode');
-  assert.equal(running, steady + .009);
-  assert.equal(shotSpread(rifle, false, { grounded: true, moveSpeed: RULES.runSpeed }), rifle.spread + .0055);
-  assert.ok(airborne > .1 && rifle.recoil >= 1.6);
+  assert.equal(running, (rifle.adsSpread + .009) * .85);
+  assert.equal(shotSpread(rifle, false, { grounded: true, moveSpeed: RULES.runSpeed }), (rifle.spread + .0055) * .85);
+  assert.ok(airborne > .09 && rifle.recoil >= 1.6);
   let now = 1000; const room = new Room('SPRAY', { bots: 0, clock: () => now }), p = room.addPlayer('a', 'ALPHA');
   for (let i = 0; i < 8; i++) room.shoot(p, now + i * 110);
-  assert.ok(shotSpread(rifle, true, p) - steady >= rifle.spreadBloom - 1e-8);
+  assert.ok(shotSpread(rifle, true, p) - steady >= rifle.spreadBloom * .85 - 1e-8);
   for (let i = 0; i < 90; i++) { now += 1000 / 60; room.setInput('a', input()); room.tick(1 / 60); }
   assert.equal(p.shotHeat, 0);
 });
@@ -43,16 +43,16 @@ test('snipers retain weapon-specific scoped precision and stronger movement pena
     const weapon = getWeapon(id), steady = shotSpread(weapon, true, { grounded: true, moveSpeed: 0 });
     const hip = shotSpread(weapon, false, { grounded: true }), walking = shotSpread(weapon, true, { grounded: true, moveSpeed: 2 });
     const running = shotSpread(weapon, true, { grounded: true, moveSpeed: RULES.runSpeed }), air = shotSpread(weapon, true, { grounded: false });
-    assert.ok(steady >= .0008 && steady < .0024 && hip >= .08 && hip > steady * 48, id);
-    assert.equal(walking, steady + .035, id); assert.equal(running, walking, id);
-    assert.equal(air, steady + .18, id);
-    assert.equal(shotSpread(weapon, false, { grounded: true, moveSpeed: 2 }), hip + .025, id);
+    assert.ok(steady >= .0007 && steady < .0021 && hip >= .07 && hip > steady * 48, id);
+    assert.equal(walking, (weapon.adsSpread + .035) * .85, id); assert.equal(running, walking, id);
+    assert.equal(air, (weapon.adsSpread + .18) * .85, id);
+    assert.equal(shotSpread(weapon, false, { grounded: true, moveSpeed: 2 }), (weapon.spread + .025) * .85, id);
   }
   for (const weapon of WEAPONS.filter((weapon) => weapon.type !== 'SNIPER')) for (const ads of [false, true]) {
     const base = ads ? weapon.adsSpread : weapon.spread;
     const penalty = weapon.type === 'SMG' ? ads ? .0063 : .0042 : weapon.type === 'SIDEARM' ? ads ? .0075 : .0048 : ads ? .009 : .0055;
-    assert.equal(shotSpread(weapon, ads, { grounded: true, moveSpeed: 2 }), base + penalty, weapon.id);
-    assert.equal(shotSpread(weapon, ads, { grounded: false }), base + .105, weapon.id);
+    assert.equal(shotSpread(weapon, ads, { grounded: true, moveSpeed: 2 }), (base + penalty) * .85, weapon.id);
+    assert.equal(shotSpread(weapon, ads, { grounded: false }), (base + .105) * .85, weapon.id);
   }
 });
 

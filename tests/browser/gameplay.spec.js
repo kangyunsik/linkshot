@@ -84,6 +84,41 @@ test('Escape opens the menu while dead, locked or not, without delaying the resp
   } finally { await dispose(page); }
 });
 
+test('death camera eases toward the last attacker position without moving the player or following the attacker', async ({ page }) => {
+  await fixture(page);
+  try {
+    const turns = await page.evaluate(async () => {
+      const { getWeapon } = await import('/shared/catalog.js');
+      const { game, room, player, timer } = window.__rules;
+      clearInterval(timer); cancelAnimationFrame(game.frameId);
+      game.yaw = 0; game.pitch = 0;
+      const attacker = room.players.get('other'), origin = { x: 15, y: 2, z: 15 };
+      room.applyDamage(attacker, player, 100, false, origin, getWeapon('rifle'), Date.now());
+      game.applySnapshot(room.snapshot());
+      const { startedAt, duration } = game.deathLook;
+      const sample = time => {
+        game.previousFrame = time - 60; game.animate(time); cancelAnimationFrame(game.frameId);
+        return { yaw: game.camera.rotation.y, x: game.camera.position.x, z: game.camera.position.z };
+      };
+      const first = sample(startedAt), middle = sample(startedAt + duration / 2), end = sample(startedAt + duration);
+      attacker.x = 27; attacker.z = -17;
+      game.applySnapshot(room.snapshot());
+      const later = sample(startedAt + duration + 200), playerYaw = game.yaw;
+      room.spawn(player); game.applySnapshot(room.snapshot());
+      const respawn = sample(startedAt + duration + 260);
+      return { first, middle, end, later, playerYaw, victim: { x: 24, z: 10 }, expectedYaw: Math.atan2(9, -5), reset: game.deathLook === null, respawnYaw: player.yaw, respawn };
+    });
+    expect(turns.first.yaw).toBeCloseTo(0);
+    expect(turns.middle.yaw).toBeCloseTo(turns.expectedYaw / 2);
+    expect(turns.end.yaw).toBeCloseTo(turns.expectedYaw);
+    expect(turns.later.yaw).toBe(turns.end.yaw);
+    expect(turns.end.x).toBeCloseTo(turns.victim.x); expect(turns.end.z).toBeCloseTo(turns.victim.z);
+    expect(turns.playerYaw).toBe(0);
+    expect(turns.reset).toBe(true);
+    expect(turns.respawn.yaw).toBeCloseTo(turns.respawnYaw);
+  } finally { await dispose(page); }
+});
+
 test('each gun repeats one identical recorded sound with fixed pitch and bounded voices', async ({ page }) => {
   await page.goto('/'); await expect(page.getByText('LAN SERVER ONLINE')).toBeVisible();
   const result = await page.evaluate(async () => {
@@ -202,7 +237,7 @@ test('hip-fire and ADS centers stay pixel-perfect during jumps, recoil, zoom and
   } finally { await dispose(page); }
 });
 
-test('rifle spread marks widen by weapon and firing state, Shift tightens them, and ADS shows a centered nonzero guide', async ({ page }) => {
+test('rifle spread marks stay tight and Shift only narrows the guide while walking upright', async ({ page }) => {
   await fixture(page);
   try {
     const values = await page.evaluate(async () => {
@@ -211,11 +246,12 @@ test('rifle spread marks widen by weapon and firing state, Shift tightens them, 
       clearInterval(timer); cancelAnimationFrame(game.frameId);
       game.world = room.world = { ...room.world, obstacles: [] };
       let clock = performance.now() + 50;
-      const measure = (id, ads = false, walk = false, heat = 0, moving = false) => {
+      const measure = (id, ads = false, walk = false, heat = 0, moving = false, crouching = false) => {
         const weapon = getWeapon(id);
-        Object.assign(player, { x: 24, y: 0, z: 10, grounded: true, moveSpeed: 0, weaponId: id, reloadUntil: 0, switchUntil: 0, shotHeat: heat });
+        Object.assign(player, { x: 24, y: 0, z: 10, grounded: true, moveSpeed: 0, weaponId: id, reloadUntil: 0, switchUntil: 0, shotHeat: heat, crouching, crouchAmount: Number(crouching) });
         game.predicted = null; game.applySnapshot(room.snapshot());
         game.keys.clear(); if (walk) game.keys.add('ShiftLeft'); if (moving) game.keys.add('KeyW');
+        if (crouching) game.keys.add('KeyC');
         game.ads = ads; game.camera.fov = game.settings.fov * (ads ? weapon.zoom : 1);
         game.previousFrame = clock - 1000 / 60; game.animate(clock); clock += 33; cancelAnimationFrame(game.frameId);
         const dot = document.querySelector(weapon.type === 'SNIPER' ? '.scope-lens>i' : '#ads-reticle');
@@ -225,13 +261,15 @@ test('rifle spread marks widen by weapon and firing state, Shift tightens them, 
       };
       return { m4: measure('m4a1'), ak: measure('ak47'), walk: measure('m4a1', false, true),
         run: measure('m4a1', false, false, 0, true), walkMoving: measure('m4a1', false, true, 0, true),
+        crouch: measure('m4a1', false, false, 0, true, true), crouchShift: measure('m4a1', false, true, 0, true, true),
         m4Ads: measure('m4a1', true), akAds: measure('ak47', true), hot: measure('ak47', true, false, .9),
         scope: measure('sniper', true), heavyScope: measure('m82', true) };
     });
     expect(values.ak.gap).toBeGreaterThan(values.m4.gap + 4);
-    expect(values.walk.gap).toBeLessThan(values.m4.gap - 1);
-    expect(values.run.gap - values.m4.gap).toBeGreaterThan(2.5);
-    expect(values.run.gap - values.m4.gap).toBeLessThan(4);
+    expect(values.walk.gap).toBe(values.m4.gap);
+    expect(values.crouchShift.gap).toBe(values.crouch.gap);
+    expect(values.run.gap - values.m4.gap).toBeGreaterThan(2);
+    expect(values.run.gap - values.m4.gap).toBeLessThan(3.5);
     expect(values.walkMoving.gap).toBeLessThan(values.run.gap);
     expect(values.akAds.ring).toBeGreaterThan(values.m4Ads.ring + 3);
     expect(values.hot.ring).toBeGreaterThan(values.akAds.ring + 8);

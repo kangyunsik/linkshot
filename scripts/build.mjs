@@ -1,4 +1,4 @@
-import { cp, mkdir, writeFile, readFile, unlink } from 'node:fs/promises';
+import { cp, mkdir, writeFile, readFile, readdir, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MAPS } from '../shared/world.js';
@@ -6,9 +6,11 @@ import { SKINS, WEAPONS, FREE_WEAPON_IDS } from '../shared/catalog.js';
 import { OUTFITS, CHARACTERS, OPERATOR_RIGS } from '../shared/outfits.js';
 import { POINT_RULES, SUPPRESSOR_LEVEL, SUPPRESSOR_KILLS } from '../shared/progression.js';
 import { publicationRisk } from './security-audit.mjs';
+import { mountStaticSource, staticBasePath } from './static-site-paths.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const output = path.join(root, 'dist');
+const basePath = staticBasePath(process.env.APP_BASE_PATH);
 let onlineServerUrl = '';
 let frontendOrigin = '';
 if (process.env.FRONTEND_URL) {
@@ -57,10 +59,22 @@ await cp(path.join(root, 'public'), output, { recursive: true, filter: (source) 
   return true;
 } });
 await cp(path.join(root, 'shared'), path.join(output, 'shared'), { recursive: true });
+if (basePath) {
+  for (const [sourceDir, outputDir] of [['public', output], ['shared', path.join(output, 'shared')]]) {
+    for (const file of await readdir(path.join(root, sourceDir), { withFileTypes: true })) {
+      const extension = path.extname(file.name);
+      if (!file.isFile() || !['.css', '.html', '.js'].includes(extension)) continue;
+      const destination = path.join(outputDir, file.name);
+      const source = await readFile(destination, 'utf8');
+      const mounted = mountStaticSource(source, extension, basePath, sourceDir === 'public');
+      if (mounted !== source) await writeFile(destination, mounted);
+    }
+  }
+}
 await mkdir(path.join(output, 'vendor'), { recursive: true });
 for (const file of ['three.module.js', 'three.core.js']) await cp(path.join(root, 'node_modules/three/build', file), path.join(output, 'vendor', file));
 for (const file of ['loaders/GLTFLoader.js', 'utils/BufferGeometryUtils.js', 'utils/SkeletonUtils.js']) { await mkdir(path.dirname(path.join(output, 'vendor/addons', file)), { recursive: true }); await cp(path.join(root, 'node_modules/three/examples/jsm', file), path.join(output, 'vendor/addons', file)); }
 const lanEnabled = ['true', '1'].includes(process.env.LAN_ENABLED);
 await writeFile(path.join(output, 'runtime-config.js'), `// Account/ranked services are optional; LAN uses the same-origin combat proxy.\nexport const APP_MODE = '${lanEnabled ? 'lan' : 'solo'}';\nexport const LAN_PLAY_PATH = '${lanEnabled ? '/lan/play' : '/play'}';\nexport const PROFILE_STORAGE = 'browser';\nexport const ONLINE_SERVER_URL = ${JSON.stringify(onlineServerUrl)};\nexport const FRONTEND_URL = ${JSON.stringify(frontendOrigin)};\n`);
 await writeFile(path.join(output, 'economy.json'), JSON.stringify({ version: 1, points: POINT_RULES, outfits: OUTFITS.map(({ id, price }) => ({ id, price })), characters: CHARACTERS.map(({ id }) => id), weapons: WEAPONS.map(({ id, price }) => ({ id, price })), freeWeapons: FREE_WEAPON_IDS, mastery: { suppressorLevel: SUPPRESSOR_LEVEL, suppressorKills: SUPPRESSOR_KILLS } }));
-console.log('Vercel용 1인 플레이 빌드 완료: dist/ (게임 서버 불필요)');
+console.log(`프런트엔드 빌드 완료: dist/${basePath ? ` (사이트 경로: ${basePath}/)` : ''}`);

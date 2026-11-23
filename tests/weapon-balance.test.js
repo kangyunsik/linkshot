@@ -78,13 +78,15 @@ test('rifles have distinct rested and sustained spread, with a small but nonzero
   }
 });
 
-test('Shift and ADS match weapon-weighted pace and focused spread without making ADS silent', () => {
+test('Shift and ADS match weapon-weighted pace and upright walking spread without making ADS silent', () => {
   const world = { width: 100, depth: 100, obstacles: [] };
   for (const weapon of WEAPONS) for (const [moveSpeed, shotHeat] of [[0, 0], [2, .5]]) {
     const state = { grounded: true, moveSpeed, shotHeat };
     const walkSpread = shotSpread(weapon, false, { ...state, walking: true });
-    assert.equal(walkSpread, shotSpread(weapon, true, state), weapon.id);
-    assert.ok(walkSpread > 0 && walkSpread < shotSpread(weapon, false, state), weapon.id);
+    const hip = shotSpread(weapon, false, state), adsSpread = shotSpread(weapon, true, state);
+    if (moveSpeed > 0) { assert.equal(walkSpread, adsSpread, weapon.id); assert.ok(walkSpread < hip, weapon.id); }
+    else assert.equal(walkSpread, hip, weapon.id);
+    assert.ok(adsSpread > 0 && adsSpread < hip, weapon.id);
     for (const [walk, ads] of [[true, false], [false, true], [true, true]]) {
       const player = { x: 0, y: 0, z: 0, grounded: true, weaponId: weapon.id };
       movePlayer(player, { ...EMPTY_INPUT, forward: 1, walk, ads }, 1 / 60, world);
@@ -94,22 +96,38 @@ test('Shift and ADS match weapon-weighted pace and focused spread without making
   }
 });
 
-test('the same authoritative trigger in motion uses the same cone for Shift and ADS, and precise rifles hit smaller targets more often', () => {
-  const trials = (id, { ads = false, walk = false, forward = 0 } = {}) => {
+test('Shift cannot stack with crouching or narrow a stopped or airborne shot', () => {
+  for (const weapon of WEAPONS) for (const state of [
+    { grounded: true, moveSpeed: 0 }, { grounded: true, moveSpeed: .1 },
+    { grounded: true, moveSpeed: 0, crouching: true, crouchAmount: 1 },
+    { grounded: true, moveSpeed: 2, crouching: true, crouchAmount: 1 },
+    { grounded: true, moveSpeed: 2, crouching: true, crouchAmount: 0 },
+    { grounded: true, moveSpeed: 2, crouching: false, crouchAmount: .3 },
+    { grounded: false, moveSpeed: 2 },
+  ]) {
+    assert.equal(shotSpread(weapon, false, { ...state, walking: true }), shotSpread(weapon, false, state), weapon.id);
+  }
+});
+
+test('authoritative Shift shots require actual upright walking, and precise rifles hit smaller targets more often', () => {
+  const trials = (id, { ads = false, walk = false, forward = 0, crouch = false, blocked = false } = {}) => {
     let seed = 340151, now = 1000;
     const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
     const room = new Room('FOCUS', { bots: 0, clock: () => now, random });
-    room.world = { ...room.world, width: 200, depth: 200, obstacles: [] };
+    const wall = { id: 'stop', x: 0, y: 0, z: -RULES.playerRadius - .25, w: 5, h: 3, d: .5 };
+    room.world = { ...room.world, width: 200, depth: 200, obstacles: blocked ? [wall] : [] };
     const shooter = room.addPlayer('a', 'A', false, { weaponId: id, ownedWeapons: [id] }), target = room.addPlayer('b', 'B');
     const pitch = Math.atan2(1.58 - RULES.eyeHeight, 65);
     Object.assign(target, { x: 0, y: 0, z: -65, hp: 1e7, protectedUntil: 0, yaw: 0 });
+    const stance = { ...EMPTY_INPUT, yaw: 0, pitch, forward, ads, walk, crouch };
     let heads = 0; const endpoints = [];
     for (let i = 0; i < 240; i++) {
-      Object.assign(shooter, { x: 0, y: 0, z: 0, grounded: true, walking: false, moveSpeed: 0, shotHeat: 0, ammo: 24 });
+      Object.assign(shooter, { x: 0, y: 0, z: 0, grounded: true, walking: false, moveSpeed: 0, shotHeat: 0, ammo: 24, crouching: crouch, crouchAmount: Number(crouch) });
       now += 1000; room.events.length = 0;
-      room.setInput(shooter.id, { ...EMPTY_INPUT, yaw: 0, pitch, forward, ads, walk, fire: true });
+      if (forward) movePlayer(shooter, stance, 1 / 60, room.world, now);
+      room.setInput(shooter.id, { ...stance, fire: true });
       // A tap released before the tick still uses the stance captured at the trigger.
-      room.setInput(shooter.id, EMPTY_INPUT);
+      room.setInput(shooter.id, { ...EMPTY_INPUT, crouch });
       room.tick(1 / 60);
       const event = room.events.find(event => event.type === 'shot');
       heads += Number(event.headshot); endpoints.push(event.end);
@@ -117,6 +135,9 @@ test('the same authoritative trigger in motion uses the same cone for Shift and 
     return { heads, endpoints };
   };
   assert.deepEqual(trials('rifle', { walk: true, forward: 1 }), trials('rifle', { ads: true, forward: 1 }));
+  for (const state of [{}, { crouch: true, forward: 1 }, { blocked: true, forward: 1 }]) {
+    assert.deepEqual(trials('rifle', { ...state, walk: true }), trials('rifle', state));
+  }
   const m4 = trials('m4a1', { ads: true }), ak = trials('ak47', { ads: true });
   assert.ok(m4.heads > 225 && ak.heads < m4.heads * .72 && ak.heads > 25, `${m4.heads}/${ak.heads}`);
   assert.ok(new Set(m4.endpoints.map(e => e.x)).size > 200);

@@ -26,6 +26,7 @@ import { OperatorPreview } from './operator-model.js';
 import { BOT_DIFFICULTIES, getBotDifficulty } from '/shared/simulation.js';
 import { PLAY_MODES, getPlayMode, recordsLocalProgress } from './play-modes.js';
 import { TRAINING_WORLD } from '/shared/training-world.js';
+import { RANGE_WORLD, RANGE_DISTANCES } from '/shared/range-world.js';
 import { normalizeQuality } from './performance.js';
 import { normalizeGameType, isTeamGame, gameTypeName, supportsGameType } from '/shared/game-types.js';
 import { objectiveOptions } from '/shared/objectives.js';
@@ -180,6 +181,7 @@ function updateDeployButton() {
   const online = getPlayMode(mode).transport === 'online', ready = onlineQueueState?.state === 'READY', blocked = ['QUEUED', 'OFFERED', 'ACCEPTED', 'ASSIGNED', 'ABANDONED'].includes(onlineQueueState?.state);
   $('create-button').disabled = busy || (online ? onlineBusy || !onlineApi || !onlineAvailable || !!onlineUser && (blocked || !ready && !onlineCapabilities.matchmaking) : !connected);
   if (mode === 'custom') $('create-button').disabled = busy || onlineBusy || !onlineApi || !onlineAvailable || !!onlineUser && (!onlineCapabilities.customRooms || !connected);
+  $('range-start-button').disabled = busy || !connected || transportKind !== 'local';
   if (online) $('create-button').querySelector('span').textContent = ready ? '배정된 경기 입장' : blocked ? '매칭 대기 중…' : getPlayMode(mode).action;
 }
 
@@ -310,6 +312,13 @@ function showMenu(visible) {
   $('pause-description').textContent = hasDeployed ? '호흡을 가다듬고, 다시 교전으로.' : '마우스를 클릭해 조준과 이동을 시작하세요.';
   $('resume-button').querySelector('span').textContent = hasDeployed ? '교전 계속하기' : '교전 시작';
   const training = game.room?.mode === 'tutorial'; $('tutorial-actions').hidden = !training;
+  const range = game.room?.mode === 'range'; $('range-setup').hidden = !range;
+  if (range) {
+    $('pause-title').textContent = 'FREE RANGE';
+    $('pause-description').textContent = '총기와 기준 거리를 바꿔 같은 조건에서 비교하세요. 전적과 보상에는 반영되지 않습니다.';
+    $('resume-button').querySelector('span').textContent = hasDeployed ? '사격 계속하기' : '사격 시작';
+    if (visible) { $('range-weapon').value = game.local.weaponId; $('range-distance').value = game.range?.distance ?? 30; }
+  }
   if (training && game.room.phase === 'training-complete') { $('pause-title').textContent = 'TRAINING COMPLETE'; $('pause-description').textContent = '기초 훈련을 마쳤습니다. 다시 도전하거나 혼자 연습으로 이어가세요.'; $('resume-button').hidden = true; }
   else $('resume-button').hidden = false;
   $('return-room-button').hidden = !game.room.staging;
@@ -345,7 +354,7 @@ async function enterGame(data) {
     game = new FPSGame({
       canvas: $('game-canvas'), minimap: $('minimap'), settings, audio, send,
       mapId: data.room.mapId, weaponId: data.players.find((player) => player.id === data.id)?.weaponId, skinId: data.players.find((player) => player.id === data.id)?.skinId,
-      world: data.room.mode === 'tutorial' ? TRAINING_WORLD : undefined,
+      world: data.room.mode === 'tutorial' ? TRAINING_WORLD : data.room.mode === 'range' && transportKind === 'local' ? RANGE_WORLD : undefined,
       outfitId: data.players.find((player) => player.id === data.id)?.outfitId,
       characterId: data.players.find((player) => player.id === data.id)?.characterId,
       onMenu: showMenu,
@@ -410,6 +419,7 @@ function setMode(value) {
   const roomMode = mode === 'custom' || mode === 'lan' && !SOLO;
   $('join-section').hidden = !roomMode; $('room-settings').hidden = !roomMode; $('room-browser-button').hidden = !roomMode; $('practice-note').hidden = mode !== 'practice';
   $('deployment-settings-button').hidden = mode !== 'practice'; $('online-loadout-button').hidden = !usesOnlineServices();
+  $('range-start-button').hidden = mode !== 'practice';
   $('tutorial-recommendation').hidden = !['tutorial', 'practice'].includes(mode) || !!stored('linkshot-tutorial-v1', '');
   const settingsVisible = mode === 'practice' || roomMode;
   for (const selector of ['.bot-row', '.match-options']) document.querySelector(selector).hidden = !settingsVisible;
@@ -933,6 +943,10 @@ $('create-button').addEventListener('click', () => {
   setBusy(true); send({ type: 'create', mode, gameType: selectedGameType(), ...objectiveConfig, bots: botCount, botDifficulty, ...roundOptions, name: callsign(), ...profileLoadout() });
 });
 $('deployment-settings-button').addEventListener('click', () => openDialog('room-create-dialog'));
+$('range-start-button').addEventListener('click', () => {
+  if (mode !== 'practice' || transportKind !== 'local' || !connected || busy || game || roomSession) return;
+  setBusy(true); send({ type: 'create', mode: 'range', name: callsign(), ...profileLoadout() });
+});
 $('room-create-form').addEventListener('submit', (event) => {
   event.preventDefault(); if (busy || game || roomSession || !$('room-create-form').reportValidity()) return;
   loadout.mapId = getMap($('room-map-choice').value).id; updateSelections();
@@ -1115,6 +1129,15 @@ const tutorialActions = document.createElement('div'); tutorialActions.id = 'tut
 const returnRoom = document.createElement('button'); returnRoom.id = 'return-room-button'; returnRoom.textContent = '방 대기실로'; returnRoom.hidden = true; returnRoom.addEventListener('click', () => send({ type: 'room-return' })); $('leave-button').before(returnRoom);
 for (const [id, text] of [['tutorial-advance', '리스폰 시범 시작'], ['tutorial-retry', '튜토리얼 다시 시작'], ['tutorial-skip', '건너뛰기 · 혼자 연습으로']]) { const button = document.createElement('button'); button.id = id; button.className = 'secondary-button'; button.textContent = text; button.hidden = id === 'tutorial-advance'; tutorialActions.append(button); }
 document.querySelector('.pause-bottom').before(tutorialActions);
+const rangeSetup = document.createElement('form'); rangeSetup.id = 'range-setup'; rangeSetup.className = 'range-setup'; rangeSetup.hidden = true;
+rangeSetup.innerHTML = '<label for="range-weapon">총기<select id="range-weapon" aria-label="총기"></select></label><label for="range-distance">표적 거리<select id="range-distance" aria-label="표적 거리"></select></label><button type="submit" class="secondary-button">적용 · 탄착 초기화</button>';
+document.querySelector('.pause-bottom').before(rangeSetup);
+for (const weapon of WEAPONS) $('range-weapon').add(new Option(weapon.name, weapon.id));
+for (const distance of RANGE_DISTANCES) $('range-distance').add(new Option(`${distance}m`, distance));
+rangeSetup.addEventListener('submit', event => {
+  event.preventDefault();
+  if (transportKind === 'local' && game?.room?.mode === 'range') send({ type: 'range-setup', roundId: game.room.roundId, weaponId: $('range-weapon').value, distance: Number($('range-distance').value) });
+});
 $('tutorial-advance').addEventListener('click', () => { if (game?.requestTutorialAction()) game.lock(); });
 $('tutorial-retry').addEventListener('click', () => { send({ type: 'restart' }); game?.lock(); });
 $('tutorial-skip').addEventListener('click', () => { store('linkshot-tutorial-v1', stored('linkshot-tutorial-v1', 'dismissed')); leaveGame(); setMode('practice'); $('tutorial-recommendation').hidden = true; });

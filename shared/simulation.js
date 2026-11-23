@@ -256,7 +256,19 @@ export class Room {
     if (getWeapon(player.weaponId).hyperburstCount && player.input.fire && !next.fire && player.shotSerial > 0) player.nextFireAt = Math.max(player.nextFireAt, player.lastShot + getWeapon(player.weaponId).fireSeconds * 1000);
     if (getWeapon(player.weaponId).melee) next.ads = false;
     player.viewTime = typeof input.viewTime === 'number' && Number.isFinite(input.viewTime) ? clamp(input.viewTime, now - 200, now) : null;
-    if (next.fire && !player.input.fire && !player.pendingShot) player.pendingShot = { newTrigger: true, fireSeq: Number.isSafeInteger(input.fireSeq) && input.fireSeq >= 0 ? input.fireSeq : null, yaw: next.yaw, pitch: next.pitch, ads: next.ads, at: now, movement: { grounded: player.grounded, walking: next.walk, sprinting: false, moveSpeed: Math.max(player.moveSpeed || 0, Math.hypot(next.forward, next.strafe)) }, viewTime: typeof input.viewTime === 'number' && Number.isFinite(input.viewTime) ? clamp(input.viewTime, now - 200, now) : null };
+    if (next.fire && !player.input.fire && !player.pendingShot) {
+      const moveIntent = Math.hypot(next.forward, next.strafe), actualSpeed = player.moveSpeed || 0;
+      player.pendingShot = {
+        newTrigger: true, fireSeq: Number.isSafeInteger(input.fireSeq) && input.fireSeq >= 0 ? input.fireSeq : null,
+        yaw: next.yaw, pitch: next.pitch, ads: next.ads, at: now, viewTime: player.viewTime,
+        movement: {
+          grounded: player.grounded,
+          walking: next.walk && moveIntent > .2 && !next.crouch && !player.crouching && !(player.crouchAmount > 0),
+          walkMoved: actualSpeed > .2,
+          moveSpeed: Math.max(actualSpeed, moveIntent),
+        },
+      };
+    }
     player.input = next;
     player.lastInput = now;
   }
@@ -556,7 +568,13 @@ export class Room {
     const botSpread = behavior.shotSpread * (player.botBrain?.longRangeFocused && ads && player.moveSpeed < .2 ? .55 : 1);
     const firingWeapon = player.isBot ? { ...weapon, spread: weapon.spread + botSpread, adsSpread: weapon.adsSpread + botSpread } : weapon;
     const targets = shot?.viewTime != null && !player.isBot ? this.playersAt(clamp(shot.viewTime, now - 200, now)) : [...this.players.values()];
-    const firingState = shot?.movement ? { ...player, ...shot.movement, grounded: player.grounded && shot.movement.grounded } : player;
+    const movement = shot?.movement;
+    // Keys alone can add a motion penalty, but don't grant the Shift bonus
+    // unless the player actually travelled. This also covers blocked movement.
+    const firingState = movement ? {
+      ...player, ...movement, grounded: player.grounded && movement.grounded,
+      walking: movement.walking && (movement.walkMoved || player.walking && player.moveSpeed > .2),
+    } : player;
     for (const angle of shotAngles(firingWeapon, ads, this.random, firingState)) {
       const direction = aimDirection((shot?.yaw ?? player.yaw) + angle.yaw, (shot?.pitch ?? player.pitch) + angle.pitch);
       const trace = traceShot(player, targets, now, this.world, direction, weapon.range);
