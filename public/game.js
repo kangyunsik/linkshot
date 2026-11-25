@@ -112,7 +112,6 @@ export class FPSGame {
     this.groundItems = new Map(); this.droppedWeapons = []; this.equipmentActionSeq = 0;
     this.firePressedUntil = 0;
     this.hud = Object.fromEntries(['hud-health', 'hud-ammo', 'hud-timer', 'hud-kd', 'health-fill', 'respawn-overlay', 'respawn-count', 'crosshair', 'ads-reticle', 'reload-indicator', 'reload-hint', 'protection-hint', 'damage-vignette', 'hitmarker', 'kill-confirmation', 'hud-fps'].map((id) => [id, $(id)]));
-    this.scopeDot = document.querySelector('.scope-lens>i');
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setClearColor('#192e3b'); this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.18;
@@ -1050,25 +1049,20 @@ export class FPSGame {
       }
       this.recoil = lerp(this.recoil, 0, dt * 15);
       this.muzzleFlash.visible = now < this.muzzleUntil; this.muzzleLight.intensity = now < this.muzzleUntil ? this.local.suppressor ? .35 : 2 : 0;
-      this.hud['crosshair'].style.opacity = this.local.hp <= 0 || ads ? '0' : '1';
-      const spread = shotSpread(weapon, ads, this.predicted);
-      const rifle = weapon.type === 'ASSAULT' || weapon.type === 'DMR' || weapon.type === 'SNIPER';
-      if (rifle || ads) {
-        // Project the same cone used by the simulation through the live FOV,
-        // in CSS pixels. Widen the outer marks, never move the aim dot.
-        const radius = Math.tan(spread) * this.renderHeight * .5 * this.camera.projectionMatrix.elements[5];
-        if (ads) {
-          const dot = scoped ? this.scopeDot : this.hud['ads-reticle'];
-          dot.setAttribute('data-dispersion', '');
-          dot.style.setProperty('--spread-diameter', `${(2 * Math.min(27, 2.4 + radius)).toFixed(2)}px`);
-        } else {
+      const crosshair = this.hud.crosshair;
+      crosshair.style.opacity = this.local.hp <= 0 || ads ? '0' : '1';
+      if (!ads) {
+        const spread = shotSpread(weapon, false, this.predicted);
+        if (weapon.type === 'ASSAULT' || weapon.type === 'DMR' || weapon.type === 'SNIPER') {
+          // Project the simulation cone in CSS pixels. Move only the outer marks.
+          const radius = Math.tan(spread) * this.renderHeight * .5 * this.camera.projectionMatrix.elements[5];
           // At zero gap the inner edges are 9px from the center (28px box, 5px marks).
-          this.hud['crosshair'].style.setProperty('--crosshair-gap', `${(clamp(2.4 + radius, 3, 35) - 9).toFixed(2)}px`);
+          crosshair.style.setProperty('--crosshair-gap', `${(clamp(2.4 + radius, 3, 35) - 9).toFixed(2)}px`);
+        } else {
+          crosshair.style.setProperty('--crosshair-gap', `${Math.min(26, spread * 170 + this.recoil * 2.5 + (weapon.type === 'SHOTGUN' ? 5 : 0))}px`);
         }
-      } else {
-        this.hud['crosshair'].style.setProperty('--crosshair-gap', `${Math.min(26, spread * 170 + this.recoil * 2.5 + (weapon.type === 'SHOTGUN' ? 5 : 0))}px`);
       }
-      this.hud['crosshair'].dataset.accuracy = !this.predicted.grounded ? 'airborne' : this.predicted.crouching ? 'crouched' : walking ? 'walking' : this.predicted.moveSpeed > 0.2 ? 'moving' : 'steady';
+      crosshair.dataset.accuracy = !this.predicted.grounded ? 'airborne' : this.predicted.crouching ? 'crouched' : walking ? 'walking' : this.predicted.moveSpeed > 0.2 ? 'moving' : 'steady';
       this.hud['protection-hint'].hidden = this.local.hp <= 0 || this.local.protectedUntil < this.serverNow;
       if (this.local.hp <= 0) this.hud['respawn-count'].textContent = Math.max(1, Math.ceil((this.local.respawnAt - this.serverNow) / 1000));
     }

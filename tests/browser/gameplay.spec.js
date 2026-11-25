@@ -237,7 +237,7 @@ test('hip-fire and ADS centers stay pixel-perfect during jumps, recoil, zoom and
   } finally { await dispose(page); }
 });
 
-test('rifle spread marks stay tight and Shift only narrows the guide while walking upright', async ({ page }) => {
+test('hip-fire guides keep sniper spread wide on Shift and zoom shows no extra dispersion ring', async ({ page }) => {
   await fixture(page);
   try {
     const values = await page.evaluate(async () => {
@@ -254,16 +254,19 @@ test('rifle spread marks stay tight and Shift only narrows the guide while walki
         if (crouching) game.keys.add('KeyC');
         game.ads = ads; game.camera.fov = game.settings.fov * (ads ? weapon.zoom : 1);
         game.previousFrame = clock - 1000 / 60; game.animate(clock); clock += 33; cancelAnimationFrame(game.frameId);
-        const dot = document.querySelector(weapon.type === 'SNIPER' ? '.scope-lens>i' : '#ads-reticle');
+        const dot = document.querySelector(!ads ? '#crosshair>b' : weapon.type === 'SNIPER' ? '.scope-lens>i' : '#ads-reticle');
         const r = dot.getBoundingClientRect(), center = Math.hypot(r.x + r.width / 2 - innerWidth / 2, r.y + r.height / 2 - innerHeight / 2);
         return { gap: parseFloat(document.getElementById('crosshair').style.getPropertyValue('--crosshair-gap')),
-          ring: parseFloat(getComputedStyle(dot, '::after').width), center };
+          hasRing: !['none', 'normal'].includes(getComputedStyle(dot, '::after').content), center };
       };
       return { m4: measure('m4a1'), ak: measure('ak47'), walk: measure('m4a1', false, true),
         run: measure('m4a1', false, false, 0, true), walkMoving: measure('m4a1', false, true, 0, true),
         crouch: measure('m4a1', false, false, 0, true, true), crouchShift: measure('m4a1', false, true, 0, true, true),
-        m4Ads: measure('m4a1', true), akAds: measure('ak47', true), hot: measure('ak47', true, false, .9),
-        scope: measure('sniper', true), heavyScope: measure('m82', true) };
+        m4Ads: measure('m4a1', true), akAds: measure('ak47', true, false, .9),
+        snipers: ['sniper', 'awp', 'm82'].map(id => ({
+          steady: measure(id), walk: measure(id, false, true, 0, true),
+          run: measure(id, false, false, 0, true), scope: measure(id, true),
+        })) };
     });
     expect(values.ak.gap).toBeGreaterThan(values.m4.gap + 4);
     expect(values.walk.gap).toBe(values.m4.gap);
@@ -271,10 +274,14 @@ test('rifle spread marks stay tight and Shift only narrows the guide while walki
     expect(values.run.gap - values.m4.gap).toBeGreaterThan(2);
     expect(values.run.gap - values.m4.gap).toBeLessThan(3.5);
     expect(values.walkMoving.gap).toBeLessThan(values.run.gap);
-    expect(values.akAds.ring).toBeGreaterThan(values.m4Ads.ring + 3);
-    expect(values.hot.ring).toBeGreaterThan(values.akAds.ring + 8);
-    expect(values.scope.ring).toBeGreaterThan(6); expect(values.heavyScope.ring).toBeGreaterThan(values.scope.ring);
-    for (const profile of [values.m4Ads, values.akAds, values.scope, values.heavyScope]) expect(profile.center).toBeLessThan(.01);
+    for (const { steady, walk, run } of values.snipers) {
+      expect(walk.gap).toBe(run.gap);
+      expect(walk.gap).toBeGreaterThanOrEqual(steady.gap);
+    }
+    for (const profile of [values.m4Ads, values.akAds, ...values.snipers.map(({ scope }) => scope)]) {
+      expect(profile.hasRing).toBe(false);
+      expect(profile.center).toBeLessThan(.01);
+    }
   } finally { await dispose(page); }
 });
 

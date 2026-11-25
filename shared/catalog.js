@@ -86,17 +86,18 @@ export function damageAtDistance(weapon, distance, headshot = false) {
   return (headshot ? weapon.headDamage : weapon.damage) * (1 - falloff * (1 - weapon.minDamage));
 }
 
-// Shift shares the focused cone only while walking upright on the ground.
-// ADS still works independently of stance and never locks bullets to center.
+// Shift shares the focused cone for non-snipers walking upright on the ground.
+// Snipers use the focused cone only when scoped.
 export function shotSpread(weapon, ads = false, state = {}) {
+  const sniper = weapon.type === 'SNIPER';
   const airborne = state.grounded === false;
   const moving = (state.moveSpeed || 0) > 0.2;
   const crouch = airborne ? 0 : Number.isFinite(state.crouchAmount) ? Math.max(0, Math.min(1, state.crouchAmount)) : state.crouching === true ? 1 : 0;
-  const focused = ads || (!airborne && moving && state.walking === true && state.crouching !== true && crouch === 0);
+  const focused = ads || (!sniper && !airborne && moving && state.walking === true && state.crouching !== true && crouch === 0);
   const base = focused ? weapon.adsSpread : weapon.spread;
   // Ordinary ground movement adds only a small spread on top of each hip-fire profile.
   const movingSpread = weapon.type === 'SMG' ? focused ? 0.0063 : 0.0042 : weapon.type === 'SIDEARM' ? focused ? 0.0075 : 0.0048 : focused ? 0.009 : 0.0055;
-  const movement = weapon.type === 'SNIPER'
+  const movement = sniper
     ? airborne ? 0.18 : moving ? focused ? 0.035 : 0.025 : 0
     : airborne ? 0.105 : moving ? movingSpread : 0;
   const bloom = Math.min(1, Math.max(0, state.shotHeat || 0)) * (weapon.spreadBloom ?? 0.012);

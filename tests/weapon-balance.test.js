@@ -78,13 +78,13 @@ test('rifles have distinct rested and sustained spread, with a small but nonzero
   }
 });
 
-test('Shift and ADS match weapon-weighted pace and upright walking spread without making ADS silent', () => {
+test('Shift and ADS match weapon-weighted pace; upright walking focuses non-snipers only', () => {
   const world = { width: 100, depth: 100, obstacles: [] };
   for (const weapon of WEAPONS) for (const [moveSpeed, shotHeat] of [[0, 0], [2, .5]]) {
     const state = { grounded: true, moveSpeed, shotHeat };
     const walkSpread = shotSpread(weapon, false, { ...state, walking: true });
     const hip = shotSpread(weapon, false, state), adsSpread = shotSpread(weapon, true, state);
-    if (moveSpeed > 0) { assert.equal(walkSpread, adsSpread, weapon.id); assert.ok(walkSpread < hip, weapon.id); }
+    if (moveSpeed > 0 && weapon.type !== 'SNIPER') { assert.equal(walkSpread, adsSpread, weapon.id); assert.ok(walkSpread < hip, weapon.id); }
     else assert.equal(walkSpread, hip, weapon.id);
     assert.ok(adsSpread > 0 && adsSpread < hip, weapon.id);
     for (const [walk, ads] of [[true, false], [false, true], [true, true]]) {

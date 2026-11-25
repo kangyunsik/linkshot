@@ -46,7 +46,11 @@ test('snipers retain weapon-specific scoped precision and stronger movement pena
     assert.ok(steady >= .0007 && steady < .0021 && hip >= .07 && hip > steady * 48, id);
     assert.equal(walking, (weapon.adsSpread + .035) * .85, id); assert.equal(running, walking, id);
     assert.equal(air, (weapon.adsSpread + .18) * .85, id);
-    assert.equal(shotSpread(weapon, false, { grounded: true, moveSpeed: 2 }), (weapon.spread + .025) * .85, id);
+    const hipWalkState = { grounded: true, moveSpeed: 2, walking: true };
+    const hipWalking = shotSpread(weapon, false, hipWalkState);
+    assert.equal(hipWalking, (weapon.spread + .025) * .85, id);
+    assert.ok(hipWalking > hip, id);
+    assert.equal(shotSpread(weapon, true, hipWalkState), walking, id);
   }
   for (const weapon of WEAPONS.filter((weapon) => weapon.type !== 'SNIPER')) for (const ads of [false, true]) {
     const base = ads ? weapon.adsSpread : weapon.spread;
@@ -56,7 +60,7 @@ test('snipers retain weapon-specific scoped precision and stronger movement pena
   }
 });
 
-test('authoritative sniper bullets miss far more often from the hip and while moving than from a stationary scope', () => {
+test('authoritative sniper hip-fire stays inaccurate while Shift walking; only a stationary scope is precise', () => {
   for (const id of ['sniper', 'awp', 'm82']) {
     const hitRate = (ads, state) => {
       let seed = 71; const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
@@ -69,6 +73,9 @@ test('authoritative sniper bullets miss far more often from the hip and while mo
     };
     const stationary = hitRate(true, { grounded: true, moveSpeed: 0, sprinting: false }), hip = hitRate(false, { grounded: true, moveSpeed: 0, sprinting: false });
     const walking = hitRate(true, { grounded: true, moveSpeed: 2, sprinting: false }), running = hitRate(true, { grounded: true, moveSpeed: 6, sprinting: true });
+    const hipWalk = hitRate(false, { grounded: true, moveSpeed: 2, walking: true });
+    const hipRun = hitRate(false, { grounded: true, moveSpeed: 6, walking: false });
+    assert.equal(hipWalk, hipRun, id); assert.ok(hipWalk <= hip, id);
     assert.equal(stationary, 1, id); assert.ok(hip < .2 && walking < .4 && running === walking, `${id}: ${JSON.stringify({ stationary, hip, walking, running })}`);
   }
 });
