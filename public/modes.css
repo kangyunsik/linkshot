@@ -49,6 +49,12 @@
 .room-settings input,.room-settings select,.room-password-dialog input { width: 100%; min-width: 0; padding: 10px; color: #e5eeee; background: #102029; border: 1px solid #4a626b; border-radius: 3px; }
 .room-settings > small { color: #8ca9b2; font-size: 9px; line-height: 1.7; }
 .room-browser-button { width: 100%; margin-top: 9px; }
+.peer-lan-dialog form, #peer-lan-response-panel { display: grid; gap: 8px; }
+.peer-lan-dialog label { color: #b7cccc; font-size: 11px; }
+.peer-lan-dialog textarea { width: 100%; min-height: 50px; resize: vertical; padding: 8px; border: 1px solid #426371; border-radius: 3px; background: #112631; color: #daece8; font: 11px var(--mono); }
+.peer-lan-dialog .peer-lan-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.peer-lan-dialog .primary-button { justify-content: center; }
+#peer-lan-status.offline { color: #ff9c83; }
 .room-password-dialog { width: min(450px,calc(100vw - 32px)); }
 .room-password-dialog label { display: block; margin: 15px 0 8px; font-size: 12px; }
 #room-password-error { min-height: 20px; color: #ffad93; font-size: 12px; }

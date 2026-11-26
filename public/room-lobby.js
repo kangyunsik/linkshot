@@ -16,10 +16,10 @@ export class RoomLobbyView {
       send(room.phase === 'active' ? { type: 'room-enter' } : room.hostId === this.id ? { type: 'room-start' } : { type: 'room-ready', ready: !self?.ready });
     });
   }
-  update(state, id) {
+  update(state, id, direct = false) {
     this.state = state; this.id = id;
     const { room } = state, defense = room.gameType === 'defense', players = state.players.filter((p) => !p.isWaveEnemy), self = players.find((p) => p.id === id), host = room.hostId === id, active = room.phase === 'active', teams = isTeamGame(room.gameType) && !defense, confirmed = defense || !teams || self?.teamConfirmed === true;
-    $('room-lobby-title').textContent = room.name || '출격 대기실'; $('room-lobby-code').textContent = room.code;
+    $('room-lobby-title').textContent = room.name || '출격 대기실'; $('room-lobby-code').textContent = direct ? '직접 연결' : room.code;
     $('room-lobby-meta').textContent = `${getMap(room.mapId).name} · ${gameTypeName(room.gameType)} · ${room.gameType === 'hardpoint' ? `${room.scoreLimit}점` : defense ? `${room.waves}공세 방어 · 수비팀 최대 4명` : `${room.fragLimit}킬`} / ${room.roundSeconds / 60}분 · ${players.filter((p) => p.roomStatus === 'playing').length}명 교전 중${room.mode === 'custom' || isObjectiveGame(room.gameType) ? ' · 경쟁 점수·전적·LP 미반영' : ''}`;
     $('room-team-choice').hidden = !teams;
     $('room-team-choice-title').textContent = confirmed ? `내 입장 팀: ${TEAM_NAMES[self?.teamId]}` : '1단계 · 입장할 팀을 먼저 선택하세요';

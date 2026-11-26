@@ -5,6 +5,8 @@ import { MAPS, getMap, RULES, normalizeRoundOptions, NETWORK_PROTOCOL } from '/s
 import { WEAPONS, SKINS, getWeapon, getSkin, ownsWeapon } from '/shared/catalog.js';
 import { ArmoryPreview } from './weapon-model.js';
 import { SoloConnection } from './solo-connection.js';
+import { PeerLanHostConnection, PeerLanGuestConnection } from './peer-lan-connection.js';
+import { PeerLanDialog } from './peer-lan-dialog.js';
 import * as runtime from './runtime-config.js';
 import { OnlineApi } from './online-api.js';
 import { OnlineConnection } from './online-connection.js';
@@ -35,7 +37,7 @@ import { normalizeWeaponHand } from './viewmodel-renderer.js';
 const $ = (id) => document.getElementById(id);
 const lpNumber = new Intl.NumberFormat('ko-KR');
 const operatorArt = file => `/assets/${file}?v=3`;
-const { APP_MODE, PROFILE_STORAGE, ONLINE_SERVER_URL = '', FRONTEND_URL = '', LAN_PLAY_PATH = '/play' } = runtime;
+const { APP_MODE, PROFILE_STORAGE, ONLINE_SERVER_URL = '', FRONTEND_URL = '', LAN_PLAY_PATH = '/play', BROWSER_LAN_ENABLED = false } = runtime;
 const defaults = { sensitivity: 1, fov: 82, volume: 65, quality: 'normal', weaponHand: 'right', killfeedOpacity: 100, killAnnouncementOpacity: 100 };
 // Retain prototype storage keys so existing names, settings and loadouts survive the LINKSHOT rename.
 function stored(key, fallback) { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } }
@@ -52,6 +54,8 @@ const settings = {
   killAnnouncementOpacity: inRange(saved.killAnnouncementOpacity, 0, 100, defaults.killAnnouncementOpacity),
 };
 const SOLO = APP_MODE === 'solo';
+const BROWSER_LAN = SOLO && BROWSER_LAN_ENABLED && isSecureContext && typeof RTCPeerConnection === 'function';
+const isPeerLan = (value = mode) => BROWSER_LAN && value === 'lan';
 let savedLoadout = {}; try { savedLoadout = JSON.parse(stored('sector07-loadout', '{}')) || {}; } catch { /* Use catalog defaults. */ }
 const loadout = { mapId: getMap(savedLoadout.mapId).id, weaponId: getWeapon(savedLoadout.weaponId).id, skinId: getSkin(savedLoadout.skinId).id };
 let preview = null, lobbyPreview = null, roomSession = null;
@@ -60,6 +64,7 @@ const dashboard = new CompetitiveDashboard();
 const rankedResults = new RankedResults();
 const matchOfferTimer = new MatchOfferTimer();
 const roomLobby = new RoomLobbyView((data) => send(data));
+const peerLanDialog = new PeerLanDialog(() => openDialog('peer-lan-dialog'), connectPeerGuest);
 let operatorPreview = null, selectedOutfitId = 'field', purchaseRequestId = null, shopBusy = false;
 let selfSessionId = null, lastRoundReward = null;
 let tutorialCompletedRound = null;
@@ -146,28 +151,30 @@ function setBusy(value) {
   $('room-create-confirm').disabled = value; $('room-password-form').querySelector('button[type="submit"]').disabled = value;
   clearTimeout(requestTimeout);
   if (value) { $('loading-overlay').querySelector('h2').textContent = '전장에 연결하는 중'; $('loading-overlay').querySelector('.eyebrow').textContent = 'ESTABLISHING CONNECTION'; }
-  if (value) requestTimeout = setTimeout(() => {
+  if (value && !(transportKind === 'p2p' && roomSession)) requestTimeout = setTimeout(() => {
     if (!busy) return;
+    if (transportKind === 'p2p') { socket?.close(1008, '브라우저 LAN 방을 준비하는 시간이 초과되었습니다. 다시 시도해 주세요.'); return; }
     send({ type: 'leave' }); setBusy(false); toast('연결 시간이 초과되었습니다. 서버 연결을 확인한 뒤 다시 시도해 주세요.', true);
   }, 12_000);
 }
 
 function updateConnection(value) {
   connected = value;
-  const serviceReady = value || ['online', 'custom'].includes(transportKind) && onlineAvailable;
+  const serviceReady = value || isPeerLan() || ['online', 'custom'].includes(transportKind) && onlineAvailable;
   $('connection-status').classList.toggle('offline', !serviceReady);
-  $('connection-status').lastElementChild.textContent = value ? transportKind === 'local' ? 'SOLO READY · LOCAL SIMULATION' : transportKind === 'custom' ? 'CUSTOM ROOMS CONNECTED' : transportKind === 'online' ? 'ONLINE BATTLE CONNECTED' : 'LAN SERVER ONLINE' : ['online', 'custom'].includes(transportKind) ? onlineAvailable ? 'ONLINE SERVICES READY' : onlineApi ? 'ONLINE SERVER OFFLINE' : 'ONLINE SERVER NOT CONFIGURED' : transportKind === 'local' ? '시뮬레이션 준비 중' : SOLO ? 'LAN 서버 페이지로 접속하세요' : '서버 연결 대기 중';
+  $('connection-status').lastElementChild.textContent = transportKind === 'p2p'
+    ? value ? 'BROWSER LAN · DIRECT PLAY' : '브라우저 LAN · 초대 연결'
+    : value ? transportKind === 'local' ? 'SOLO READY · LOCAL SIMULATION' : transportKind === 'custom' ? 'CUSTOM ROOMS CONNECTED' : transportKind === 'online' ? 'ONLINE BATTLE CONNECTED' : 'LAN SERVER ONLINE' : ['online', 'custom'].includes(transportKind) ? onlineAvailable ? 'ONLINE SERVICES READY' : onlineApi ? 'ONLINE SERVER OFFLINE' : 'ONLINE SERVER NOT CONFIGURED' : transportKind === 'local' ? '시뮬레이션 준비 중' : SOLO ? 'LAN 서버 페이지로 접속하세요' : '서버 연결 대기 중';
   document.querySelector('.connection-dot').style.background = serviceReady ? '#a3dbc9' : '#ff6249';
   updateDeployButton();
   $('join-form').querySelector('button').disabled = !value || busy;
-  $('room-browser-button').disabled = busy || (mode === 'custom' && !onlineUser ? !onlineAvailable : !value);
   renderModeBrief();
 }
 
 function renderModeBrief() {
   const selected = getPlayMode(mode);
-  $('mode-info-title').textContent = `${selected.name} · 모드 안내`; $('mode-info-description').textContent = selected.description;
-  $('mode-service-status').textContent = usesOnlineServices() ? !onlineAvailable ? '온라인 연결 안내' : onlineUser ? '온라인 준비' : '로그인 안내' : mode === 'lan' ? connected ? 'LAN 준비' : 'LAN 연결 안내' : '로컬 실행 · 안내';
+  $('mode-info-title').textContent = `${selected.name} · 모드 안내`; $('mode-info-description').textContent = isPeerLan() ? '같은 LAN에서 초대 링크와 응답 코드로 연결합니다. 방장 브라우저에서 게임을 실행하므로 탭을 닫으면 종료됩니다.' : selected.description;
+  $('mode-service-status').textContent = usesOnlineServices() ? !onlineAvailable ? '온라인 연결 안내' : onlineUser ? '온라인 준비' : '로그인 안내' : mode === 'lan' ? isPeerLan() ? '브라우저 LAN 안내' : connected ? 'LAN 준비' : 'LAN 연결 안내' : '로컬 실행 · 안내';
 }
 
 function isOnlineRoom(room = game?.room) { return ['casual', 'ranked'].includes(room?.mode); }
@@ -179,8 +186,9 @@ function equipmentProfile() {
 function rememberAccountWeapon() { if (onlineUser) store(`linkshot-account-weapon-${onlineUser.id}`, onlineSelectedWeapon); }
 function updateDeployButton() {
   const online = getPlayMode(mode).transport === 'online', ready = onlineQueueState?.state === 'READY', blocked = ['QUEUED', 'OFFERED', 'ACCEPTED', 'ASSIGNED', 'ABANDONED'].includes(onlineQueueState?.state);
-  $('create-button').disabled = busy || (online ? onlineBusy || !onlineApi || !onlineAvailable || !!onlineUser && (blocked || !ready && !onlineCapabilities.matchmaking) : !connected);
+  $('create-button').disabled = busy || (online ? onlineBusy || !onlineApi || !onlineAvailable || !!onlineUser && (blocked || !ready && !onlineCapabilities.matchmaking) : !connected && !isPeerLan());
   if (mode === 'custom') $('create-button').disabled = busy || onlineBusy || !onlineApi || !onlineAvailable || !!onlineUser && (!onlineCapabilities.customRooms || !connected);
+  $('room-browser-button').disabled = busy || (!isPeerLan() && (mode === 'custom' && !onlineUser ? !onlineAvailable : !connected));
   $('range-start-button').disabled = busy || !connected || transportKind !== 'local';
   if (online) $('create-button').querySelector('span').textContent = ready ? '배정된 경기 입장' : blocked ? '매칭 대기 중…' : getPlayMode(mode).action;
 }
@@ -188,7 +196,7 @@ function updateDeployButton() {
 function updateRooms(list) {
   rooms = list;
   const players = rooms.reduce((sum, room) => sum + room.players, 0);
-  $('room-summary').textContent = transportKind === 'local' ? `${MAPS.length}개 전장 · ${WEAPONS.length}종 무기` : transportKind === 'online' ? '개인전 랭크 · 팀전 랭크' : connected ? `${rooms.length}개의 방 · ${players}명` : '연결 대기';
+  $('room-summary').textContent = transportKind === 'local' ? `${MAPS.length}개 전장 · ${WEAPONS.length}종 무기` : transportKind === 'online' ? '개인전 랭크 · 팀전 랭크' : transportKind === 'p2p' ? '같은 LAN · 초대 전용' : connected ? `${rooms.length}개의 방 · ${players}명` : '연결 대기';
   const container = $('room-list'); container.replaceChildren();
   if (!rooms.length) {
     const empty = document.createElement('div'); empty.className = 'empty-rooms';
@@ -222,11 +230,23 @@ function connect(kind = getPlayMode(mode).transport) {
   clearTimeout(reconnectTimeout);
   const previous = socket; socket = null; previous?.close(); selfSessionId = null; transportKind = kind;
   updateConnection(false); updateRooms([]);
-  if (kind === 'online' || kind === 'custom' && (!onlineUser || !onlineApi || !onlineCapabilities.customRooms) || kind === 'lan' && SOLO) return;
+  if (kind === 'p2p' || kind === 'online' || kind === 'custom' && (!onlineUser || !onlineApi || !onlineCapabilities.customRooms) || kind === 'lan' && SOLO) return;
   const url = new URL(kind === 'lan' && LAN_PLAY_PATH === '/lan/play' ? '/lan/play' : '/play', location.href); url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const connection = kind === 'custom' ? new CustomConnection(onlineApi) : kind === 'local' ? new SoloConnection() : new WebSocket(url); socket = connection;
   bindConnection(connection, kind);
 }
+
+function usePeerConnection(connection) {
+  const previous = socket; socket = connection; previous?.close(); selfSessionId = null;
+  transportKind = 'p2p'; updateConnection(false); bindConnection(connection, 'p2p');
+  return connection;
+}
+
+function connectPeerGuest() {
+  if (!isPeerLan() || busy || roomSession || game) throw new Error('LAN 로비에서 초대 링크를 열어 주세요.');
+  return usePeerConnection(new PeerLanGuestConnection({ name: callsign(), ...profileLoadout() }));
+}
+
 function bindConnection(connection, kind) {
   const snapshots = new SnapshotOrder();
   const expectedOnlineAccount = ['online', 'custom'].includes(kind) ? onlineUser?.id : null;
@@ -234,7 +254,11 @@ function bindConnection(connection, kind) {
     if (socket !== connection) return;
     let data; try { data = JSON.parse(event.data); } catch { return; }
     if (!data || typeof data !== 'object') return;
-    if (['joined', 'state'].includes(data.type) && data.room?.protocolVersion !== NETWORK_PROTOCOL) { send({ type: 'leave' }); setBusy(false); toast('서버를 재시작하고 페이지를 새로고침해 주세요. 전투 버전이 일치하지 않습니다.', true); connection.close(4001, 'Protocol mismatch'); return; }
+    if (['joined', 'state'].includes(data.type) && data.room?.protocolVersion !== NETWORK_PROTOCOL) {
+      if (kind === 'p2p') connection.close(4001, '두 브라우저의 전투 버전이 다릅니다. 새로고침 후 다시 초대해 주세요.');
+      else { send({ type: 'leave' }); setBusy(false); toast('서버를 재시작하고 페이지를 새로고침해 주세요. 전투 버전이 일치하지 않습니다.', true); connection.close(4001, 'Protocol mismatch'); }
+      return;
+    }
     if (data.type === 'joined' && (!selfSessionId || snapshots.code !== data.room?.code)) snapshots.reset();
     if (['joined', 'state'].includes(data.type) && !snapshots.accept(data)) return;
     if (kind === 'online' && ['joined', 'state'].includes(data.type) && (!isOnlineRoom(data.room) || data.online?.matchId !== connection.matchId || !Array.isArray(data.players) || !data.players.some((player) => player?.id === expectedOnlineAccount) || data.type === 'joined' && data.id !== expectedOnlineAccount)) { connection.close(); setBusy(false); toast('온라인 경기 배정 정보가 일치하지 않습니다.', true); return; }
@@ -250,17 +274,28 @@ function bindConnection(connection, kind) {
     if (data.type === 'pong') {
       const latency = Math.max(1, Date.now() - data.sent);
       $('hud-ping').textContent = `${latency} MS`;
-      $('connection-status').title = kind === 'local' ? `브라우저 시뮬레이션 응답: ${latency}ms` : `서버 왕복 지연: ${latency}ms`;
+      $('connection-status').title = kind === 'local' ? `브라우저 시뮬레이션 응답: ${latency}ms` : kind === 'p2p' ? `LAN 왕복 지연: ${latency}ms` : `서버 왕복 지연: ${latency}ms`;
     }
     if (data.type === 'joined') { clearTimeout(requestTimeout); pendingJoinCode = null; $('room-join-password').value = ''; dialogs.closeAll(); selfSessionId = data.id; if (kind === 'online') { onlineActiveMatch = data.online?.matchId; onlineReconnectUntil = 0; } syncProgress(data); if (data.room.staging) handleRoomSession(data); else enterGame(data); }
     if (data.type === 'state') { syncProgress(data); if (data.room?.staging) handleRoomSession(data); else { game?.applySnapshot(data); handleTutorialState(data); handleOnlineState(data); } }
     if (data.type === 'left') { if (game || roomSession) leaveGame(false); selfSessionId = null; }
-    if (data.type === 'error') { setBusy(false); if (data.code === 'ROOM_PASSWORD' && pendingJoinCode) { askRoomPassword(pendingJoinCode); $('room-password-error').textContent = data.message; } else { if (roomSession) $('room-lobby-status').textContent = data.message; toast(data.message, true); } }
+    if (data.type === 'error') {
+      setBusy(false);
+      if (kind === 'p2p' && !roomSession && !game) { connection.close(1008, data.message); return; }
+      if (data.code === 'ROOM_PASSWORD' && pendingJoinCode) { askRoomPassword(pendingJoinCode); $('room-password-error').textContent = data.message; }
+      else { if (roomSession) $('room-lobby-status').textContent = data.message; toast(data.message, true); }
+    }
   });
   connection.addEventListener('close', (event) => {
     if (socket !== connection) return;
     const wasPlaying = !!game || !!roomSession, phase = game?.room?.phase, ended = phase === 'ended';
     updateConnection(false); setBusy(false); updateRooms([]);
+    if (kind === 'p2p') {
+      socket = null; selfSessionId = null;
+      if (wasPlaying) leaveGame(false);
+      if (event.reason) toast(event.reason, true);
+      return;
+    }
     if (kind === 'online') {
       matchIntro.hide(); onlineEntering = false;
       if (wasPlaying && !ended) { leaveGame(false); toast(phase === 'active' ? '온라인 전투 연결이 끊겼습니다. 30초 안에는 같은 생명·탄약으로 재접속할 수 있습니다.' : '경기 준비 연결이 끊겼습니다. 복구 후에는 공통 시작 시각의 남은 준비 시간을 표시합니다.', true); }
@@ -337,7 +372,11 @@ function handleRoomSession(data, resultPresented = false) {
     }
     if (game) { game.dispose(); game = null; for (const id of ['pause-overlay', 'round-overlay', 'respawn-overlay', 'scoreboard-overlay']) $(id).hidden = true; }
     $('lobby').hidden = false; $('game-shell').hidden = true; setBusy(false);
-    roomLobby.update(data, selfSessionId); dialogs.show($('room-lobby-dialog'));
+    const peer = transportKind === 'p2p', host = data.room.hostId === selfSessionId;
+    $('room-lobby-invite').hidden = peer && !host;
+    $('room-lobby-invite').textContent = peer ? '친구 초대' : '초대 링크 복사';
+    $('room-lobby-leave').textContent = peer && host ? '방 닫기' : '방 나가기';
+    roomLobby.update(data, selfSessionId, peer); dialogs.show($('room-lobby-dialog'));
   } else if (!game) { dialogs.closeAll(); setBusy(true); void enterGame({ ...data, id: selfSessionId }); }
   else game.applySnapshot(data);
 }
@@ -365,8 +404,12 @@ async function enterGame(data) {
     game.applySnapshot(data, data.id);
     $('loading-overlay').querySelector('h2').textContent = '그래픽을 준비하는 중'; $('loading-overlay').querySelector('.eyebrow').textContent = 'PREPARING GRAPHICS';
     const created = game; await created.prepareGraphics(); if (game !== created || created.disposed) return;
-    $('pause-room-code').textContent = data.room.code;
-    $('copy-invite').hidden = !['lan', 'custom'].includes(data.room.mode); $('hud-connection-kind').textContent = transportKind === 'local' ? 'LOCAL' : transportKind === 'custom' ? 'CUSTOM' : transportKind === 'online' ? 'ONLINE' : 'ROOM';
+    const peer = transportKind === 'p2p';
+    $('pause-room-code').textContent = peer ? '' : data.room.code;
+    $('copy-invite').hidden = peer ? socket?.role !== 'host' : !['lan', 'custom'].includes(data.room.mode);
+    $('copy-invite-label').textContent = peer ? '친구 초대' : '친구 초대 링크 복사';
+    $('leave-button').title = peer && socket?.role === 'host' ? '방장이 나가면 모든 참가자의 방이 종료됩니다.' : '';
+    $('hud-connection-kind').textContent = peer ? 'LAN · P2P' : transportKind === 'local' ? 'LOCAL' : transportKind === 'custom' ? 'CUSTOM' : transportKind === 'online' ? 'ONLINE' : 'ROOM';
     if (onlineEntering) { send({ type: 'ready' }); handleOnlineState({ room: created.room, online: created.online, serverTime: created.serverNow }); }
     else if (isOnlineRoom(data.room) && data.room.phase === 'active') showCombatFocus();
     else if (data.room.phase !== 'ended') showMenu(true);
@@ -381,7 +424,8 @@ function leaveGame(notify = true) {
   matchIntro.hide(); onlineEntering = false;
   const online = isOnlineRoom(); if (online && game.room.phase === 'ended') { lobbyResultMatchId = onlineActiveMatch; renderLobbyResult(); void fetchOnlineReceipt(onlineActiveMatch); }
   if (notify && online) { onlineReconnectUntil = 0; clearTimeout(reconnectTimeout); }
-  if (notify) send({ type: 'leave' });
+  if (notify && transportKind === 'p2p') { const previous = socket; socket = null; previous?.close(); updateConnection(false); }
+  else if (notify) send({ type: 'leave' });
   game?.dispose(); game = null; roomSession = null; dialogs.closeAll();
   rankedResults.reset();
   if (online) { onlineQueueState = null; renderOnlineQueue(); }
@@ -400,24 +444,29 @@ function setMode(value) {
   if (selected.transport === 'online' && !['casual', 'ranked'].includes(mode)) onlineSelectedWeapon = getWeapon(stored('linkshot-online-weapon', onlineSelectedWeapon)).id;
   if (selected.id === 'custom' && mode !== 'custom') onlineSelectedWeapon = getWeapon(stored('linkshot-custom-weapon', 'rifle')).id;
   mode = selected.id;
+  const peer = isPeerLan(), kind = peer ? 'p2p' : selected.transport;
   if (onlineUser) {
     onlineSelectedWeapon = getWeapon(stored(`linkshot-account-weapon-${onlineUser.id}`, onlineSelectedWeapon)).id;
     if (!ownsWeapon(onlineUser, onlineSelectedWeapon)) onlineSelectedWeapon = 'rifle';
   }
   if (changedMode && ['casual', 'ranked'].includes(mode)) { dashboardLadder = ladderKey(mode); store('linkshot-dashboard-ladder', dashboardLadder); }
-  const roomBrowserLabel = mode === 'custom' ? '사용자 대전 방 목록' : 'LAN 방 목록'; $('nav-rooms').title = roomBrowserLabel; $('nav-rooms').setAttribute('aria-label', roomBrowserLabel); $('nav-rooms').querySelector('span').textContent = mode === 'custom' ? '사용자 방' : 'LAN 방';
+  const roomBrowserLabel = mode === 'custom' ? '사용자 대전 방 목록' : peer ? 'LAN 초대 입력' : 'LAN 방 목록'; $('nav-rooms').title = roomBrowserLabel; $('nav-rooms').setAttribute('aria-label', roomBrowserLabel); $('nav-rooms').querySelector('span').textContent = mode === 'custom' ? '사용자 방' : 'LAN 방';
+  $('browse-rooms').firstChild.textContent = BROWSER_LAN && mode !== 'custom' ? 'LAN 초대 입력 ' : '열린 방 보기 ';
   if (mode === 'custom' && !onlineUser && transportKind === 'custom' && socket) connect('custom');
   for (const item of PLAY_MODES) { $(`mode-${item.id}`).classList.toggle('selected', mode === item.id); $(`mode-${item.id}`).setAttribute('aria-selected', String(mode === item.id)); $(`mode-${item.id}`).tabIndex = mode === item.id ? 0 : -1; }
-  $('create-button').querySelector('span').textContent = selected.action; $('mode-description').textContent = selected.description;
-  const unavailable = usesOnlineServices() && (!onlineAvailable || !(mode === 'custom' ? onlineCapabilities.customRooms : onlineCapabilities.matchmaking)) || SOLO && mode === 'lan';
+  $('create-button').querySelector('span').textContent = selected.action; $('mode-description').textContent = peer ? '같은 네트워크 · 초대 링크 · 방장 PC에서 실행' : selected.description;
+  const unavailable = usesOnlineServices() && (!onlineAvailable || !(mode === 'custom' ? onlineCapabilities.customRooms : onlineCapabilities.matchmaking)) || SOLO && mode === 'lan' && !peer;
   $('mode-unavailable').hidden = !unavailable;
   $('mode-unavailable').textContent = usesOnlineServices() ? onlineAvailable ? 'Java/Spring Boot 연결됨 · 전투 노드 준비 중' : 'Java/Spring Boot 서버 미연결 · 프로필에서 상태를 확인하세요.' : 'LAN 서버 페이지에서 이용할 수 있습니다.';
   renderOnlineAccount(); renderOnlineQueue();
   $('lan-connect-guide').hidden = !SOLO; $('lan-share-panel').hidden = SOLO;
-  $('deploy-note').lastChild.textContent = mode === 'lan' ? ' 방 코드로 친구를 초대할 수 있어요' : mode === 'tutorial' ? ' 약 3–5분 · 언제든 건너뛰기 / 다시 시작' : ' 튜토리얼·혼자 연습은 서버 없이 이용할 수 있어요';
+  $('deploy-note').lastChild.textContent = peer ? ' 초대 링크와 응답 코드를 주고받으세요. 방장 탭이 닫히면 방도 종료됩니다.' : mode === 'lan' ? ' 방 코드로 친구를 초대할 수 있어요' : mode === 'tutorial' ? ' 약 3–5분 · 언제든 건너뛰기 / 다시 시작' : ' 튜토리얼·혼자 연습은 서버 없이 이용할 수 있어요';
   $('bot-description').textContent = mode === 'lan' ? '친구를 기다리는 동안 가볍게' : '함께 실력을 쌓아갈 연습 상대';
-  const roomMode = mode === 'custom' || mode === 'lan' && !SOLO;
-  $('join-section').hidden = !roomMode; $('room-settings').hidden = !roomMode; $('room-browser-button').hidden = !roomMode; $('practice-note').hidden = mode !== 'practice';
+  const roomMode = mode === 'custom' || mode === 'lan' && (!SOLO || peer);
+  $('join-section').hidden = !roomMode || peer; $('room-settings').hidden = !roomMode; $('room-browser-button').hidden = !roomMode; $('practice-note').hidden = mode !== 'practice';
+  $('room-browser-button').textContent = peer ? '초대 링크·코드로 참가' : '방 목록 보기';
+  $('room-password').closest('label').hidden = peer;
+  $('room-create-note').textContent = peer ? '초대로만 입장합니다. 방장 탭을 닫으면 모든 참가자의 방이 종료됩니다.' : '생성 후 대기실에서 사람과 AI를 구성하고 경기를 시작합니다.';
   $('deployment-settings-button').hidden = mode !== 'practice'; $('online-loadout-button').hidden = !usesOnlineServices();
   $('range-start-button').hidden = mode !== 'practice';
   $('tutorial-recommendation').hidden = !['tutorial', 'practice'].includes(mode) || !!stored('linkshot-tutorial-v1', '');
@@ -427,8 +476,7 @@ function setMode(value) {
   $('choose-map').disabled = mode === 'tutorial' || selected.transport === 'online';
   updateRuleChoices();
   if (mode === 'practice' && selectedGameType() !== 'defense' && botCount === 0) botCount = 1;
-  if (socket && transportKind !== selected.transport || !socket && (selected.transport === 'local' || selected.transport === 'custom' && onlineUser && onlineCapabilities.customRooms || selected.transport === 'lan' && !SOLO)) connect(selected.transport);
-  else if (unavailable && transportKind !== selected.transport) connect(selected.transport);
+  if (transportKind !== kind && (peer || socket || unavailable) || !socket && (kind === 'local' || kind === 'custom' && onlineUser && onlineCapabilities.customRooms || kind === 'lan' && !SOLO)) connect(kind);
   updateConnection(connected && !unavailable);
   updateBots();
 }
@@ -938,7 +986,7 @@ $('create-button').addEventListener('click', () => {
   if (busy) return;
   if (usesOnlineServices() && !onlineUser) { openDialog('profile-dialog'); return; }
   if (getPlayMode(mode).transport === 'online') { void joinOnlineQueue(); return; }
-  if (!connected) return;
+  if (!connected && !isPeerLan()) return;
   if (['lan', 'custom'].includes(mode)) { openDialog('room-create-dialog'); return; }
   setBusy(true); send({ type: 'create', mode, gameType: selectedGameType(), ...objectiveConfig, bots: botCount, botDifficulty, ...roundOptions, name: callsign(), ...profileLoadout() });
 });
@@ -952,8 +1000,15 @@ $('room-create-form').addEventListener('submit', (event) => {
   loadout.mapId = getMap($('room-map-choice').value).id; updateSelections();
   saveRoundForm();
   if (mode === 'practice') { void dialogs.close($('room-create-dialog')); return; }
-  if (!connected) { toast('서버에 연결한 뒤 다시 시도해 주세요.', true); return; }
-  const options = { staging: true, roomName: $('room-title').value, password: $('room-password').value, gameType: selectedGameType(), teamId: $('room-initial-team').value, bots: botCount, ...roundOptions, ...objectiveConfig, mapId: loadout.mapId };
+  const peer = isPeerLan();
+  if (!connected && !peer) { toast('서버에 연결한 뒤 다시 시도해 주세요.', true); return; }
+  const options = { staging: true, roomName: $('room-title').value, password: peer ? '' : $('room-password').value, gameType: selectedGameType(), teamId: $('room-initial-team').value, bots: botCount, ...roundOptions, ...objectiveConfig, mapId: loadout.mapId };
+  if (peer) {
+    dialogs.closeAll(); setBusy(true);
+    try { usePeerConnection(new PeerLanHostConnection({ type: 'create', ...profileLoadout(), ...options, name: callsign() })); }
+    catch { setBusy(false); toast('방장 브라우저에서 LAN 방을 시작하지 못했습니다.', true); }
+    return;
+  }
   dialogs.closeAll(); setBusy(true); send(transportKind === 'custom' ? { type: 'create', ...options, weaponId: onlineSelectedWeapon, skinId: loadout.skinId, suppressor: selectedSuppressor(onlineUser, onlineSelectedWeapon) } : { type: 'create', mode, ...profileLoadout(), ...options, name: callsign() }); $('room-password').value = '';
 });
 $('join-form').addEventListener('submit', (event) => { event.preventDefault(); requestJoin($('room-code').value.trim().toUpperCase()); });
@@ -1047,10 +1102,15 @@ $('restart-button').addEventListener('click', () => send({ type: 'restart' }));
 $('copy-lan').addEventListener('click', () => copyText(lanUrl, 'LAN 주소를 복사했습니다. 같은 네트워크의 친구에게 공유하세요.'));
 $('copy-invite').addEventListener('click', () => {
   if (!game) return;
+  if (transportKind === 'p2p') { if (socket?.role === 'host') peerLanDialog.openHost(socket); return; }
   const url = new URL(game.room.mode === 'custom' ? location.origin : lanUrl); url.searchParams.set(game.room.mode === 'custom' ? 'custom' : 'room', game.room.code);
   copyText(url.toString(), `초대 링크를 복사했습니다. 방 코드: ${game.room.code}`);
 });
-$('room-lobby-invite').addEventListener('click', () => { if (!roomSession) return; const url = new URL(roomSession.room.mode === 'custom' ? location.origin : lanUrl); url.searchParams.set(roomSession.room.mode === 'custom' ? 'custom' : 'room', roomSession.room.code); void copyText(url.toString(), `초대 링크를 복사했습니다. 방 코드: ${roomSession.room.code}`); });
+$('room-lobby-invite').addEventListener('click', () => {
+  if (!roomSession) return;
+  if (transportKind === 'p2p') { if (socket?.role === 'host') peerLanDialog.openHost(socket); return; }
+  const url = new URL(roomSession.room.mode === 'custom' ? location.origin : lanUrl); url.searchParams.set(roomSession.room.mode === 'custom' ? 'custom' : 'room', roomSession.room.code); void copyText(url.toString(), `초대 링크를 복사했습니다. 방 코드: ${roomSession.room.code}`);
+});
 $('sound-button').addEventListener('click', async () => {
   audio.muted = !audio.muted;
   if (!audio.muted && settings.volume === 0) { settings.volume = 65; updateSettings(); }
@@ -1101,7 +1161,16 @@ $('confirm-purchase').addEventListener('click', async () => {
 $('nav-play').addEventListener('click', () => {
   setMode(SOLO ? 'practice' : 'lan'); $('create-button').focus({ preventScroll: true });
 });
-function browseRooms() { if (!['lan', 'custom'].includes(mode)) setMode('lan'); if (SOLO && mode === 'lan') { openDialog('network-dialog'); $('lan-server-address').focus(); return; } if (mode === 'custom' && !onlineUser) { openDialog('profile-dialog'); return; } if (mode === 'custom' && !connected) { toast('사용자 대전 서버 연결을 기다려 주세요.', true); return; } $('room-browser-title').textContent = mode === 'custom' ? '열려 있는 사용자 대전 방' : '열려 있는 LAN 방'; $('room-browser-note').textContent = mode === 'custom' ? '연결된 온라인 서버의 사용자 방입니다. 점수·LP에는 반영하지 않습니다.' : '현재 LAN 서버에서 생성된 방입니다.'; send({ type: 'list' }); openDialog('rooms-dialog'); updateRooms(rooms); }
+function browseRooms() {
+  if (!['lan', 'custom'].includes(mode)) setMode('lan');
+  if (isPeerLan()) { if (!game && !roomSession && !busy) peerLanDialog.openGuest(); return; }
+  if (SOLO && mode === 'lan') { openDialog('network-dialog'); $('lan-server-address').focus(); return; }
+  if (mode === 'custom' && !onlineUser) { openDialog('profile-dialog'); return; }
+  if (mode === 'custom' && !connected) { toast('사용자 대전 서버 연결을 기다려 주세요.', true); return; }
+  $('room-browser-title').textContent = mode === 'custom' ? '열려 있는 사용자 대전 방' : '열려 있는 LAN 방';
+  $('room-browser-note').textContent = mode === 'custom' ? '연결된 온라인 서버의 사용자 방입니다. 점수·LP에는 반영하지 않습니다.' : '현재 LAN 서버에서 생성된 방입니다.';
+  send({ type: 'list' }); openDialog('rooms-dialog'); updateRooms(rooms);
+}
 $('nav-rooms').addEventListener('click', browseRooms); $('browse-rooms').addEventListener('click', browseRooms);
 $('room-browser-button').addEventListener('click', browseRooms);
 $('refresh-rooms').addEventListener('click', () => { if (send({ type: 'list' })) toast('방 목록을 새로고침했습니다.'); else toast('로컬 서버에 연결되어 있지 않습니다.', true); });
@@ -1117,7 +1186,7 @@ for (const key of ['ffa', 'teams']) $(`dashboard-${key}`).addEventListener('clic
 setInterval(() => {
   if (!connected) return;
   send({ type: 'ping', sent: Date.now() });
-  if (!game && !busy && transportKind !== 'online') send({ type: 'list' });
+  if (!game && !busy && !['online', 'p2p'].includes(transportKind)) send({ type: 'list' });
 }, 4000);
 setInterval(() => { if (!onlineApi) return; if (!game && !roomSession) { void connectOnlineServices(); if (lobbyResultMatchId) void fetchOnlineReceipt(lobbyResultMatchId); } else if (isOnlineRoom() && game.room.phase === 'ended' && onlineActiveMatch) void fetchOnlineReceipt(onlineActiveMatch); }, 5000);
 makeCollections(); updateSelections(); renderProfile();
@@ -1143,13 +1212,22 @@ $('tutorial-retry').addEventListener('click', () => { send({ type: 'restart' });
 $('tutorial-skip').addEventListener('click', () => { store('linkshot-tutorial-v1', stored('linkshot-tutorial-v1', 'dismissed')); leaveGame(); setMode('practice'); $('tutorial-recommendation').hidden = true; });
 $('tutorial-recommendation').hidden = !!stored('linkshot-tutorial-v1', '');
 if (SOLO) {
-  document.body.classList.add('solo-edition'); document.title = 'LINKSHOT · 링크샷 — Solo combat';
+  document.body.classList.add('solo-edition'); document.title = BROWSER_LAN ? 'LINKSHOT · 링크샷' : 'LINKSHOT · 링크샷 — Solo combat';
   for (const id of ['join-section', 'copy-lan']) $(id).hidden = true;
   $('hud-connection-kind').textContent = 'LOCAL';
-  document.querySelector('.build-tag').childNodes[1].textContent = ' SOLO EDITION ';
+  document.querySelector('.build-tag').childNodes[1].textContent = BROWSER_LAN ? ' BROWSER EDITION ' : ' SOLO EDITION ';
+  $('peer-lan-guide').hidden = !BROWSER_LAN;
   const steps = $('help-dialog').querySelectorAll('.help-steps p span');
   for (const [i, text] of [`전장과 장비를 고르세요. ${MAPS.length}개 전장 · ${WEAPONS.length}종 중 1–4번은 무료, 나머지는 LP로 영구 해금합니다.`, '연습전 시작을 누르세요. 전적·무기 숙련도는 자동 저장되며 포인트는 라운드 완료 후 지급됩니다.', `목표 킬·시간을 설정하세요. 외형과 무기 숙련도는 능력치를 높이지 않습니다.`].entries()) steps[i].textContent = text;
-  $('help-dialog').querySelector('.rooms-footnote').textContent = '튜토리얼과 혼자 연습은 서버 없이 실행됩니다. LAN대전은 로컬 서버 페이지로 접속하며, 일반·랭크는 별도의 중앙 온라인 서버가 필요합니다.';
+  $('help-dialog').querySelector('.rooms-footnote').textContent = BROWSER_LAN ? '같은 네트워크의 친구와 LAN 초대 링크로 연결할 수 있습니다. 방장 탭을 닫으면 방이 종료됩니다. 랭크는 별도 온라인 서버가 필요합니다.' : '튜토리얼과 혼자 연습은 서버 없이 실행됩니다. LAN대전은 로컬 서버 페이지로 접속하며, 일반·랭크는 별도의 중앙 온라인 서버가 필요합니다.';
 }
 updateSettings(); updateBots(); setMode(mode); updateRooms([]);
 void connectOnlineServices();
+if (BROWSER_LAN) {
+  window.addEventListener('pagehide', () => { if (transportKind === 'p2p') socket?.close(); });
+  const address = new URL(location.href), invite = new URLSearchParams(address.hash.slice(1)).get('lan');
+  if (invite) {
+    address.hash = ''; history.replaceState(null, '', address);
+    setMode('lan'); peerLanDialog.openGuest(invite);
+  }
+}
